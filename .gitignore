@@ -3,4 +3,5 @@ secrets/
 !.gitkeep
 
 .env
+__pycache__/
 

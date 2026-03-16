@@ -1,0 +1,5 @@
+{
+  "llm": {
+    "model": "DeepPavlov/distilrubert-tiny-cased-conversational-5k"
+  }
+}
