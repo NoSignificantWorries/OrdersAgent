@@ -1,8 +1,12 @@
 import json
+import logging
 from pathlib import Path
 
 # custom modules
 from llm import LLM
+
+# configs
+from logging_config import setup_logging
 
 
 class Table:
@@ -27,4 +31,8 @@ def main():
     ...
 
 if __name__ == "__main__":
+    setup_logging()
+    logger = logging.getLogger(__name__)
+
     main()
+
