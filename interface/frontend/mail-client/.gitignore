@@ -6,6 +6,7 @@ ENV/
 
 # Файлы с секретами и конфигурацией
 .env
+.env.*
 .env.local
 .env.production
 .env.development
