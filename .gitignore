@@ -2,6 +2,9 @@ secrets/
 
 !.gitkeep
 
-.env
+**.env
+**.**.env
 __pycache__/
+
+*.bkp
 
