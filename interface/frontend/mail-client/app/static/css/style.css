@@ -1,0 +1,490 @@
+/* ===== ОБЩИЕ СТИЛИ ===== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    height: 100vh;
+    color: #1e293b;
+}
+
+/* ===== СТРАНИЦА ВХОДА (LOGIN) ===== */
+.login-container {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 20px;
+}
+
+.login-box {
+    background: white;
+    padding: 50px 40px;
+    border-radius: 24px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.3);
+    text-align: center;
+    width: 100%;
+    max-width: 440px;
+    transition: transform 0.3s ease;
+}
+
+.login-box:hover {
+    transform: translateY(-5px);
+}
+
+.login-box h1 {
+    margin-bottom: 15px;
+    color: #1e293b;
+    font-size: 32px;
+    font-weight: 600;
+}
+
+.login-box p {
+    color: #64748b;
+    margin-bottom: 35px;
+    font-size: 16px;
+    line-height: 1.5;
+}
+
+.yandex-login {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: #fc3f1d;
+    color: white;
+    padding: 16px 40px;
+    border-radius: 50px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 18px;
+    transition: all 0.3s ease;
+    border: none;
+    cursor: pointer;
+    width: 100%;
+    box-shadow: 0 8px 20px rgba(252, 63, 29, 0.3);
+}
+
+.yandex-login:hover {
+    background: #e63514;
+    transform: scale(1.02);
+    box-shadow: 0 12px 28px rgba(252, 63, 29, 0.4);
+}
+
+.yandex-icon {
+    width: 28px;
+    height: 28px;
+}
+
+.demo-note {
+    margin-top: 35px;
+    font-size: 14px;
+    color: #94a3b8;
+    line-height: 1.6;
+}
+
+.demo-note small {
+    font-size: 12px;
+    color: #cbd5e1;
+}
+
+/* ===== ГЛАВНАЯ СТРАНИЦА ===== */
+.app-container {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #f1f5f9;
+}
+
+/* Шапка */
+.app-header {
+    background: white;
+    padding: 0 30px;
+    height: 70px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #e2e8f0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.header-left h2 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #1e293b;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.user-email {
+    color: #475569;
+    font-size: 14px;
+    background: #f1f5f9;
+    padding: 6px 12px;
+    border-radius: 20px;
+}
+
+.user-name {
+    font-weight: 600;
+    color: #1e293b;
+    font-size: 15px;
+}
+
+.logout-btn {
+    color: #ef4444;
+    text-decoration: none;
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1.5px solid #ef4444;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.logout-btn:hover {
+    background: #ef4444;
+    color: white;
+}
+
+/* Основной макет (2 колонки) */
+.main-layout {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    overflow: hidden;
+    gap: 1px;
+    background: #e2e8f0;
+}
+
+/* ===== ЛЕВАЯ ПАНЕЛЬ - СПИСОК ПИСЕМ ===== */
+.email-list {
+    background: white;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.list-header {
+    padding: 20px;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #fafbfc;
+}
+
+.list-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.list-header h3::before {
+    content: "📬";
+    font-size: 20px;
+}
+
+.email-count {
+    background: #e2e8f0;
+    padding: 4px 12px;
+    border-radius: 30px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.emails-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+/* Карточка письма в списке */
+.email-item {
+    padding: 16px;
+    border-radius: 14px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid transparent;
+    background: #ffffff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+}
+
+.email-item:hover {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.email-item.selected {
+    background: #f1f5f9;
+    border-color: #667eea;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+}
+
+.email-item .sender {
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: #0f172a;
+    font-size: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.email-item .sender::after {
+    content: "●";
+    color: #22c55e;
+    font-size: 10px;
+    opacity: 0;
+}
+
+.email-item.unread .sender::after {
+    opacity: 1;
+}
+
+.email-item .subject {
+    font-size: 14px;
+    color: #334155;
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.email-item .preview {
+    font-size: 13px;
+    color: #64748b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 8px;
+}
+
+.email-item .date {
+    font-size: 11px;
+    color: #94a3b8;
+    text-align: right;
+    font-weight: 500;
+}
+
+/* ===== ЦЕНТРАЛЬНАЯ ОБЛАСТЬ - КАРТОЧКА ПИСЬМА ===== */
+.email-content {
+    background: #f8fafc;
+    padding: 24px;
+    overflow-y: auto;
+}
+
+.email-view {
+    background: white;
+    border-radius: 24px;
+    padding: 32px;
+    min-height: 100%;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
+}
+
+/* Заглушка (когда письмо не выбрано) */
+.email-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 400px;
+    color: #94a3b8;
+    font-size: 18px;
+    border: 2px dashed #e2e8f0;
+    border-radius: 20px;
+    background: #fafbfc;
+}
+
+/* Карточка письма (когда выбрано) */
+.email-card .email-header {
+    padding-bottom: 25px;
+    border-bottom: 2px solid #f1f5f9;
+    margin-bottom: 25px;
+}
+
+.email-card .email-subject {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    color: #0f172a;
+    line-height: 1.3;
+}
+
+.email-card .email-meta {
+    background: #f8fafc;
+    padding: 16px 20px;
+    border-radius: 16px;
+    color: #475569;
+    font-size: 15px;
+    line-height: 1.8;
+    border: 1px solid #e2e8f0;
+}
+
+.email-card .email-meta div {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.email-card .email-meta strong {
+    min-width: 60px;
+    color: #1e293b;
+}
+
+.email-card .email-body {
+    font-size: 16px;
+    line-height: 1.8;
+    color: #1e293b;
+    white-space: pre-wrap;
+    padding: 20px 0;
+}
+
+/* ===== СКРОЛЛБАРЫ (для красоты) ===== */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* ===== АДАПТИВНОСТЬ ДЛЯ ПЛАНШЕТОВ ===== */
+@media (max-width: 900px) {
+    .main-layout {
+        grid-template-columns: 300px 1fr;
+    }
+    
+    .email-card .email-subject {
+        font-size: 22px;
+    }
+    
+    .login-box {
+        padding: 30px 20px;
+    }
+}
+
+/* ===== АДАПТИВНОСТЬ ДЛЯ ТЕЛЕФОНОВ ===== */
+@media (max-width: 600px) {
+    .main-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .email-list {
+        display: none;
+    }
+    
+    .app-header {
+        padding: 0 15px;
+    }
+    
+    .user-name, .user-email {
+        display: none;
+    }
+    
+    .login-box h1 {
+        font-size: 24px;
+    }
+    
+    .yandex-login {
+        padding: 12px 20px;
+        font-size: 16px;
+    }
+}
+
+/* ===== ДОПОЛНИТЕЛЬНЫЕ ЭФФЕКТЫ ===== */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.email-item {
+    animation: fadeIn 0.3s ease;
+}
+
+/* Индикатор загрузки (можно использовать потом) */
+.loading {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #e2e8f0;
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+.status-display {
+    padding: 8px 20px;
+    border-radius: 40px;
+    font-size: 14px;
+    font-weight: 500;
+    background: white;
+    display: inline-block;
+}
+
+/* ===== КНОПКА "ПРИНЯТЬ" ===== */
+.accept-button-container {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #e2e8f0;
+    text-align: center;
+}
+
+.accept-btn {
+    background: #10b981;
+    color: white;
+    border: none;
+    padding: 14px 40px;
+    border-radius: 40px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+.accept-btn:hover {
+    background: #059669;
+    transform: scale(1.02);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+.accept-btn:active {
+    transform: scale(0.98);
+}
