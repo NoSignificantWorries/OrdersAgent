@@ -3,7 +3,7 @@ package client
 import (
     "fmt"
     
-    "mail/internal/config"
+    "OrdersAgent/mail/internal/config"
     "github.com/emersion/go-imap/v2"
     "github.com/emersion/go-imap/v2/imapclient"
 )
@@ -41,7 +41,7 @@ func (c *Client) FetchUnread() ([]imap.UID, error) {
    
     allUIDs := searchData.AllUIDs()
    
-    // Получаем флаги для определения непрочитанных
+    // флаги для определения непрочитанных
     fetchOptions := &imap.FetchOptions{
         Flags: true,
         UID:   true,

@@ -5,8 +5,8 @@ import (
     "os"
     "path/filepath"
     
-    "mail/internal/parser"
-    "mail/internal/storage"
+    "OrdersAgent/mail/internal/parser"
+    "OrdersAgent/mail/internal/storage"
 )
 
 type Processor struct {
@@ -29,12 +29,10 @@ func (p *Processor) ProcessEmail(email *parser.Email) error {
             continue
         }
     }
-    
-    // Сохраняем заказ (пока заглушка)
-    p.repo.SaveOrder(map[string]string{
-        "subject": email.Subject,
-        "from":    email.From,
-    })
+
+    if err := p.repo.SaveOrder(email); err != nil {
+        return err
+    }
     
     fmt.Println("---")
     return nil

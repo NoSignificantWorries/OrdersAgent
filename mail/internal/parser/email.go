@@ -211,13 +211,59 @@ func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, erro
     return email, bodyError
 }
 
+func cleanBodyText(body string) string {
+    lines := strings.Split(body, "\n")
+
+    var cleaned []string
+
+    for _, raw := range lines {
+        line := strings.TrimSpace(raw)
+        if line == "" {
+            continue
+        }
+
+        if strings.Contains(line, "---------- Пересылаемое письмо ----------") {
+            continue
+        }
+        
+        if strings.Contains(line, "---------- Конец пересылаемого письма ----------") {
+            continue
+        }
+
+        if strings.HasPrefix(line, "От:") ||
+           strings.HasPrefix(line, "К:") ||
+           strings.HasPrefix(line, "А также к:") ||
+           strings.HasPrefix(line, "Время создания:") ||
+           strings.HasPrefix(line, "Тема:") ||
+           strings.HasPrefix(line, "Прикрепленные файлы:") {
+            continue
+        }
+
+        if strings.HasPrefix(line, "С уважением") || 
+           strings.HasPrefix(line, "--") {
+            break
+        }
+
+        if strings.Contains(line, "blockquote.rt") ||
+           strings.HasPrefix(line, "p {") ||
+           strings.Contains(line, ".email-signature") {
+            continue
+        }
+
+        cleaned = append(cleaned, line)
+    }
+
+    return strings.Join(cleaned, "\n")
+}
+
+
 func parseBody(email *Email, literal io.Reader) error {
     mr, err := mail.CreateReader(literal)
     if err != nil {
         return fmt.Errorf("parsing body: %w", err)
     }
 
-    var plainBody, htmlBody string
+    var parts []string
 
     for {
         p, err := mr.NextPart()
@@ -233,14 +279,20 @@ func parseBody(email *Email, literal io.Reader) error {
         // text/plain
         if strings.HasPrefix(contentType, "text/plain") {
             bodyBytes, _ := io.ReadAll(p.Body)
-            plainBody = string(bodyBytes)
+            txt := strings.TrimSpace(string(bodyBytes))
+            if txt != "" {
+                parts = append(parts, txt)
+            }
             continue
         }
 
-        // text/html → извлекаем только текст
+        // text/html
         if strings.HasPrefix(contentType, "text/html") {
             bodyBytes, _ := io.ReadAll(p.Body)
-            htmlBody = extractTextFromHTML(string(bodyBytes))
+            txt := strings.TrimSpace(extractTextFromHTML(string(bodyBytes)))
+            if txt != "" {
+                parts = append(parts, txt)
+            }
             continue
         }
 
@@ -249,28 +301,30 @@ func parseBody(email *Email, literal io.Reader) error {
         if strings.Contains(disposition, "attachment") ||
            strings.HasPrefix(contentType, "application/") ||
            strings.HasPrefix(contentType, "image/") {
-            att := Attachment{}
-            att.Name = extractFilename(disposition, contentType)
+            
+            name := extractFilename(disposition, contentType)
+            if name == "" {
+                continue
+            }
+
+            att := Attachment{
+                Name: name,
+            }
             att.Data, _ = io.ReadAll(p.Body)
             email.Files = append(email.Files, att)
         }
     }
 
-    // Приоритет: plain > html > пусто
-    if plainBody != "" {
-        email.Body = plainBody
-    } else if htmlBody != "" {
-        email.Body = htmlBody
-    }
+    email.Body = strings.Join(parts, "\n\n")
+    email.Body = cleanBodyText(email.Body)
     return nil
 }
 
-// Извлекает чистый текст из HTML
-// Извлекает чистый текст из HTML
+// чистый текст из HTML
 func extractTextFromHTML(htmlStr string) string {
     doc, err := htmllib.Parse(strings.NewReader(htmlStr))
     if err != nil {
-        return htmlStr // fallback на сырой HTML
+        return htmlStr
     }
 
     var text strings.Builder
@@ -286,21 +340,26 @@ func extractTextFromHTML(htmlStr string) string {
     f(doc)
     
     result := text.String()
-    // Убираем лишние пробелы
+    
     result = strings.Join(strings.Fields(result), " ")
     return result
 }
 
 func extractFilename(disposition, contentType string) string {
-    filename := "attachment.bin"
-    
+    var filename string
+
     if idx := strings.Index(disposition, "filename="); idx >= 0 {
         rawFilename := disposition[idx+9:]
         rawFilename = strings.Trim(rawFilename, "\"")
-        
+
         filename = decodeHeader(rawFilename)
     }
-    
+
+    // Если имени нет  это мусорное вложение (подпись и т.п.)
+    if filename == "" {
+        return ""
+    }
+
     // Очистка опасных символов
     filename = strings.Map(func(r rune) rune {
         switch r {
@@ -309,7 +368,7 @@ func extractFilename(disposition, contentType string) string {
         }
         return r
     }, filename)
-    
+
     return filename
 }
 
