@@ -22,6 +22,7 @@ func (p *Processor) ProcessEmail(email *parser.Email) error {
     fmt.Printf("   Тема: %s\n", email.Subject)
     fmt.Printf("   Дата: %s\n", email.Date)
     fmt.Printf("   Тело: %s\n", email.Body)
+    fmt.Printf("    UID: %s\n", email.UID)
     
     for _, file := range email.Files {
         if err := p.repo.SaveFile(file); err != nil {

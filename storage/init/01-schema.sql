@@ -7,17 +7,25 @@ CREATE TABLE IF NOT EXISTS users (
   current_load INT DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
-
+/* добавлены поля:
+predicted_class — итоговый класс;
+prob_1 — вероятность класса 1 от модели;
+model_decision — решение модели;
+*/
 CREATE TABLE IF NOT EXISTS process_queue (
   id BIGSERIAL PRIMARY KEY,
   assigned_to BIGINT NOT NULL REFERENCES users(id) ON DELETE SET NULL,
   email_subject VARCHAR(255),
   email_body TEXT,
+  email_uid BIGINT,
   document_name VARCHAR(255),
   document_data BYTEA,
   result_document_name VARCHAR(255),
   result_document_data BYTEA,
   status VARCHAR(20) NOT NULL DEFAULT 'wait',
+  prob_1 double precision,
+  predicted_class smallint,
+  model_decision text,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

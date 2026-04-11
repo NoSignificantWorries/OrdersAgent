@@ -65,6 +65,7 @@ func (r *DBRepo) SaveOrder(order any) error {
 
     ctx := context.Background()
     managerID := int64(1)
+    emailUID := int64(email.UID)
 
     // по заявке на каждый
     if len(email.Files) > 0 {
@@ -74,6 +75,7 @@ func (r *DBRepo) SaveOrder(order any) error {
                 AssignedTo: &managerID,
                 Subject: email.Subject,
                 Body: email.Body,
+                EmailUID:   &emailUID,
                 DocName: &name,
                 DocData: f.Data,
                 Status: "wait",
@@ -88,6 +90,7 @@ func (r *DBRepo) SaveOrder(order any) error {
                 AssignedTo: &managerID,
                 Subject: email.Subject,
                 Body: email.Body,
+                EmailUID:   &emailUID,
                 DocName: nil,
                 DocData: nil,
                 Status: "wait",

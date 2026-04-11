@@ -84,7 +84,6 @@ func ProcessEmailsOnce(imap *client.Client, sigChan chan os.Signal, processor *o
 
         imap.MarkRead(uid)
 
-        // Немного спим, чтобы не долбить сервер
         time.Sleep(100 * time.Millisecond)
     }
 }

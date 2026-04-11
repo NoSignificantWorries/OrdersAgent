@@ -4,8 +4,12 @@ secrets/
 
 **.env
 **.**.env
+.venv
 __pycache__/
 
 dataset_emails/
+dataset/
+debug/
+app.log
 
 *.bkp

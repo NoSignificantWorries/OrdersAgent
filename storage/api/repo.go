@@ -10,10 +10,14 @@ type QueueItem struct {
     AssignedTo *int64  `json:"assigned_to,omitempty"`
     Subject    string  `json:"email_subject"`
     Body       string  `json:"email_body"`
+    EmailUID       *int64   `json:"email_uid,omitempty"`
     DocName    *string `json:"document_name,omitempty"`
     DocData    []byte  `json:"-"`
     Status     string  `json:"status"`
     CreatedAt  string  `json:"created_at"`
+    Prob1         *float64 `json:"prob_1,omitempty"`
+    PredictedClass *int16  `json:"predicted_class,omitempty"`
+    ModelDecision *string  `json:"model_decision,omitempty"`
 }
 
 // Вставка записи в очередь
@@ -23,10 +27,11 @@ func (db *DB) InsertQueueItem(ctx context.Context, item QueueItem) error {
             assigned_to,
             email_subject,
             email_body,
+            email_uid,
             document_name,
             document_data,
             status
-        ) VALUES ($1,$2,$3,$4,$5,$6)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7)
     `
 
     var assignedTo any
@@ -34,6 +39,13 @@ func (db *DB) InsertQueueItem(ctx context.Context, item QueueItem) error {
         assignedTo = *item.AssignedTo
     } else {
         assignedTo = nil
+    }
+
+    var emailUID any
+    if item.EmailUID != nil {
+        emailUID = *item.EmailUID
+    } else {
+        emailUID = nil
     }
 
     var docName any
@@ -48,6 +60,7 @@ func (db *DB) InsertQueueItem(ctx context.Context, item QueueItem) error {
         assignedTo,
         item.Subject,
         item.Body,
+        emailUID,
         docName,
         item.DocData,
         item.Status,
@@ -59,7 +72,8 @@ func (db *DB) InsertQueueItem(ctx context.Context, item QueueItem) error {
 func (db *DB) ListQueue(ctx context.Context, status string, limit int) ([]QueueItem, error) {
     const q = `
         SELECT id, assigned_to, email_subject, email_body,
-               document_name, status, created_at
+            document_name, status, created_at,
+            prob_1, predicted_class, model_decision
         FROM process_queue
         WHERE ($1 = '' OR status = $1)
         ORDER BY created_at DESC
@@ -77,6 +91,9 @@ func (db *DB) ListQueue(ctx context.Context, status string, limit int) ([]QueueI
         var it QueueItem
         var assignedTo sql.NullInt64
         var docName sql.NullString
+        var prob1 sql.NullFloat64
+        var predClass sql.NullInt16
+        var modelDecision sql.NullString
 
         if err := rows.Scan(
             &it.ID,
@@ -86,6 +103,9 @@ func (db *DB) ListQueue(ctx context.Context, status string, limit int) ([]QueueI
             &docName,
             &it.Status,
             &it.CreatedAt,
+            &prob1,
+            &predClass,
+            &modelDecision,
         ); err != nil {
             return nil, err
         }
@@ -98,6 +118,21 @@ func (db *DB) ListQueue(ctx context.Context, status string, limit int) ([]QueueI
         if docName.Valid {
             v := docName.String
             it.DocName = &v
+        }
+
+        if prob1.Valid {
+            v := prob1.Float64
+            it.Prob1 = &v
+        }
+
+        if predClass.Valid {
+            v := predClass.Int16
+            it.PredictedClass = &v
+        }
+
+        if modelDecision.Valid {
+            v := modelDecision.String
+            it.ModelDecision = &v
         }
 
         res = append(res, it)
