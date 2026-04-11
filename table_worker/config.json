@@ -1,18 +1,55 @@
 {
   "column-associations": {
-    "size": ["размер", "размеры", "длина", "ширина", "высота"],
+    "size": ["размер", "размеры"],
+    "length": ["длина"],
+    "width": ["ширина"],
+    "height": ["высота"],
     "amount": ["кол-во", "количество"],
     "material": [
       "наименование",
       "обозначение",
       "имя",
       "номенклатура",
-      "артикул"
+      "артикул",
+      "типпакета"
     ]
   },
 
   "regex-classes": {
     "barcode": "[A-Z]{0,2}[0-9]{8,20}[A-Z]?",
     "number": "^[+-]?\\d+(?:[.,]\\d+)?$"
-  }
+  },
+
+  "patterns": [
+    {
+      "name": "Standart",
+      "format": [
+        {
+          "count": 0,
+          "header-variants": [
+            ["material", "width", "height", "amount"],
+            ["material", "width", "length", "amount"],
+            ["material", "length", "height", "amount"],
+            ["material", "size", "size", "amount"]
+          ],
+          "content": "*"
+        }
+      ]
+    },
+    {
+      "name": "Okna",
+      "format": [
+        {
+          "count": 0,
+          "header-variants": [
+            ["material", "width", "height", "amount"],
+            ["material", "width", "length", "amount"],
+            ["material", "length", "height", "amount"],
+            ["material", "size", "size", "amount"]
+          ],
+          "content": "*"
+        }
+      ]
+    }
+  ]
 }

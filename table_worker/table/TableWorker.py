@@ -4,16 +4,17 @@ import json
 from functools import partial
 from html import escape
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 # data working
 import numpy as np
 import pandas as pd
+import xarray as xr
 # tables processing
 import openpyxl
 import xlrd
 
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 
 import tqdm
 
@@ -48,28 +49,48 @@ def _get_filename(path: Path):
     filename = "".join(path.name.split('.')[:-1])
     return filename
 
-def _make_table(df: pd.DataFrame, classes_df: pd.DataFrame) -> str:
-    html_rows = []
-    for (_, row), (_, class_row) in zip(df.iterrows(), classes_df.iterrows()):
-        tds = []
-        for cell, cell_class in zip(row, class_row):
-            if pd.isna(cell):
-                val = "NULL"
-            else:
-                val = str(cell)
-            tds.append(f"<td class='cell-{cell_class}'>{escape(val)}</td>")
-        html_rows.append("<tr>" + "".join(tds) + "</tr>")
-    table_html = "\n".join(html_rows)
-    return table_html
 
-def _create_table(df: pd.DataFrame, classes_df: pd.DataFrame, filepath: Path) -> None:
-    table_html = _make_table(df, classes_df)
+def _make_table_from_xa(da: xr.DataArray) -> List[str]:
+    sheets_html = []
+
+    values = da.sel(attr="value")
+    classes = da.sel(attr="class")
+
+    def process_value(x):
+        if pd.isna(x):
+            return "NULL"
+        return str(x)
+
+    vectorized_value = np.vectorize(process_value, otypes=[object])
+    vectorized_escape = np.vectorize(lambda x: escape(str(x)), otypes=[object])
+
+    processed_values = vectorized_value(values.values)
+    escaped_values = vectorized_escape(processed_values)
+
+    sh, r, c, _ = da.shape
+
+    for i in range(sh):
+        html_rows = []
+        for j in range(r):
+            tds = []
+            for k in range(c):
+                td = f"<td class='cell-{classes[i, j, k]}'>{escaped_values[i, j, k]}"
+                tds.append(td)
+            html_rows.append("".join(tds))
+        sheets_html.append("".join(html_rows))
+
+    return sheets_html
+
+
+def _create_tables(da: xr.DataArray, filepath: Path) -> None:
+    tables_html = _make_table_from_xa(da)
 
     filename = _get_filename(filepath)
-    content = _basic_table.format(table=table_html, filename=filename)
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, "w") as file:
-        file.write(content)
+    for i, table in enumerate(tables_html):
+        content = _basic_table.format(table=table, filename=f"{filename}_sheet_{i}")
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, "w") as file:
+            file.write(content)
 
 
 def _get_values_by_class(df: pd.DataFrame, classes_df: pd.DataFrame, key_classes: Tuple[str, ...]):
@@ -99,6 +120,38 @@ class ColumnsConfig:
 
         self.col_asc = data["column-associations"]
         self.cell_regex = data["regex-classes"]
+
+
+class TableExtruder:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.header_patterns = None
+
+    def _extrude_header_from_row(self, row):
+        if self.header_patterns is None:
+            raise ValueError("[ERROR]: Empty headers list.")
+
+    def process_rows(self, table: xr.DataArray):
+        raise NotImplementedError("[ERROR]: Not implemented method 'find pattern'")
+
+
+class StandartExtruder(TableExtruder):
+    def __init__(self) -> None:
+        super().__init__(name="Standart")
+        self.header_patterns = [
+            ["material", "width", "height", "amount"],
+            ["material", "length", "height", "amount"],
+            ["material", "width", "length", "amount"],
+            ["material", "size", "size", "amount"]
+        ]
+
+    def process_rows(self, table: xr.DataArray):
+        def process_sheet(sheet):
+            for i, row in enumerate(sheet):
+                print(i, row)
+
+        for sheet in table:
+            process_sheet(sheet)
 
 
 def fuzzy_match(text, pattern, threshold=50) -> bool:
@@ -136,9 +189,10 @@ class TableWorker:
     def __init__(self, file: Path, config: ColumnsConfig) -> None:
         self.path = file
         self.format = file.suffix
-        self.name = "".join(file.name.split(".")[:-1])
-        self.sheets_dfs = []
-        self.classes_dfs = []
+        self.name = _get_filename(file)
+        self.attr = ["value", "class"]
+        self.data = None
+        self.origin_shapes = []
 
         self.config = config
 
@@ -154,6 +208,7 @@ class TableWorker:
         except Exception:
             return
 
+        sheets_data = []
         sheets = wb.sheet_names()
         for sheetname in sheets:
             sheet = wb[sheetname]
@@ -172,18 +227,20 @@ class TableWorker:
             df.dropna(axis=1, how='all', inplace=True)
             df = df.reset_index(drop=True)
 
-            self.sheets_dfs.append(df)
+            if not df.empty:
+                self.origin_shapes.append(df.shape)
+                sheets_data.append(df)
+
+        self._sheets_to_xarray(sheets_data)
 
 
     def _open_and_clean_xlsx(self):
         wb = openpyxl.load_workbook(self.path)
 
+        sheets_data = []
         sheets = wb.sheetnames
         for sheetname in sheets:
-            # loading sheet
             sheet = wb[sheetname]
-
-            # merged = sheet.merged_cells.ranges
 
             data = sheet.values
             df = pd.DataFrame(data)
@@ -195,44 +252,82 @@ class TableWorker:
             df.dropna(axis=1, how='all', inplace=True)
             df = df.reset_index(drop=True)
 
-            self.sheets_dfs.append(df)
+            if not df.empty:
+                self.origin_shapes.append(df.shape)
+                sheets_data.append(df)
 
-    def match_classes(self):
-        tmp_dfs = []
-        for df in self.sheets_dfs:
-            tmp_dfs.append(match_classes_to_df(df, self.config))
-        self.classes_dfs = tmp_dfs
+        self._sheets_to_xarray(sheets_data)
 
-    def crop_table(self):
-        search_for = {"material": 1, "size": 2, "amount": 1}
-        classes_mask = ["text", "number", "number", "number"]
-        is_mask = False
-        indexes = None
-        for df, df_vals in zip(self.classes_dfs, self.sheets_dfs):
-            for i, row in df.iterrows():
-                # print(i, row.to_list())
-                mask = [(row == key).sum() == cnt for key, cnt in search_for.items()]
-                if all(mask):
-                    # print("-->", i)
-                    is_mask = True
-                    col_idx = []
-                    for key in search_for.keys():
-                        col_idx += (row[row == key].index - 1).to_list()
-                    indexes = col_idx
-                elif is_mask:
-                    # print("==>", i)
-                    classes_in_row = row.iloc[indexes].to_list()
-                    values = df_vals.iloc[i, indexes].to_list()
-                    bins = [cls_r in classes_mask for cls_r in classes_in_row]
-                    # print(bins, all(bins))
-                    if all(bins):
-                        values = df_vals.iloc[i, indexes].to_list()
-                        # print(classes_in_row, values)
-                    else:
-                        is_mask = False
-                        indexes = None
+    def _sheets_to_xarray(self, sheets):
+        if not bool(self.origin_shapes):
+            return
 
+        if not bool(sheets):
+            return
 
+        max_rows = max(shape[0] for shape in self.origin_shapes)
+        max_cols = max(shape[1] for shape in self.origin_shapes)
+
+        n = len(sheets)
+        aligned_data = np.full((n, max_rows, max_cols, len(self.attr)), np.nan, dtype=object)
+
+        for i, (sheet_data, (n_rows, n_cols)) in enumerate(zip(sheets, self.origin_shapes)):
+            aligned_data[i, :n_rows, :n_cols, 0] = sheet_data
+
+        self.data = xr.DataArray(
+            aligned_data,
+            dims=["sheet", "row", "column", "attr"],
+            coords={
+                "sheet": [f"sheet_{i}" for i in range(n)],
+                "row": range(max_rows),
+                "column": range(max_cols),
+                "attr": self.attr
+            }
+        )
+
+    def match_class_to_data(self):
+        if self.data is None:
+            return
+
+        values = self.data.sel(attr="value")
+
+        conf_func = partial(match_class, config=self.config)
+        vectorized_func = np.vectorize(conf_func, otypes=[object])
+
+        class_labels = vectorized_func(values.values)
+
+        self.data[..., self.attr.index("class")] = class_labels
+
+    def apply_extruder(self, extruder: TableExtruder):
+        if self.data is None:
+            raise ValueError("[ERROR]: Empty table data.")
+
+        extruder.process_rows(self.data)
+
+    def pull_values_from_data(self):
+        if self.data is None:
+            return
+
+        class_counts = {"material": 1, "size": 2, "amount": 1}
+        headers = ["metarial", "size", "size", "amount"]
+
+        def get_count_of_elements(slice):
+            res = {}
+            classes = slice.sel(attr="class")
+            for key in class_counts.keys():
+                mask = classes == key
+                mask = mask.fillna(False)
+                count = int(mask.sum().values)
+                res[key] = count
+            return res
+
+        def process_sheet(sheet):
+            elements_on_sheet = get_count_of_elements(sheet)
+            for i, row in enumerate(sheet):
+                continue
+
+        for sheet in self.data:
+            process_sheet(sheet)
 
 
 def development():
@@ -244,20 +339,22 @@ def development():
     conf = ColumnsConfig(config_path)
 
     # table_path = tables_path / Path("BTs_Kirova_steklopakety.xlsx")
-
-    # for table_path in tables_path.iterdir():
-    # table_path = tables_path / Path("BTs_Kirova_steklopakety.xlsx")
     table_path = tables_path / Path("1108A.xls")
 
     table = TableWorker(table_path, conf)
 
     table.open_and_clean()
-    table.match_classes()
-    table.crop_table()
 
-    for i, (sheet, classes) in enumerate(zip(table.sheets_dfs, table.classes_dfs)):
-        save_table_path = result_path / Path(f"{table.name}_sheet_{i}.html")
-        _create_table(sheet, classes, result_path / save_table_path)
+    table.match_class_to_data()
+
+    # table.pull_values_from_data()
+    table.apply_extruder(StandartExtruder())
+
+    if table.data is None:
+        print("Empty Table")
+    else:
+        save_table_path = result_path / Path(f"{table.name}.html")
+        _create_tables(table.data, save_table_path)
 
 
 if __name__ == "__main__":
