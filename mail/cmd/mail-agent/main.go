@@ -7,6 +7,7 @@ import (
     "os/signal"
     "syscall"
     "time"
+    "flag"
     
     "OrdersAgent/mail/internal/client"
     "OrdersAgent/mail/internal/config"
@@ -22,6 +23,16 @@ import (
 func main() {
     _ = godotenv.Load("storage/.env")
 
+    userID := flag.Int("user-id", 0, "ID пользователя для обработки почты")
+	flag.Parse()
+
+	if *userID <= 0 {
+		log.Fatal("user-id is required, example: --user-id=2")
+	}
+
+	log.Printf("starting mail agent for user_id=%d", *userID)
+
+    // Загружаем конфиг IMAP для КОНКРЕТНОГО ящика
     cfg, err := config.Load("mail/internal/config/config.json")
     if err != nil {
         log.Fatalf("config: %v", err)
@@ -44,7 +55,7 @@ func main() {
     defer db.Conn.Close()
 
     repo := storage.NewDBRepo(db)
-    processor := orders.New(repo)
+    processor := orders.New(repo, int64(*userID))
 
     ticker := time.NewTicker(10 * time.Second)
     defer ticker.Stop()

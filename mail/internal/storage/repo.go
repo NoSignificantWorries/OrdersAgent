@@ -5,6 +5,7 @@ import (
     "os"
     "path/filepath"
     "context"
+    "time"
 
     "OrdersAgent/mail/internal/parser"
     "OrdersAgent/storage/api"
@@ -12,7 +13,7 @@ import (
 
 type Repository interface {
     SaveFile(att parser.Attachment) error
-    SaveOrder(order any) error
+    SaveOrder(userID int64, order any) error
 }
 
 // Файловая реализация (старая).
@@ -37,7 +38,7 @@ func (f *FileRepo) SaveFile(att parser.Attachment) error {
     return nil
 }
 
-func (f *FileRepo) SaveOrder(order any) error {
+func (f *FileRepo) SaveOrder(userID int64, order any) error {
     fmt.Println("Заказ сохранен (заглушка, FileRepo)")
     return nil
 }
@@ -57,7 +58,7 @@ func (r *DBRepo) SaveFile(att parser.Attachment) error {
     return nil
 }
 
-func (r *DBRepo) SaveOrder(order any) error {
+func (r *DBRepo) SaveOrder(userID int64, order any) error {
     email, ok := order.(*parser.Email)
     if !ok {
         return fmt.Errorf("expected *parser.Email, got %T", order)
@@ -67,15 +68,31 @@ func (r *DBRepo) SaveOrder(order any) error {
     managerID := int64(1)
     emailUID := int64(email.UID)
 
+    var emailFrom *string
+    if email.From != "" {
+        from := email.From
+        emailFrom = &from
+    }
+
+    var emailDate *time.Time
+    if email.Date != "" {
+        if parsed, err := time.Parse("2006-01-02 15:04", email.Date); err == nil {
+            emailDate = &parsed
+        }
+    }
+
     // по заявке на каждый
     if len(email.Files) > 0 {
         for _, f := range email.Files {
             name := f.Name
             item := api.QueueItem{
                 AssignedTo: &managerID,
+                TargetUserID: userID,
                 Subject: email.Subject,
                 Body: email.Body,
                 EmailUID:   &emailUID,
+                EmailFrom:    emailFrom,
+                EmailDate:    emailDate,
                 DocName: &name,
                 DocData: f.Data,
                 Status: "wait",
@@ -88,9 +105,12 @@ func (r *DBRepo) SaveOrder(order any) error {
     }
     item := api.QueueItem{
                 AssignedTo: &managerID,
+                TargetUserID: userID,
                 Subject: email.Subject,
                 Body: email.Body,
                 EmailUID:   &emailUID,
+                EmailFrom:    emailFrom,
+                EmailDate:    emailDate,
                 DocName: nil,
                 DocData: nil,
                 Status: "wait",

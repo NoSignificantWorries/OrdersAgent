@@ -7,6 +7,7 @@ import (
     "strings"
     "mime"
     "encoding/base64"
+    "log"
 
     htmllib "golang.org/x/net/html"
 
@@ -212,50 +213,62 @@ func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, erro
 }
 
 func cleanBodyText(body string) string {
-    lines := strings.Split(body, "\n")
 
+    // Сначала вычищаем рамки forwarded прямо в тексте,
+    // а не выкидываем строки целиком.
+    replacements := []string{
+        "-------- Пересылаемое сообщение --------",
+        "-------- Пересылаемое письмо --------",
+        "-------- Конец пересылаемого сообщения --------",
+        "-------- Конец пересылаемого письма --------",
+    }
+    for _, r := range replacements {
+        body = strings.ReplaceAll(body, r, "")
+    }
+
+    lines := strings.Split(body, "\n")
     var cleaned []string
 
-    for _, raw := range lines {
+    for i, raw := range lines {
+        log.Printf("[LINE %d RAW]: %q", i, raw)
         line := strings.TrimSpace(raw)
+        log.Printf("[LINE %d TRIM]: %q", i, line)
+
         if line == "" {
+            log.Printf("[LINE %d] -> SKIP: empty", i)
             continue
         }
 
-        if strings.Contains(line, "---------- Пересылаемое письмо ----------") {
-            continue
-        }
-        
-        if strings.Contains(line, "---------- Конец пересылаемого письма ----------") {
-            continue
-        }
-
+        // Служебные строки пересылки
         if strings.HasPrefix(line, "От:") ||
-           strings.HasPrefix(line, "К:") ||
-           strings.HasPrefix(line, "А также к:") ||
-           strings.HasPrefix(line, "Время создания:") ||
-           strings.HasPrefix(line, "Тема:") ||
-           strings.HasPrefix(line, "Прикрепленные файлы:") {
+            strings.HasPrefix(line, "К:") ||
+            strings.HasPrefix(line, "Кому:") ||
+            strings.HasPrefix(line, "А также к:") ||
+            strings.HasPrefix(line, "Тема:") ||
+            strings.HasPrefix(line, "Дата:") ||
+            strings.HasPrefix(line, "Время создания:") ||
+            strings.HasPrefix(line, "Прикрепленные файлы:") {
             continue
         }
 
-        if strings.HasPrefix(line, "С уважением") || 
-           strings.HasPrefix(line, "--") {
-            break
-        }
-
+        // HTML/CSS‑мусор
         if strings.Contains(line, "blockquote.rt") ||
-           strings.HasPrefix(line, "p {") ||
-           strings.Contains(line, ".email-signature") {
+            strings.HasPrefix(line, "p {") ||
+            strings.Contains(line, ".email-signature") {
             continue
+        }
+
+        if strings.HasPrefix(line, "С уважением") ||
+            line == "--" {
+            break
         }
 
         cleaned = append(cleaned, line)
     }
 
-    return strings.Join(cleaned, "\n")
+    result := strings.Join(cleaned, "\n")
+    return result
 }
-
 
 func parseBody(email *Email, literal io.Reader) error {
     mr, err := mail.CreateReader(literal)

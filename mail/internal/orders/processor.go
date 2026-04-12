@@ -11,10 +11,14 @@ import (
 
 type Processor struct {
     repo storage.Repository
+    userID int64
 }
 
-func New(repo storage.Repository) *Processor {
-    return &Processor{repo: repo}
+func New(repo storage.Repository, userID int64) *Processor {
+    return &Processor{
+        repo: repo,
+        userID: userID,
+    }
 }
 
 func (p *Processor) ProcessEmail(email *parser.Email) error {
@@ -22,7 +26,7 @@ func (p *Processor) ProcessEmail(email *parser.Email) error {
     fmt.Printf("   Тема: %s\n", email.Subject)
     fmt.Printf("   Дата: %s\n", email.Date)
     fmt.Printf("   Тело: %s\n", email.Body)
-    fmt.Printf("    UID: %s\n", email.UID)
+    fmt.Printf("    UID: %d\n", email.UID)
     
     for _, file := range email.Files {
         if err := p.repo.SaveFile(file); err != nil {
@@ -31,7 +35,7 @@ func (p *Processor) ProcessEmail(email *parser.Email) error {
         }
     }
 
-    if err := p.repo.SaveOrder(email); err != nil {
+    if err := p.repo.SaveOrder(p.userID, email); err != nil {
         return err
     }
     

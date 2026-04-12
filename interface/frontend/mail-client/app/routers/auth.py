@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 import json
 
 from app.config import settings
+from app.services.users import get_or_create_user_by_email
 
 router = APIRouter()
 
@@ -143,18 +144,39 @@ async def auth_callback(
         
         user_data = user_response.json()
         print(f"Данные пользователя получены: {user_data.get('default_email')}")
-        
+
+        # привязка к нашей таблице users
+        email = user_data.get("default_email")
+        login = user_data.get("login") or email
+        name = user_data.get("real_name") or user_data.get("display_name")
+
+        if not email:
+            print("Нет default_email у пользователя Яндекс")
+            return {"error": "No default_email in Yandex user info"}
+
+        # получаем или создаём запись в users
+        try:
+            db_user = await get_or_create_user_by_email(
+                email=email,
+                login=login,
+                name=name,
+            )
+        except Exception as e:
+            print(f"Ошибка работы с БД users: {e}")
+            return {"error": "Failed to sync user with database"}
+
         # Создаём сессию
         session_id = generate_state()
         sessions[session_id] = {
-            "id": user_data.get("id"),
-            "email": user_data.get("default_email"),
-            "name": user_data.get("real_name") or user_data.get("display_name"),
-            "login": user_data.get("login"),
+            "id": db_user["id"],      # ВАЖНО: это теперь users.id
+            "email": db_user["email"],
+            "name": name,
+            "login": db_user["login"],
+            "role": db_user["role"],  # admin / manager
         }
-        
+
         print(f"✓ Сессия создана: {session_id}")
-        print(f"Пользователь: {sessions[session_id]}")
+        print(f"Пользователь (app): {sessions[session_id]}")
         print(f"Всего сессий: {len(sessions)}")
         
         # Устанавливаем куки сессии и редирект на главную

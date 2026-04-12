@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import os
 
 from app.config import settings
-from app.routers import auth
+from app.routers import auth, queue
 
 # Создание экземпляра приложения
 app = FastAPI(
@@ -22,6 +22,9 @@ templates = Jinja2Templates(directory="app/templates")
 
 # Подключение маршрутов авторизации
 app.include_router(auth.router)
+
+# Подключение API очереди писем
+app.include_router(queue.router)
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):

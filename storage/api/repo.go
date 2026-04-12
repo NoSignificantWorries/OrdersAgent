@@ -3,14 +3,18 @@ package api
 import (
     "context"
     "database/sql"
+    "time"
 )
 
 type QueueItem struct {
     ID         int64   `json:"id"`
     AssignedTo *int64  `json:"assigned_to,omitempty"`
+    TargetUserID int64   `json:"target_user_id"`
     Subject    string  `json:"email_subject"`
     Body       string  `json:"email_body"`
     EmailUID       *int64   `json:"email_uid,omitempty"`
+    EmailFrom      *string    `json:"email_from,omitempty"`
+    EmailDate      *time.Time `json:"email_date,omitempty"`
     DocName    *string `json:"document_name,omitempty"`
     DocData    []byte  `json:"-"`
     Status     string  `json:"status"`
@@ -25,13 +29,16 @@ func (db *DB) InsertQueueItem(ctx context.Context, item QueueItem) error {
     const q = `
         INSERT INTO process_queue (
             assigned_to,
+            target_user_id,
             email_subject,
             email_body,
             email_uid,
+            email_from,
+            email_date,
             document_name,
             document_data,
             status
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
     `
 
     var assignedTo any
@@ -58,9 +65,12 @@ func (db *DB) InsertQueueItem(ctx context.Context, item QueueItem) error {
     _, err := db.Conn.ExecContext(
         ctx, q,
         assignedTo,
+        item.TargetUserID,
         item.Subject,
         item.Body,
         emailUID,
+        item.EmailFrom,
+        item.EmailDate,
         docName,
         item.DocData,
         item.Status,

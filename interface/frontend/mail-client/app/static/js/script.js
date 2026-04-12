@@ -1,262 +1,292 @@
-// ===== РЕАЛЬНЫЕ ПИСЬМА ИЗ ВАШЕЙ ПОЧТЫ =====
-const emails = [
-    {
-        id: 1,
-        sender: "Наталья Парфенова",
-        email: "n.parfenova@m1glass.ru",
-        subject: "Заявка на стеклопакеты №1283A, 1282A, 1281A, 1224A, 1251A, 9_24246, 303008467",
-        preview: "Здравствуйте, С уважением, Наталья Парфенова Менеджер отдела продаж ООО 'М1'...",
-        date: "2026-03-13",
-        status: "waiting",
-        content: `Здравствуйте,
-
-Направляю заявку на стеклопакеты:
-• №1283A
-• №1282A
-• №1281A
-• №1224A
-• №1251A
-• 9_24246
-• 303008467
-
-Даты доставки: 02.03.26, 11.03.26
-
-Прикрепленные файлы:
-• 1283A.xls
-• 1282A.xls
-• 1281A.xls
-• 1224A.xls
-• 1251A.xls
-• 9_24246.xls
-• 303008467.xls
-
-С уважением, Наталья Парфенова
-Менеджер отдела продаж ООО "М1"
-(383)362-00-01 доб.114
-n.parfenova@m1glass.ru`
-    },
-    {
-        id: 2,
-        sender: "Наталья Парфенова",
-        email: "n.parfenova@m1glass.ru",
-        subject: "Заявка на стеклопакеты №1298A, 1297A, 1296A, 1259A, 079036108, 079038833",
-        preview: "Здравствуйте, С уважением, Наталья Парфенова Менеджер отдела продаж ООО 'М1'...",
-        date: "2026-03-13",
-        status: "processing",
-        content: `Здравствуйте,
-
-Направляю заявку на стеклопакеты:
-• №1298A
-• №1297A
-• №1296A
-• №1259A
-• 079036108
-• 079038833
-
-Дата доставки: 04.03.26
-
-Прикрепленные файлы:
-• 1298A.xls
-• 1297A.xls
-• 1296A.xls
-• 1259A.xls
-• 079036108.xls
-• 079038833.xls
-
-С уважением, Наталья Парфенова
-Менеджер отдела продаж ООО "М1"
-(383)362-00-01 доб.114
-n.parfenova@m1glass.ru`
-    },
-    {
-        id: 3,
-        sender: "Наталья Парфенова",
-        email: "n.parfenova@m1glass.ru",
-        subject: "Запрос стоимости",
-        preview: "Здравствуйте, С уважением, Наталья Парфенова...",
-        date: "2026-03-13",
-        status: "clarification",
-        content: `Здравствуйте,
-
-Прошу рассчитать стоимость по приложенной заявке.
-
-Прикрепленные файлы:
-• Заявка 27.02.26.xls
-
-С уважением, Наталья Парфенова
-Менеджер отдела продаж ООО "М1"
-(383)362-00-01 доб.114
-n.parfenova@m1glass.ru`
-    },
-    {
-        id: 4,
-        sender: "Наталья Парфенова",
-        email: "n.parfenova@m1glass.ru",
-        subject: "Заявка на расчет ИП Колодинов С.С.",
-        preview: "Здравствуйте, С уважением, Наталья Парфенова...",
-        date: "2026-03-13",
-        status: "completed",
-        content: `Здравствуйте,
-
-Прошу произвести расчет для ИП Колодинов С.С.
-
-Прикрепленные файлы:
-• Заявка М1 от 05.03... кат.xls
-• Приложение к заявке... -22.pdf
-• Приложение к заявке... -26.pdf
-
-С уважением, Наталья Парфенова
-Менеджер отдела продаж ООО "М1"
-(383)362-00-01 доб.114
-n.parfenova@m1glass.ru`
-    },
-    {
-        id: 5,
-        sender: "Наталья Парфенова",
-        email: "n.parfenova@m1glass.ru",
-        subject: "Заявка на стеклопакеты №1250A, 1249A, 1248A, 1247A, 1246A, 1240A, 05502547, 079038775, 012237682",
-        preview: "Здравствуйте, С уважением, Наталья Парфенова...",
-        date: "2026-03-13",
-        status: "waiting",
-        content: `Здравствуйте,
-
-Направляю заявку на стеклопакеты:
-• №1250A
-• №1249A
-• №1248A
-• №1247A
-• №1246A
-• №1240A
-• 05502547
-• 079038775
-• 012237682
-
-Даты доставки: 23.02.26, 24.02.26, 04.03.26, 12.03.26, 19.03.26
-
-Прикрепленные файлы:
-• 1250A.xls
-• 1249A.xls
-• 1248A.xls
-• 1247A.xls
-• 1246A.xls
-• 1240A.xls
-• 05502547.xls
-• 079038775.xls
-• 012237682.xls
-• 012237682-01
-• 2237682.pdf
-
-С уважением, Наталья Парфенова
-Менеджер отдела продаж ООО "М1"
-(383)362-00-01 доб.114
-n.parfenova@m1glass.ru`
-    },
-    {
-        id: 6,
-        sender: "Наталья Парфенова",
-        email: "n.parfenova@m1glass.ru",
-        subject: "ЖК Счастливый квартал. Заявка на стеклопакеты №1271А, 1271В, 1271С, 1272А, 1272В, 1272С, 1273А, 1273В, 1273С, 1274А, 1274В, 1274С",
-        preview: "Здравствуйте, С уважением, Наталья Парфенова...",
-        date: "2026-03-13",
-        status: "processing",
-        content: `Здравствуйте,
-
-Направляю заявку на стеклопакеты для ЖК "Счастливый квартал":
-• №1271А, 1271В, 1271С
-• №1272А, 1272В, 1272С
-• №1273А, 1273В, 1273С
-• №1274А, 1274В, 1274С
-
-Даты доставки: 12.03.26, 20.03.26, 31.03.26, 10.04.26
-
-С уважением, Наталья Парфенова
-Менеджер отдела продаж ООО "М1"
-(383)362-00-01 доб.114
-n.parfenova@m1glass.ru`
-    }
-];
+let emails = [];
+let selectedEmailId = null;
 
 // ===== КОНФИГУРАЦИЯ СТАТУСОВ =====
 const statusConfig = {
-    waiting: {
-        name: "Ожидание",
-        color: "#d97706",
-        bg: "#fef3c7",
-        border: "#f59e0b"
-    },
-    processing: {
-        name: "Обработка",
-        color: "#2563eb",
-        bg: "#dbeafe",
-        border: "#3b82f6"
-    },
-    clarification: {
-        name: "Уточнение",
-        color: "#0891b2",
-        bg: "#cffafe",
-        border: "#06b6d4"
-    },
-    completed: {
-        name: "Выполнена",
-        color: "#16a34a",
-        bg: "#dcfce7",
-        border: "#22c55e"
-    }
+    waiting: { name: "Ожидание" },
+    processing: { name: "Обработка" },
+    clarification: { name: "Класс определён" },
+    review: { name: "Требуется выбор класса" },
+    completed: { name: "Выполнена" }
 };
 
-// ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+// варианты решения модели / класса письма
+const decisionOptions = [
+    { value: "",        label: "Выберите класс" },
+    { value: "auto_0",  label: "Заявка" },
+    { value: "auto_1",  label: "Расчёт" },
+    { value: "review",  label: "Требуется ручной выбор" },
+];
 
+// ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
 function formatDate(dateString) {
     const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return "";
     const months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
     return `${date.getDate()} ${months[date.getMonth()]}`;
 }
 
+function formatDateTime(dateString) {
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString("ru-RU");
+}
+
 function escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = text ?? "";
     return div.innerHTML;
 }
 
 function showLoading() {
     const emailView = document.getElementById('emailView');
     if (emailView) {
-        emailView.innerHTML = `<div style="display: flex; justify-content: center; align-items: center; height: 300px;"><div class="loading"></div></div>`;
+        emailView.innerHTML = `
+            <div class="email-loading-wrapper">
+                <div class="loading"></div>
+            </div>
+        `;
     }
 }
 
-// ===== ФУНКЦИЯ УДАЛЕНИЯ ПИСЬМА =====
-function deleteEmail(emailId) {
-    const index = emails.findIndex(e => e.id === parseInt(emailId));
-    if (index !== -1) {
-        emails.splice(index, 1);
-        
-        renderEmailList();
-        
-        if (emails.length > 0) {
-            selectEmail(emails[0].id);
-        } else {
-            const emailView = document.getElementById('emailView');
-            if (emailView) {
-                emailView.innerHTML = `
-                    <div class="email-placeholder">
-                        📭 Нет писем для обработки
+function highlightSelectedEmail(id) {
+    document.querySelectorAll('.email-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+
+    const selectedItem = document.querySelector(`.email-item[data-id="${id}"]`);
+    if (selectedItem) {
+        selectedItem.classList.add('selected');
+    }
+}
+
+function applyEmailUpdatesToOpenView(email) {
+    if (!email) return;
+
+    const currentStatus = statusConfig[email.status] || statusConfig.waiting;
+
+    const statusDisplay = document.querySelector('.status-display');
+    if (statusDisplay) {
+        statusDisplay.textContent = currentStatus.name;
+        statusDisplay.className = `status-display status-${email.status}`;
+    }
+
+    const decisionSelect = document.getElementById('decision-select');
+    if (decisionSelect) {
+        const newValue = email.model_decision || "";
+        if (decisionSelect.value !== newValue) {
+            decisionSelect.value = newValue;
+        }
+    }
+}
+
+// маппинг статуса из БД в UI-статус
+// waiting        — модель ещё не проверила
+// clarification  — модель вынесла решение или менеджер задал класс
+// review         — модель не смогла выбрать, требуется человек
+function mapStatus(status) {
+    if (!status) return "waiting";
+    const s = status.toLowerCase();
+
+    if (s === "wait" || s === "waiting") return "waiting";
+    // "classified" трактуем как "класс определён"
+    if (s === "classified" || s === "clarification") return "clarification";
+    if (s === "review") return "review";
+    if (s === "processing") return "processing";
+    if (s === "done" || s === "completed") return "completed";
+
+    return "waiting";
+}
+
+// ===== ЗАГРУЗКА ПИСЕМ ИЗ API =====
+async function loadEmailsFromApi(showLoadingState = true) {
+    const listEl = document.getElementById("emailsContainer");
+    const viewEl = document.getElementById("emailView");
+    const countEl = document.querySelector(".email-count");
+
+    try {
+        if (showLoadingState) {
+            if (countEl) countEl.textContent = "Загрузка...";
+            if (listEl) {
+                listEl.innerHTML = `
+                    <div class="email-placeholder" style="padding: 20px; text-align: center;">
+                        Загрузка писем...
                     </div>
                 `;
             }
         }
-        
-        console.log(`Письмо ${emailId} удалено`);
+
+        const resp = await fetch("/api/queue", {
+            method: "GET",
+            headers: { "Accept": "application/json" },
+            credentials: "same-origin",
+        });
+
+        console.log("queue status", resp.status);
+
+        if (resp.status === 401) {
+            console.log("queue 401");
+            if (countEl) countEl.textContent = "Не авторизован";
+            if (listEl) {
+                listEl.innerHTML = `
+                    <div class="email-placeholder" style="padding: 20px; text-align: center;">
+                        Нужно войти заново
+                    </div>
+                `;
+            }
+            if (viewEl) {
+                viewEl.innerHTML = `
+                    <div class="email-placeholder">
+                        Нужно войти заново
+                    </div>
+                `;
+            }
+            return false;
+        }
+
+        if (!resp.ok) {
+            console.log("queue not ok", resp.status);
+            if (countEl) countEl.textContent = "Ошибка";
+            if (listEl) {
+                listEl.innerHTML = `
+                    <div class="email-placeholder" style="padding: 20px; text-align: center;">
+                        Ошибка загрузки писем
+                    </div>
+                `;
+            }
+            if (viewEl) {
+                viewEl.innerHTML = `
+                    <div class="email-placeholder">
+                        Ошибка загрузки писем
+                    </div>
+                `;
+            }
+            return false;
+        }
+
+        const data = await resp.json();
+        const items = data.items || [];
+
+        const grouped = new Map();
+
+        for (const item of items) {
+            const uid = item.email_uid ?? item.emailUid ?? item.uid ?? item.id;
+
+            if (!grouped.has(uid)) {
+                grouped.set(uid, {
+                    uid,
+                    id: item.id,
+                    sender: item.email_from || item.sender || "Неизвестный отправитель",
+                    email: item.email || "",
+                    subject: item.email_subject || "(без темы)",
+                    date: item.email_date || item.created_at || new Date().toISOString(),
+                    status: mapStatus(item.status),
+                    content: item.email_body || "",
+                    raw_status: item.status || "",
+                    document_names: [],
+                    predicted_class: item.predicted_class ?? null,
+                    model_decision: item.model_decision || "",
+                });
+            }
+
+            const g = grouped.get(uid);
+
+            if (item.document_name) {
+                g.document_names.push(item.document_name);
+            }
+
+            if (!g.content && item.email_body) {
+                g.content = item.email_body;
+            }
+        }
+
+        emails = Array.from(grouped.values()).map((g, idx) => ({
+            id: g.id ?? (idx + 1),
+            uid: g.uid,
+            sender: g.sender,
+            email: g.email,
+            subject: g.subject,
+            preview: (g.content || "").replace(/\s+/g, " ").trim().slice(0, 140),
+            date: g.date,
+            status: g.status,
+            content: g.content || "",
+            document_names: g.document_names,
+            raw_status: g.raw_status,
+            predicted_class: g.predicted_class ?? null,
+            model_decision: g.model_decision || "",
+        }));
+
+        if (countEl) countEl.textContent = `${emails.length} писем`;
+
+        return true;
+    } catch (e) {
+        console.error("Ошибка при загрузке писем из API:", e);
+
+        if (countEl) countEl.textContent = "Ошибка";
+        if (listEl) {
+            listEl.innerHTML = `
+                <div class="email-placeholder" style="padding: 20px; text-align: center;">
+                    Ошибка загрузки писем
+                </div>
+            `;
+        }
+        if (viewEl) {
+            viewEl.innerHTML = `
+                <div class="email-placeholder">
+                    Ошибка загрузки писем
+                </div>
+            `;
+        }
+
+        return false;
+    }
+}
+
+async function refreshEmailsSilently() {
+    const previousSelectedId = selectedEmailId;
+    const previousEmailsJson = JSON.stringify(emails);
+
+    const loaded = await loadEmailsFromApi(false);
+    if (!loaded) return;
+
+    const currentEmailsJson = JSON.stringify(emails);
+    if (previousEmailsJson === currentEmailsJson) {
+        return;
+    }
+
+    renderEmailList();
+
+    if (previousSelectedId) {
+        highlightSelectedEmail(previousSelectedId);
+
+        const selectedEmail = emails.find(e => e.id === previousSelectedId);
+        if (selectedEmail) {
+            applyEmailUpdatesToOpenView(selectedEmail);
+        }
     }
 }
 
 // ===== ОСНОВНЫЕ ФУНКЦИИ =====
-
 function renderEmailList() {
     const container = document.getElementById('emailsContainer');
+    const countEl = document.querySelector('.email-count');
     if (!container) return;
+    console.log("renderEmailList: container ok");
 
     const sortedEmails = [...emails].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    if (countEl) {
+        countEl.textContent = `${sortedEmails.length} писем`;
+    }
+
+    if (sortedEmails.length === 0) {
+        container.innerHTML = `
+            <div class="email-placeholder" style="padding: 20px; text-align: center;">
+                📭 Писем пока нет
+            </div>
+        `;
+        return;
+    }
 
     container.innerHTML = sortedEmails.map(email => {
         const status = statusConfig[email.status] || statusConfig.waiting;
@@ -264,7 +294,7 @@ function renderEmailList() {
             <div class="email-item" data-id="${email.id}">
                 <div class="email-item-header">
                     <div class="sender">${escapeHtml(email.sender)}</div>
-                    <div class="status-badge" style="background: ${status.bg}; color: ${status.color}; border-color: ${status.border};">
+                    <div class="status-badge status-${escapeHtml(email.status)}">
                         ${status.name}
                     </div>
                 </div>
@@ -284,21 +314,14 @@ function selectEmail(id) {
     showLoading();
 
     setTimeout(() => {
-        document.querySelectorAll('.email-item').forEach(item => {
-            item.classList.remove('selected');
-        });
+        highlightSelectedEmail(id);
 
-        const selectedItem = document.querySelector(`.email-item[data-id="${id}"]`);
-        if (selectedItem) {
-            selectedItem.classList.add('selected');
-        }
-
-        const email = emails.find(e => e.id == parseInt(id));
+        const email = emails.find(e => e.id == parseInt(id, 10));
         if (!email) return;
 
         const currentStatus = statusConfig[email.status] || statusConfig.waiting;
-        
-        const formattedContent = email.content
+
+        const formattedContent = (email.content || "")
             .split('\n')
             .map(line => {
                 if (line.trim() === '') return '<br>';
@@ -307,59 +330,147 @@ function selectEmail(id) {
             })
             .join('');
 
-        const showAcceptButton = email.status === "completed";
-        
+        const attachmentBlock = email.document_names && email.document_names.length
+            ? `
+                <div class="email-attachments">
+                    <strong>Вложения:</strong>
+                    <ul>
+                        ${email.document_names.map(name => `<li>${escapeHtml(name)}</li>`).join("")}
+                    </ul>
+                </div>
+            `
+            : "";
+
+        const emailMetaSender = email.email
+            ? `${escapeHtml(email.sender)} (${escapeHtml(email.email)})`
+            : `${escapeHtml(email.sender)}`;
+
+        const decisionValue = email.model_decision || "";
+
+        const decisionOptionsHtml = decisionOptions.map(opt => `
+            <option value="${escapeHtml(opt.value)}" ${opt.value === decisionValue ? "selected" : ""}>
+                ${escapeHtml(opt.label)}
+            </option>
+        `).join("");
+
+        const decisionBlock = `
+            <div class="decision-block">
+                <label for="decision-select" class="decision-label">
+                    Класс письма:
+                </label>
+                <select id="decision-select" class="decision-select">
+                    ${decisionOptionsHtml}
+                </select>
+                <button id="decision-save-btn" class="decision-save-btn">
+                    Сохранить
+                </button>
+            </div>
+        `;
+
         const emailView = document.getElementById('emailView');
         emailView.innerHTML = `
             <div class="email-card">
                 <div class="email-header">
-                    <div class="email-subject">${escapeHtml(email.subject)}</div>
-                    
-                    <div class="status-block">
-                        <div class="status-info">
-                            <span class="status-label">Состояние:</span>
-                            <div class="status-display" style="background: ${currentStatus.bg}; color: ${currentStatus.color}; border: 2px solid ${currentStatus.border};">
-                                ${currentStatus.name}
+                    <div class="email-header-top">
+                        <div class="email-subject">${escapeHtml(email.subject)}</div>
+
+                        <div class="status-block">
+                            <div class="status-info">
+                                <span class="status-label">Состояние:</span>
+                                <div class="status-display status-${escapeHtml(email.status)}">
+                                    ${currentStatus.name}
+                                </div>
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="email-meta">
-                        <div><strong>От:</strong> ${escapeHtml(email.sender)} (${escapeHtml(email.email)})</div>
-                        <div><strong>Дата:</strong> ${email.date}</div>
+                        <div><strong>От:</strong> ${emailMetaSender}</div>
+                        <div><strong>Дата:</strong> ${formatDateTime(email.date)}</div>
                     </div>
                 </div>
+
+                ${attachmentBlock}
+
+                ${decisionBlock}
+
                 <div class="email-body">
-                    ${formattedContent}
+                    ${formattedContent || "<p>Текст письма отсутствует</p>"}
                 </div>
-                ${showAcceptButton ? `
-                <div class="accept-button-container">
-                    <button class="accept-btn" data-id="${email.id}">
-                        ✅ Принять
-                    </button>
-                </div>
-                ` : ''}
             </div>
         `;
 
-        if (showAcceptButton) {
-            const acceptBtn = document.querySelector('.accept-btn');
-            if (acceptBtn) {
-                acceptBtn.addEventListener('click', (e) => {
-                    const emailId = e.target.dataset.id;
-                    deleteEmail(emailId);
-                });
-            }
+        const saveBtn = document.getElementById("decision-save-btn");
+        const decisionSelect = document.getElementById("decision-select");
+
+        if (saveBtn && decisionSelect) {
+            saveBtn.addEventListener("click", async () => {
+                const newDecision = decisionSelect.value;
+
+                try {
+                    const resp = await fetch(`/api/queue/${email.id}/decision`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                        },
+                        credentials: "same-origin",
+                        body: JSON.stringify({
+                            model_decision: newDecision === "" ? null : newDecision,
+                        }),
+                    });
+
+                    if (!resp.ok) {
+                        console.error("Не удалось сохранить решение", resp.status);
+                        alert("Не удалось сохранить решение");
+                        return;
+                    }
+
+                    email.model_decision = newDecision;
+                    if (newDecision === "auto_0" || newDecision === "auto_1") {
+                        email.status = "clarification";
+                    } else if (newDecision === "review") {
+                        email.status = "review";
+                    }
+
+                    renderEmailList();
+                    highlightSelectedEmail(email.id);
+                    applyEmailUpdatesToOpenView(email);
+
+                    alert("Решение сохранено");
+                } catch (e) {
+                    console.error("Ошибка при сохранении решения", e);
+                    alert("Ошибка при сохранении решения");
+                }
+            });
         }
     }, 300);
 }
 
 // ===== ИНИЦИАЛИЗАЦИЯ =====
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    const loaded = await loadEmailsFromApi();
+
+    if (!loaded) return;
+
     renderEmailList();
+
     if (emails.length > 0) {
         selectEmail(emails[0].id);
+    } else {
+        const emailView = document.getElementById('emailView');
+        if (emailView) {
+            emailView.innerHTML = `
+                <div class="email-placeholder">
+                    📭 Писем пока нет
+                </div>
+            `;
+        }
     }
+
+    setInterval(() => {
+        refreshEmailsSilently();
+    }, 5000);
 });
 
-window.mailClient = { emails, deleteEmail, statusConfig };
+window.mailClient = { statusConfig };
