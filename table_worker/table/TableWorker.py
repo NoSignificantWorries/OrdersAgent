@@ -34,6 +34,9 @@ _basic_table = """
     .cell-maybe-material {{ background-color: #74c7ec; }}
     .cell-empty    {{ background-color: #666; color: #222; }}
     .cell-size {{ background-color: #00ff00; }}
+    .cell-width {{ background-color: #00ff00; }}
+    .cell-height {{ background-color: #00ff00; }}
+    .cell-length {{ background-color: #00ff00; }}
     .cell-amount {{ background-color: #ffff00; }}
     .cell-material {{ background-color: #00ffff; }}
     </style>
@@ -54,7 +57,7 @@ def _make_table_from_xa(da: xr.DataArray) -> List[str]:
     sheets_html = []
 
     values = da.sel(attr="value")
-    classes = da.sel(attr="class")
+    classes = da.sel(attr="class").values
 
     def process_value(x):
         if pd.isna(x):
@@ -76,39 +79,21 @@ def _make_table_from_xa(da: xr.DataArray) -> List[str]:
             for k in range(c):
                 td = f"<td class='cell-{classes[i, j, k]}'>{escaped_values[i, j, k]}"
                 tds.append(td)
-            html_rows.append("".join(tds))
+            html_rows.append("<tr>" + "".join(tds) + "</tr>")
         sheets_html.append("".join(html_rows))
 
     return sheets_html
 
 
-def _create_tables(da: xr.DataArray, filepath: Path) -> None:
+def _create_tables(da: xr.DataArray, dirpath: Path, filename: str) -> None:
     tables_html = _make_table_from_xa(da)
 
-    filename = _get_filename(filepath)
     for i, table in enumerate(tables_html):
+        filepath = dirpath / Path(f"{filename}_sheet_{i}.html")
         content = _basic_table.format(table=table, filename=f"{filename}_sheet_{i}")
-        filepath.parent.mkdir(parents=True, exist_ok=True)
+        dirpath.parent.mkdir(parents=True, exist_ok=True)
         with open(filepath, "w") as file:
             file.write(content)
-
-
-def _get_values_by_class(df: pd.DataFrame, classes_df: pd.DataFrame, key_classes: Tuple[str, ...]):
-    origin_flat = df.stack()
-    classes_flat = classes_df.stack()
-    mask = None
-    for key_class in key_classes:
-        local_mask = classes_flat == key_class
-        if mask is None:
-            mask = local_mask
-        else:
-            mask = local_mask | mask
-    data = origin_flat[mask]
-    result = pd.DataFrame({
-        "data": data.values
-    })
-    result["class"] = 0
-    return result
 
 
 class ColumnsConfig:
@@ -139,16 +124,66 @@ class StandartExtruder(TableExtruder):
     def __init__(self) -> None:
         super().__init__(name="Standart")
         self.header_patterns = [
-            ["material", "width", "height", "amount"],
-            ["material", "length", "height", "amount"],
-            ["material", "width", "length", "amount"],
-            ["material", "size", "size", "amount"]
+            { "material": 1, "width": 1, "height": 1, "amount": 1 },
+            { "material": 1, "length": 1, "height": 1, "amount": 1 },
+            { "material": 1, "width": 1, "length": 1, "amount": 1 },
+            { "material": 1, "size": 2, "amount": 1 }
         ]
+        self.header_classes = {
+            "material": "text",
+            "size": "number",
+            "length": "number",
+            "width": "number",
+            "height": "number",
+            "amount": "number"
+        }
 
     def process_rows(self, table: xr.DataArray):
+        def check_row(row):
+            for i, header_pattern in enumerate(self.header_patterns):
+                all_correct = True
+                indexes = []
+                keys = []
+                for key, cnt in header_pattern.items():
+                    mask = np.where(row == key)[0]
+                    if len(mask) != cnt:
+                        all_correct = False
+                        break
+                    indexes.append(mask[0])
+                    keys.append(key)
+                if all_correct:
+                    return (True, indexes, keys)
+            return (False, [], [])
+
+        def check_classes(row, pattern_idx, pattern):
+            for i, key in zip(pattern_idx, pattern):
+                if row[i] != self.header_classes[key]:
+                    return False
+            return True
+
         def process_sheet(sheet):
+            is_pattern = False
+            pattern = None
+            pattern_idx = None
+            tables = []
+            idx = -1
             for i, row in enumerate(sheet):
-                print(i, row)
+                vals = row.sel(attr="value")
+                clss = row.sel(attr="class")
+
+                pattern_here, _pattern_idx, _pattern = check_row(clss)
+                if pattern_here:
+                    is_pattern = True
+                    pattern = _pattern
+                    pattern_idx = _pattern_idx
+                    tables.append({"header": pattern, "data": []})
+                    idx += 1
+                    continue
+                if is_pattern:
+                    if check_classes(clss, pattern_idx, pattern):
+                        tables[idx]["data"].append(vals[pattern_idx].values)
+
+            print(tables)
 
         for sheet in table:
             process_sheet(sheet)
@@ -353,8 +388,7 @@ def development():
     if table.data is None:
         print("Empty Table")
     else:
-        save_table_path = result_path / Path(f"{table.name}.html")
-        _create_tables(table.data, save_table_path)
+        _create_tables(table.data, result_path, table.name)
 
 
 if __name__ == "__main__":
