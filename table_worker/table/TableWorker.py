@@ -34,9 +34,9 @@ _basic_table = """
     .cell-maybe-material {{ background-color: #74c7ec; }}
     .cell-empty    {{ background-color: #666; color: #222; }}
     .cell-size {{ background-color: #00ff00; }}
-    .cell-width {{ background-color: #00ff00; }}
-    .cell-height {{ background-color: #00ff00; }}
-    .cell-length {{ background-color: #00ff00; }}
+    .cell-width {{ background-color: #00ffff; }}
+    .cell-height {{ background-color: #0f00f0; }}
+    .cell-length {{ background-color: #ff00ff; }}
     .cell-amount {{ background-color: #ffff00; }}
     .cell-material {{ background-color: #00ffff; }}
     </style>
@@ -111,12 +111,13 @@ class TableExtruder:
     def __init__(self, name: str) -> None:
         self.name = name
         self.header_patterns = None
+        self.sheets_data = None
 
     def _extrude_header_from_row(self, row):
         if self.header_patterns is None:
             raise ValueError("[ERROR]: Empty headers list.")
 
-    def process_rows(self, table: xr.DataArray):
+    def process_data(self, table: xr.DataArray):
         raise NotImplementedError("[ERROR]: Not implemented method 'find pattern'")
 
 
@@ -137,8 +138,42 @@ class StandartExtruder(TableExtruder):
             "height": "number",
             "amount": "number"
         }
+        self.sheets_data = None
 
-    def process_rows(self, table: xr.DataArray):
+    def _make_xlsx(self, data):
+        wb = openpyxl.Workbook()
+
+        default_sheet = wb.active
+        wb.remove(default_sheet)
+
+        all_empty = True
+        for i, sheet_data in enumerate(data):
+            ws = wb.create_sheet(title=f"Sheet {i}")
+
+            headers = sheet_data["header"]
+            sheet_data_data = sheet_data["data"]
+
+            if headers is None:
+                print("[WARN]: Not a format on sheet")
+                continue
+            else:
+                all_empty = False
+
+            for col_idx, header_name in enumerate(headers, start=1):
+                cell = ws.cell(row=1, column=col_idx, value=header_name)
+
+            current_row = 2
+            for line in sheet_data_data:
+                for col_idx, value in enumerate(line, start=1):
+                    cell = ws.cell(row=current_row, column=col_idx, value=value)
+                current_row += 1
+
+        if all_empty:
+            return None
+        return wb
+
+
+    def process_data(self, table: xr.DataArray):
         def check_row(row):
             for i, header_pattern in enumerate(self.header_patterns):
                 all_correct = True
@@ -165,8 +200,7 @@ class StandartExtruder(TableExtruder):
             is_pattern = False
             pattern = None
             pattern_idx = None
-            tables = []
-            idx = -1
+            table = {"header": None, "data": []}
             for i, row in enumerate(sheet):
                 vals = row.sel(attr="value")
                 clss = row.sel(attr="class")
@@ -174,19 +208,25 @@ class StandartExtruder(TableExtruder):
                 pattern_here, _pattern_idx, _pattern = check_row(clss)
                 if pattern_here:
                     is_pattern = True
+                    if _pattern == pattern:
+                        raise ValueError("[ERROR]: Wrong data format")
                     pattern = _pattern
                     pattern_idx = _pattern_idx
-                    tables.append({"header": pattern, "data": []})
-                    idx += 1
+                    table["header"] = pattern
                     continue
                 if is_pattern:
                     if check_classes(clss, pattern_idx, pattern):
-                        tables[idx]["data"].append(vals[pattern_idx].values)
+                        table["data"].append(vals[pattern_idx].values)
 
-            print(tables)
+            return table
 
+        sh_tables = []
         for sheet in table:
-            process_sheet(sheet)
+            sh_tables.append(process_sheet(sheet))
+
+        self.sheets_data = sh_tables.copy()
+
+        return self._make_xlsx(sh_tables)
 
 
 def fuzzy_match(text, pattern, threshold=50) -> bool:
@@ -205,7 +245,7 @@ def match_class(cell, config: ColumnsConfig) -> str:
 
     for (cls, associations) in config.col_asc.items():
         for asc in associations:
-            if fuzzy_match(cell.lower(), asc, 65):
+            if fuzzy_match(cell.lower(), asc, 90):
                 return cls
 
     return "text"
@@ -227,6 +267,7 @@ class TableWorker:
         self.name = _get_filename(file)
         self.attr = ["value", "class"]
         self.data = None
+        self.wb = None
         self.origin_shapes = []
 
         self.config = config
@@ -335,60 +376,67 @@ class TableWorker:
 
     def apply_extruder(self, extruder: TableExtruder):
         if self.data is None:
-            raise ValueError("[ERROR]: Empty table data.")
+            # raise ValueError("[ERROR]: Empty table data.")
+            print("[ERROR]: Empy table data")
+            return None
 
-        extruder.process_rows(self.data)
+        self.wb = extruder.process_data(self.data)
+        if self.wb is None:
+            return None
+        return extruder.sheets_data
 
-    def pull_values_from_data(self):
-        if self.data is None:
+    def save_wb(self, path: Path):
+        if self.wb is None:
             return
-
-        class_counts = {"material": 1, "size": 2, "amount": 1}
-        headers = ["metarial", "size", "size", "amount"]
-
-        def get_count_of_elements(slice):
-            res = {}
-            classes = slice.sel(attr="class")
-            for key in class_counts.keys():
-                mask = classes == key
-                mask = mask.fillna(False)
-                count = int(mask.sum().values)
-                res[key] = count
-            return res
-
-        def process_sheet(sheet):
-            elements_on_sheet = get_count_of_elements(sheet)
-            for i, row in enumerate(sheet):
-                continue
-
-        for sheet in self.data:
-            process_sheet(sheet)
+        path = path / Path(f"{self.name}.xlsx")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.wb.save(path)
 
 
 def development():
     private_dir = Path("~/Projects/OrdersAgent/private").expanduser()
     tables_path = private_dir / Path("tables")
     result_path = private_dir / Path("results/tables")
+    result_html_path = private_dir / Path("results/html")
 
     config_path = Path("../config.json").resolve()
     conf = ColumnsConfig(config_path)
 
     # table_path = tables_path / Path("BTs_Kirova_steklopakety.xlsx")
-    table_path = tables_path / Path("1108A.xls")
+    # table_path = tables_path / Path("1108A.xls")
+    all_materials = []
+    for table_path in tables_path.iterdir():
+        print(table_path.name)
+        table = TableWorker(table_path, conf)
 
-    table = TableWorker(table_path, conf)
+        table.open_and_clean()
 
-    table.open_and_clean()
+        table.match_class_to_data()
 
-    table.match_class_to_data()
+        data = table.apply_extruder(StandartExtruder())
 
-    # table.pull_values_from_data()
-    table.apply_extruder(StandartExtruder())
+        if data is not None:
+            for sheet in data:
+                idx = sheet["header"].index("material")
+                materials = []
+                for line in sheet["data"]:
+                    materials.append(line[idx])
+                materials = list(set(materials))
+                all_materials += materials
+                # print(*materials, sep="\n")
+        else:
+            print("ERROR: No data")
 
-    if table.data is None:
-        print("Empty Table")
-    else:
-        _create_tables(table.data, result_path, table.name)
+        table.save_wb(result_path)
+
+        if table.data is None:
+            print("Empty Table")
+        else:
+            _create_tables(table.data, result_html_path, table.name)
+
+
+    with open("res.txt", "w") as file:
+        file.write("\n".join(all_materials))
 
 
 if __name__ == "__main__":
