@@ -405,8 +405,13 @@ def development():
     # table_path = tables_path / Path("BTs_Kirova_steklopakety.xlsx")
     # table_path = tables_path / Path("1108A.xls")
     all_materials = []
+    count_of_files = 0
+    parsed_files = 0
+    no_parsed_files = []
+    strange_files = []
     for table_path in tables_path.iterdir():
-        print(table_path.name)
+        print("==>", table_path.name)
+        count_of_files += 1
         table = TableWorker(table_path, conf)
 
         table.open_and_clean()
@@ -417,6 +422,9 @@ def development():
 
         if data is not None:
             for sheet in data:
+                if sheet["header"] is None:
+                    print("[WARN]: Empty sheet")
+                    continue
                 idx = sheet["header"].index("material")
                 materials = []
                 for line in sheet["data"]:
@@ -424,19 +432,28 @@ def development():
                 materials = list(set(materials))
                 all_materials += materials
                 # print(*materials, sep="\n")
+            parsed_files += 1
+            table.save_wb(result_path)
         else:
+            no_parsed_files.append(table_path.name)
             print("ERROR: No data")
 
-        table.save_wb(result_path)
-
         if table.data is None:
-            print("Empty Table")
+            print(f"Empty Table for file ((({table_path})))")
+            strange_files.append(table_path.name)
         else:
             _create_tables(table.data, result_html_path, table.name)
 
 
+    if count_of_files == 0:
+        print("No files")
+    else:
+        print(parsed_files, count_of_files)
+        print("Total percent:", parsed_files / count_of_files * 100)
     with open("res.txt", "w") as file:
         file.write("\n".join(all_materials))
+    with open("no_parsed.txt", "w") as file:
+        file.write("\n".join(no_parsed_files) + "\n" + "\n".join(strange_files))
 
 
 if __name__ == "__main__":
