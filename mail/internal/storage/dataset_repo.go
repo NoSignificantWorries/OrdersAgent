@@ -10,10 +10,11 @@ import (
 
 type DatasetRepo struct {
     Dir string
+    userID int64
 }
 
-func NewDatasetRepo(dir string) *DatasetRepo {
-    return &DatasetRepo{Dir: dir}
+func NewDatasetRepo(dir string, id int64) *DatasetRepo {
+    return &DatasetRepo{Dir: dir, userID: id}
 }
 
 func (r *DatasetRepo) SaveFile(att parser.Attachment) error {
@@ -21,7 +22,7 @@ func (r *DatasetRepo) SaveFile(att parser.Attachment) error {
     return nil
 }
 
-func (r *DatasetRepo) SaveOrder(order any) error {
+func (r *DatasetRepo) SaveOrder(userID int64, order any) error {
     email, ok := order.(*parser.Email)
     if !ok {
         return fmt.Errorf("expected *parser.Email, got %T", order)

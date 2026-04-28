@@ -18,16 +18,17 @@ class DecisionUpdate(BaseModel):
 async def get_queue(
     request: Request,
     status: str = "",
-    limit: int = 50,
+    limit: int | None = None,
 ):
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    if limit < 1:
-        limit = 1
-    if limit > 200:
-        limit = 200
+    if limit is not None:
+        if limit < 1:
+            limit = 1
+        if limit > 200:
+            limit = 200
 
     items = await list_queue_for_user(user=user, status=status, limit=limit)
 

@@ -79,9 +79,9 @@ def fetch_pending_emails(conn, limit=100):
 
 
 def decide_by_thresholds(prob_1: float):
-    if prob_1 <= 0.37:
+    if prob_1 <= 0.25:
         return "auto_0", 0, "classified"
-    if prob_1 >= 0.52:
+    if prob_1 >= 0.60:
         return "auto_1", 1, "classified"
     return "review", None, "review"
 
@@ -111,7 +111,7 @@ def main():
     logger = logging.getLogger(__name__)
     print("1. main started")
 
-    model_path = Path("model_out/final")
+    model_path = Path("model_out/final_lora")
     print(f"2. model path = {model_path}")
 
     logger.info("Loading model from %s", model_path)

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
+from peft import PeftConfig, PeftModel
 
 class LLM:
     def __init__(self, model_path: str) -> None:
@@ -12,11 +12,22 @@ class LLM:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("device:", self.device)
 
-        print("loading tokenizer...")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+        print("loading peft config...")
+        peft_config = PeftConfig.from_pretrained(self.model_path)
+        base_model_name = peft_config.base_model_name_or_path
+        print("base model:", base_model_name)
 
-        print("loading model...")
-        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_path)
+        print("loading tokenizer...")
+        self.tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+
+        print("loading base model...")
+        base_model = AutoModelForSequenceClassification.from_pretrained(
+            base_model_name,
+            num_labels=2,
+        )
+
+        print("loading lora adapter...")
+        self.model = PeftModel.from_pretrained(base_model, self.model_path)
 
         print("moving model to device...")
         self.model.to(self.device)
@@ -48,11 +59,13 @@ class LLM:
 
 
 def development() -> None:
-    model_path = Path("model_out/final")
+    model_path = Path("../model_out/final_lora")
     model = LLM(model_path)
 
     prob_1 = model.predict_prob_1("Добрый день. Просим сделать расчет.")
-    print(prob_1)
+    print(f"Добрый день. Просим сделать расчет.: {prob_1}")
+    print(f"Нужен счет, прошу выставить.: {model.predict_prob_1("Нужен счет, прошу выставить")}")  # ждём > 0.7
+    print(f"Заявка в работу, без пересчета.: {model.predict_prob_1("Заявка в работу, без пересчета")}")
 
 
 if __name__ == "__main__":
