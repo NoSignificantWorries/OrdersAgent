@@ -1,15 +1,247 @@
 import re
 import csv
-from sys import maxsize
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+from enum import Enum, auto
+from sys import prefix
+from typing import Dict, List, Optional, Tuple
 
 
-def get_indexes(text: str, symbol: str):
-    return [i for i, c in enumerate(text) if c == symbol]
+DELIMETERS = ["-", "–", "—", "+", "x", "х", "*"]
+
+
+class DelimetersList:
+    def __init__(self) -> None:
+        self._cnt = 0
+        self._index = []
+
+    def __str__(self) -> str:
+        return f"(cnt={self._cnt}, indxes={self._index})"
+
+    def __repr__(self) -> str:
+        return f"(cnt={self._cnt}, indxes={self._index})"
+
+    @property
+    def count(self) -> int:
+        return self._cnt
+
+    @property
+    def index(self) -> List:
+        return self._index
+
+    def add(self, idx):
+        self._cnt += 1
+        self._index.append(idx)
+
+
+def _check_breket(breket: str) -> Optional[str]:
+    if breket in "()":
+        return "round"
+    if breket in "{}":
+        return "figure"
+    if breket in "[]":
+        return "square"
+    if breket in "$":
+        return "empty"
+    return None
+
+
+class Block:
+    def __init__(self, brek: str, level: int, start_i: int, end_i: Optional[int] = None):
+        self._btype = _check_breket(brek)
+        if self._btype is None:
+            raise ValueError(f"Unsupported breket symbol '{brek}'")
+
+        self._level = level
+        self._start = start_i
+        self._end = end_i
+
+        self._delims = {}
+        self._max_delimeter = None
+        self._max_count = 0
+        self._string = None
+
+    def __str__(self) -> str:
+        return f"Block(btype={self._btype}, string={self._string}, level={self._level}, ({self._start}, {self._end})) delims={self._delims} max_delim={self._max_delimeter} count={self._max_count}"
+
+    def __repr__(self) -> str:
+        return f"Block(btype={self._btype}, string={self._string}, level={self._level}, ({self._start}, {self._end})) delims={self._delims} max_delim={self._max_delimeter} count={self._max_count}"
+
+    @property
+    def level(self) -> int:
+        return self._level
+
+    @property
+    def btype(self) -> Optional[str]:
+        return self._btype
+
+    @property
+    def start(self) -> int:
+        return self._start
+
+    @property
+    def end(self) -> Optional[int]:
+        return self._end
+
+    @property
+    def delims(self) -> Dict:
+        return self._delims
+
+    @property
+    def max_delimeter(self) -> Optional[str]:
+        return self._max_delimeter
+
+    @property
+    def max_delimeter_count(self) -> int:
+        return self._max_count
+
+    @property
+    def string(self) -> Optional[str]:
+        return self._string
+
+    def get_pair(self) -> Tuple[int, Optional[int]]:
+        return self._start, self._end
+
+    def set_end(self, idx) -> None:
+        self._end = idx
+
+    def set_string(self, text: str) -> None:
+        self._string = text
+
+    def add_delim(self, delimeter: str, idx: int) -> None:
+        if delimeter not in self._delims:
+            self._delims[delimeter] = DelimetersList()
+
+        self._delims[delimeter].add(idx)
+
+        delim_cnt = self._delims[delimeter].count
+        if delim_cnt > self._max_count:
+            self._max_count = delim_cnt
+            self._max_delimeter = delimeter
+
+    def split_by_delim(self, delim: str) -> None:
+        if delim not in self._delims:
+            raise ValueError(f"Undefined delimeter in the Block! Current delimeters: {list(self._delims.keys())}")
+
+
+class BlockLevels:
+    def __init__(self) -> None:
+        self._levels = {}
+        self._depth = 0
+
+    def __str__(self) -> str:
+        return f"Levels(levels={self._levels}, depth={self._depth})"
+
+    def __repr__(self) -> str:
+        return f"Levels(levels={self._levels}, depth={self._depth})"
+
+    @property
+    def depth(self) -> int:
+        return self._depth
+
+    def get_level(self, level: int):
+        return self._levels.get(level)
+
+    def add_block(self, block: Block) -> None:
+        lvl = block.level
+
+        if lvl not in self._levels:
+            self._levels[lvl] = []
+        self._levels[lvl].append(block)
+
+        if lvl > self._depth:
+            self._depth = lvl
+
+
+def _symbols_tree(line: str, delims: List[str]) -> BlockLevels:
+    open_breks = "([{"
+    close_breks = "}])"
+
+    line = line.strip()
+
+    idx = 0
+    levels = BlockLevels()
+    stack = []
+    general_block = Block("$", 0, -1, len(line))
+    general_block.set_string(line)
+
+    for i, symbol in enumerate(line):
+        if symbol in open_breks:
+            idx += 1
+            stack.append(Block(symbol, idx, i))
+        elif symbol in close_breks:
+            if _check_breket(symbol) == stack[-1].btype:
+                block = stack.pop(-1)
+                block.set_end(i)
+                block.set_string(line[block.start + 1:block.end])
+                levels.add_block(block)
+                idx -= 1
+            else:
+                raise ValueError(f"Wrong brekets format at {i}: '{symbol}'")
+        elif symbol in delims:
+            if stack:
+                stack[-1].add_delim(symbol, i)
+            else:
+                general_block.add_delim(symbol, i)
+
+    if stack:
+        raise ValueError(f"Wrong brekets format at {i}: '{symbol}'")
+
+    levels.add_block(general_block)
+    return levels
+
+
+class ParseAction(Enum):
+    NO_ACTION = auto()
+
+
+@dataclass
+class ParseResult:
+    action: ParseAction
+    prefix: Optional[str] = None
+    content: Optional[str] = None
+    postfix: Optional[str] = None
+    content: Optional[str] = None
+    breket: Optional[Block] = None
+
+    @classmethod
+    def no_action(cls):
+        return cls(action=ParseAction.NO_ACTION)
+
+
+class ParseRule(ABC):
+    @abstractmethod 
+    def can_apply(self, levels: BlockLevels) -> bool:
+        pass
+
+    @abstractmethod 
+    def apply(self, line: str, levels: BlockLevels) -> Optional[ParseResult]:
+        pass
+
+
+class ParsePipeline:
+    def __init__(self, delimeters: List[str]) -> None:
+        self._delims = delimeters
+        self._rules: List[ParseRule] = []
+
+    def parse(self, line: str) -> ParseResult:
+        levels = _symbols_tree(line, self._delims)
+
+        for rule in self._rules:
+            if rule.can_apply(levels):
+                result = rule.apply(line, levels)
+                if result and result.action != ParseAction.NO_ACTION:
+                    return result
+
+        return ParseResult.no_action()
+
+    def add_rule(self, rule: ParseRule) -> None:
+        self._rules.append(rule)
 
 
 class MaterialParser:
     def __init__(self) -> None:
-        self._delims = ["-", "–", "—", "+", "x", "х", "*"]
+        self._delims = DELIMETERS
 
     @property
     def delims(self):
@@ -44,7 +276,7 @@ class MaterialParser:
         mat = "СП[ДО]?"
         size = f"\(?\d*\)?{sep}(мм)?"
         stuff = "[\(:]?"
-        pattern = rf"^({mat}{sep}{size}{sep}{stuff}){sep}(.*)$"
+        pattern = rf"^({mat}{sep}{size}{sep}){sep}{stuff}{sep}(.*)$"
 
         prefix_pattern = re.compile(pattern, re.IGNORECASE)
 
@@ -80,116 +312,6 @@ class MaterialParser:
 
         return res
 
-    def delimeters_parser(self, text: str):
-        text = text.strip()
-        res = {"material": text}
-        max_del = None
-        max_cnt = 0
-        for delim in self._delims:
-            cnt = text.count(delim)
-            res[delim] = cnt
-            if cnt > max_cnt:
-                max_del = delim
-                max_cnt = cnt
-
-        if max_del is None:
-            pass
-        else:
-            last_p = "p1"
-            for i, cc in enumerate(text.split(max_del)):
-                key = f"p{i + 1}"
-                res[key] = cc
-                last_p = key
-
-        if max_cnt > 0:
-            parsed_p1 = self._clean_p1(res["p1"])
-            res.update(parsed_p1)
-            parsed_last_p = self._clean_last_p(last_p, res[last_p])
-            res.update(parsed_last_p)
-
-        return res, max_cnt + 1
-
-    def extended_delimeters_parser(self, text: str):
-        text = text.strip()
-        res_delims = [(delim, text.count(delim)) for delim in self.delims]
-        max_delim, max_cnt = max(res_delims, key=lambda x: x[1])
-        delims_dict = dict(res_delims)
-
-        if max_cnt == 0:
-            res = {
-                    "material": text,
-                    "prefix": "",
-                    "p1": text,
-                    "postfix": ""
-                    }
-            res.update(delims_dict)
-            return res, 1
-        if max_cnt == 1:
-            p1, postfix = text.split(max_delim)
-            res = {
-                    "material": text,
-                    "prefix": "",
-                    "p1": p1,
-                    "postfix": postfix
-                    }
-            res.update(delims_dict)
-            return res, 1
-        
-        delim_indexes = get_indexes(text, max_delim)
-        open_brek = get_indexes(text, "(")
-        close_brek = get_indexes(text, ")")
-        # print(text, delim_indexes, open_brek, close_brek)
-        prefix = ""
-        postfix = ""
-        # outer brekets
-        if open_brek:
-            if open_brek[0] < delim_indexes[0] and close_brek[-1] > delim_indexes[-1]:
-                content = text[open_brek[0] + 1:close_brek[-1]]
-                prefix = text[:open_brek[0]]
-                postfix = text[close_brek[-1] + 1:]
-            else:
-                content = text
-        else:
-            content = text
-
-        res = {
-                "material": text,
-                "prefix": prefix,
-                "postfix": postfix
-                }
-        idx = 0
-        blocks = {}
-        substring = ""
-        in_block = False
-        for symbol in content:
-            if symbol == max_delim and not in_block:
-                blocks[f"p{idx + 1}"] = substring
-                substring = ""
-                idx += 1
-                continue
-            if symbol in "([{":
-                in_block = True
-            if symbol in ")}]":
-                in_block = False
-            substring += symbol
-        if substring:
-            blocks[f"p{idx + 1}"] = substring
-
-        res.update(blocks)
-
-        if not prefix:
-            prefix, p1 = self._extended_clean_p1(res["p1"])
-            print(text, res["p1"], prefix, p1)
-            res["prefix"] = prefix
-            res["p1"] = p1
-
-        for key in res.keys():
-            res[key] = res[key].strip()
-
-        res.update(delims_dict)
-
-        return res, max_cnt + 1
-            
 
 def development() -> None:
     with open("res.txt", "r") as file:
@@ -230,7 +352,16 @@ def development() -> None:
     else:
         print("N/A")
 
+    print(_brekets_and_delims_tree("aaa-aaa-(bb{c}d)-ee[f]", parser.delims))
+
+
+def dev2() -> None:
+    parser = MaterialParser()
+    tree = _symbols_tree("aaa-aaa-(bb{c+b+e}d)-ee[f]", parser.delims)
+
+
 
 if __name__ == "__main__":
-    development()
+    # development()
+    dev2()
 
