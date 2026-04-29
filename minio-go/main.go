@@ -228,5 +228,5 @@ func main() {
 		log.Printf("Ошибка: %v", err)
 	}
 
-	fmt.Println("\n🎉 Все операции завершены!")
+	fmt.Println("\nВсе операции завершены!")
 }

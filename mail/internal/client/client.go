@@ -2,7 +2,7 @@ package client
 
 import (
     "fmt"
-    
+
     "OrdersAgent/mail/internal/config"
     "github.com/emersion/go-imap/v2"
     "github.com/emersion/go-imap/v2/imapclient"
@@ -14,21 +14,21 @@ type Client struct {
 }
 
 func New(cfg *config.Config) (*Client, error) {
-    c, err := imapclient.DialTLS(cfg.Host+":"+fmt.Sprintf("%d", cfg.Port), nil)
+    c, err := imapclient.DialTLS(fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), nil)
     if err != nil {
         return nil, fmt.Errorf("dial: %w", err)
     }
-    
+
     if err := c.Login(cfg.Username, cfg.Password).Wait(); err != nil {
         c.Close()
         return nil, fmt.Errorf("login: %w", err)
     }
-    
+
     if _, err := c.Select("INBOX", nil).Wait(); err != nil {
         c.Close()
         return nil, fmt.Errorf("select INBOX: %w", err)
     }
-    
+
     return &Client{conn: c, cfg: cfg}, nil
 }
 
@@ -38,23 +38,26 @@ func (c *Client) FetchUnread() ([]imap.UID, error) {
     if err != nil {
         return nil, fmt.Errorf("search: %w", err)
     }
-   
+
     allUIDs := searchData.AllUIDs()
-   
-    // флаги для определения непрочитанных
+
     fetchOptions := &imap.FetchOptions{
         Flags: true,
         UID:   true,
     }
-   
+
+    if len(allUIDs) == 0 {
+        return nil, nil
+    }
+
     fetchCmd := c.conn.Fetch(imap.UIDSetNum(allUIDs...), fetchOptions)
     defer fetchCmd.Close()
-   
+
     messages, err := fetchCmd.Collect()
     if err != nil {
         return nil, fmt.Errorf("fetch flags: %w", err)
     }
-   
+
     var unreadUIDs []imap.UID
     for _, msg := range messages {
         hasSeen := false
@@ -68,20 +71,19 @@ func (c *Client) FetchUnread() ([]imap.UID, error) {
             unreadUIDs = append(unreadUIDs, msg.UID)
         }
     }
-   
-    fmt.Printf("Total: %d, Unread: %d\n", len(allUIDs), len(unreadUIDs))
+
     return unreadUIDs, nil
 }
 
 func (c *Client) FetchMessage(uid imap.UID) (*imapclient.FetchCommand, error) {
     fetchOptions := &imap.FetchOptions{
-        UID:        true,
-        Envelope:   true,
+        UID:      true,
+        Envelope: true,
         BodySection: []*imap.FetchItemBodySection{{
             Peek: true,
         }},
     }
-    
+
     return c.conn.Fetch(imap.UIDSetNum(uid), fetchOptions), nil
 }
 

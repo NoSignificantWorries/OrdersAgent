@@ -7,21 +7,22 @@ import (
 )
 
 type QueueItem struct {
-    ID         int64   `json:"id"`
-    AssignedTo *int64  `json:"assigned_to,omitempty"`
-    TargetUserID int64   `json:"target_user_id"`
-    Subject    string  `json:"email_subject"`
-    Body       string  `json:"email_body"`
+    ID             int64    `json:"id"`
+    AssignedTo     *int64   `json:"assigned_to,omitempty"`
+    TargetUserID   int64    `json:"target_user_id"`
+    Subject        string   `json:"email_subject"`
+    Body           string   `json:"email_body"`
     EmailUID       *int64   `json:"email_uid,omitempty"`
-    EmailFrom      *string    `json:"email_from,omitempty"`
+    EmailFrom      *string  `json:"email_from,omitempty"`
     EmailDate      *time.Time `json:"email_date,omitempty"`
-    DocName    *string `json:"document_name,omitempty"`
-    DocData    []byte  `json:"-"`
-    Status     string  `json:"status"`
-    CreatedAt  string  `json:"created_at"`
-    Prob1         *float64 `json:"prob_1,omitempty"`
-    PredictedClass *int16  `json:"predicted_class,omitempty"`
-    ModelDecision *string  `json:"model_decision,omitempty"`
+    DocName        *string  `json:"document_name,omitempty"`
+    ObjectBucket   *string  `json:"object_bucket,omitempty"`
+    ObjectKey      *string  `json:"object_key,omitempty"`
+    Status         string   `json:"status"`
+    CreatedAt      string   `json:"created_at"`
+    Prob1          *float64 `json:"prob_1,omitempty"`
+    PredictedClass *int16   `json:"predicted_class,omitempty"`
+    ModelDecision  *string  `json:"model_decision,omitempty"`
 }
 
 // Вставка записи в очередь
@@ -36,9 +37,11 @@ func (db *DB) InsertQueueItem(ctx context.Context, item QueueItem) error {
             email_from,
             email_date,
             document_name,
-            document_data,
+            object_bucket,
+            object_key,
             status
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     `
 
     var assignedTo any
@@ -62,6 +65,20 @@ func (db *DB) InsertQueueItem(ctx context.Context, item QueueItem) error {
         docName = nil
     }
 
+    var objectBucket any
+    if item.ObjectBucket != nil {
+        objectBucket = *item.ObjectBucket
+    } else {
+        objectBucket = nil
+    }
+
+    var objectKey any
+    if item.ObjectKey != nil {
+        objectKey = *item.ObjectKey
+    } else {
+        objectKey = nil
+    }
+
     _, err := db.Conn.ExecContext(
         ctx, q,
         assignedTo,
@@ -72,7 +89,8 @@ func (db *DB) InsertQueueItem(ctx context.Context, item QueueItem) error {
         item.EmailFrom,
         item.EmailDate,
         docName,
-        item.DocData,
+        objectBucket,
+        objectKey,
         item.Status,
     )
     return err
@@ -82,8 +100,8 @@ func (db *DB) InsertQueueItem(ctx context.Context, item QueueItem) error {
 func (db *DB) ListQueue(ctx context.Context, status string, limit int) ([]QueueItem, error) {
     const q = `
         SELECT id, assigned_to, email_subject, email_body,
-            document_name, status, created_at,
-            prob_1, predicted_class, model_decision
+               document_name, status, created_at,
+               prob_1, predicted_class, model_decision
         FROM process_queue
         WHERE ($1 = '' OR status = $1)
         ORDER BY created_at DESC
