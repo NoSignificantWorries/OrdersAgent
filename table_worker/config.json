@@ -1,0 +1,58 @@
+{
+  "column-associations": {
+    "size": ["размер", "размеры", "размеры,мм", "размеры[мм]", "размеры(мм)"],
+    "length": ["длина", "длина,мм", "длина[мм]", "длина(мм)"],
+    "width": ["ширина", "ширина,мм", "ширина[мм]", "ширина(мм)"],
+    "height": ["высота", "высота,мм", "высота[мм]", "высота(мм)"],
+    "amount": ["кол-во", "количество", "кол-во(шт)", "количество(шт)"],
+    "material": [
+      "наименование",
+      "обозначение",
+      "имя",
+      "номенклатура",
+      "артикул",
+      "типпакета",
+      "формула",
+      "формулазаполнения",
+      "формуласп"
+    ]
+  },
+
+  "regex-classes": {
+    "barcode": "[A-Z]{0,2}[0-9]{8,20}[A-Z]?",
+    "number": "^[+-]?\\d+(?:[.,]\\d+)?$"
+  },
+
+  "patterns": [
+    {
+      "name": "Standart",
+      "format": [
+        {
+          "count": 0,
+          "header-variants": [
+            ["material", "width", "height", "amount"],
+            ["material", "width", "length", "amount"],
+            ["material", "length", "height", "amount"],
+            ["material", "size", "size", "amount"]
+          ],
+          "content": "*"
+        }
+      ]
+    },
+    {
+      "name": "Okna",
+      "format": [
+        {
+          "count": 0,
+          "header-variants": [
+            ["material", "width", "height", "amount"],
+            ["material", "width", "length", "amount"],
+            ["material", "length", "height", "amount"],
+            ["material", "size", "size", "amount"]
+          ],
+          "content": "*"
+        }
+      ]
+    }
+  ]
+}

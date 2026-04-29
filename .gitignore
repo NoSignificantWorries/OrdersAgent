@@ -1,3 +1,7 @@
+.venv/
+.qodo/
+.vscode/
+
 secrets/
 
 !.gitkeep
@@ -13,3 +17,4 @@ debug/
 app.log
 
 *.bkp
+private/
