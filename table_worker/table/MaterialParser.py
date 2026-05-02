@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from MatreialLibrary import MaterialMatcherORM, DatabaseManager, initialize_app
+from MaterialLibrary import MaterialMatcherORM, DatabaseManager, initialize_app
 
 
 DELIMETERS = ["-", "–", "—", "+", "x", "х", "*"]
@@ -360,7 +360,7 @@ class ParserV2:
         return resuts
 
 
-class MetarialProcessor:
+class MaterialProcessor:
     def __init__(self, pipeline: ParserV2) -> None:
         self._pipeline = pipeline
         self._matcher = MaterialMatcherORM()
@@ -389,7 +389,7 @@ async def development_async() -> None:
         lines = [line.rstrip("\n") for line in row_lines]
 
     pipeline = ParserV2(DELIMETERS)
-    processor = MetarialProcessor(pipeline)
+    processor = MaterialProcessor(pipeline)
 
     results = []
     max_parts = 0

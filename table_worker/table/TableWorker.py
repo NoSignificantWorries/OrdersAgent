@@ -1,3 +1,4 @@
+import asyncio
 from operator import is_
 import re
 import json
@@ -9,6 +10,7 @@ from typing import List, Optional, Tuple
 # data working
 import numpy as np
 import pandas as pd
+from sqlalchemy import column
 import xarray as xr
 # tables processing
 import openpyxl
@@ -17,6 +19,8 @@ import xlrd
 from rapidfuzz import fuzz, process
 
 import tqdm
+
+from MaterialParser import MaterialProcessor, DatabaseManager, initialize_app, ParserV2, DELIMETERS, ParseResults
 
 
 _basic_table = """
@@ -260,6 +264,10 @@ def match_classes_to_df(data: pd.DataFrame, config: ColumnsConfig) -> pd.DataFra
     return classes
 
 
+async def ask_user_about_materials(materials):
+    pass
+
+
 class TableWorker:
     def __init__(self, file: Path, config: ColumnsConfig) -> None:
         self.path = file
@@ -267,6 +275,8 @@ class TableWorker:
         self.name = _get_filename(file)
         self.attr = ["value", "class"]
         self.data = None
+        self.parsed_data = None
+        self.parsed_materials = None
         self.wb = None
         self.origin_shapes = []
 
@@ -383,7 +393,105 @@ class TableWorker:
         self.wb = extruder.process_data(self.data)
         if self.wb is None:
             return None
+
+        self.parsed_data = extruder.sheets_data
         return extruder.sheets_data
+
+    async def parse_materials(self, processor: MaterialProcessor):
+        if self.parsed_data is None:
+            return None
+
+        materials = dict()
+        for sheet in self.parsed_data:
+            if sheet["header"] is None:
+                print("No data on sheet")
+                continue
+            material_column_idx = sheet["header"].index("material")
+            for i, row in enumerate(sheet["data"]):
+                material = row[material_column_idx].strip()
+                row[material_column_idx] = material
+                if material not in materials:
+                    materials[material] = []
+                materials[material].append(i)
+
+        # print(materials)
+
+        material_questions = dict()
+        parsed_materials = dict()
+        is_problem = False
+        for material in materials.keys():
+            parsed = await processor.process_line(material)
+            if material not in parsed_materials:
+                parsed_materials[material] = {
+                        "postfix": parsed.postfix,
+                        "parts": dict()
+                    }
+            for i, (p, m) in enumerate(zip(parsed.parts, parsed.matches)):
+                parsed_materials[material]["parts"][p] = m
+                if m is None:
+                    is_problem = True
+                    if material not in material_questions:
+                        material_questions[material] = []
+                    material_questions[material].append((p, i))
+        print(material_questions)
+        print(parsed_materials)
+        if is_problem:
+            await ask_user_about_materials(material_questions)
+
+        self.parsed_materials = parsed_materials
+
+    def _make_xlsx(self):
+        if self.parsed_data is None or self.parsed_materials is None:
+            return None
+
+        wb = openpyxl.Workbook()
+
+        default_sheet = wb.active
+        wb.remove(default_sheet)
+
+        all_empty = True
+        for i, sheet_data in enumerate(self.parsed_data):
+            ws = wb.create_sheet(title=f"Sheet {i}")
+
+            headers = sheet_data["header"]
+            sheet_data_data = sheet_data["data"]
+
+            if headers is None:
+                print("[WARN]: Not a format on sheet")
+                continue
+            else:
+                all_empty = False
+
+            ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
+            ws.merge_cells(start_row=1, start_column=11, end_row=1, end_column=13)
+            ws.merge_cells(start_row=1, start_column=14, end_row=1, end_column=18)
+            for col_idx, header_content in [(10, "Характеристики"), (13, "Доп. информация")]:
+                cell = ws.cell(row=1, column=col_idx + 1, value=header_content)
+
+            for col_idx, header_content in enumerate(["Номенклатура 1С", "П1", "Р1", "П2", "Р2", "П3", "Р3", "П4",
+                "Герметик", "Тип изделия", "X", "Y", "Кол-во", "Маркировка", "ПЗ", "ШК", "Номер фигуры", "Уточнения"]):
+                cell = ws.cell(row=2, column=col_idx + 1, value=header_content)
+
+            ws.row_dimensions[1].height = 15
+            ws.row_dimensions[2].height = 25
+
+            current_row = 3
+            for line in sheet_data_data:
+                material, x, y, amount = line
+
+                for i, (_, matched) in enumerate(self.parsed_materials[material]["parts"].items(), start=2):
+                    cell = ws.cell(row=current_row, column=i, value=matched)
+
+                cell = ws.cell(row=current_row, column=1, value=material)
+                cell = ws.cell(row=current_row, column=11, value=x)
+                cell = ws.cell(row=current_row, column=12, value=y)
+                cell = ws.cell(row=current_row, column=13, value=amount)
+                cell = ws.cell(row=current_row, column=18, value=self.parsed_materials[material]["postfix"])
+                current_row += 1
+
+        if all_empty:
+            return
+        self.wb = wb
 
     def save_wb(self, path: Path):
         if self.wb is None:
@@ -393,7 +501,9 @@ class TableWorker:
         self.wb.save(path)
 
 
-def development():
+async def development_async():
+    await initialize_app()
+    
     private_dir = Path("~/Projects/OrdersAgent/private").expanduser()
     tables_path = private_dir / Path("tables")
     result_path = private_dir / Path("results/tables")
@@ -401,6 +511,9 @@ def development():
 
     config_path = Path("../config.json").resolve()
     conf = ColumnsConfig(config_path)
+
+    pipeline = ParserV2(DELIMETERS)
+    processor = MaterialProcessor(pipeline)
 
     # table_path = tables_path / Path("BTs_Kirova_steklopakety.xlsx")
     # table_path = tables_path / Path("1108A.xls")
@@ -420,17 +533,20 @@ def development():
 
         data = table.apply_extruder(StandartExtruder())
 
-        table.parse_materials()
-
         if data is not None:
             for sheet in data:
                 if sheet["header"] is None:
                     print("[WARN]: Empty sheet")
                     continue
+                
+                await table.parse_materials(processor)
+
+                table._make_xlsx()
+
                 idx = sheet["header"].index("material")
                 materials = []
                 for line in sheet["data"]:
-                    materials.append(line[idx])
+                    materials.append(line[idx].strip())
                 materials = list(set(materials))
                 all_materials += materials
                 # print(*materials, sep="\n")
@@ -446,6 +562,7 @@ def development():
         else:
             _create_tables(table.data, result_html_path, table.name)
 
+    await DatabaseManager.close()
 
     if count_of_files == 0:
         print("No files")
@@ -456,6 +573,10 @@ def development():
         file.write("\n".join(all_materials))
     with open("no_parsed.txt", "w") as file:
         file.write("\n".join(no_parsed_files) + "\n" + "\n".join(strange_files))
+
+
+def development() -> None:
+    asyncio.run(development_async())
 
 
 if __name__ == "__main__":
