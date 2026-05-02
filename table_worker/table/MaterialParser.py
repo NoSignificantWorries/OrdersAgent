@@ -1,10 +1,10 @@
 import re
 import csv
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
-from enum import Enum, auto
-from sys import prefix
-from typing import Dict, List, Optional, Tuple
+import asyncio
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
+from MatreialLibrary import MaterialMatcherORM, DatabaseManager, initialize_app
 
 
 DELIMETERS = ["-", "–", "—", "+", "x", "х", "*"]
@@ -119,9 +119,20 @@ class Block:
             self._max_count = delim_cnt
             self._max_delimeter = delimeter
 
-    def split_by_delim(self, delim: str) -> None:
+    def split_by_delim(self, delim: str) -> List[str]:
         if delim not in self._delims:
             raise ValueError(f"Undefined delimeter in the Block! Current delimeters: {list(self._delims.keys())}")
+        parts = []
+        last_idx = -1
+        for idx in self._delims[delim].index:
+            idx -= self._start + 1
+            part = self._string[last_idx+1:idx]
+            parts.append(part)
+            last_idx = idx
+        part = self._string[last_idx+1:]
+        parts.append(part)
+
+        return parts
 
 
 class BlockLevels:
@@ -139,7 +150,7 @@ class BlockLevels:
     def depth(self) -> int:
         return self._depth
 
-    def get_level(self, level: int):
+    def get_level(self, level: int) -> Optional[List]:
         return self._levels.get(level)
 
     def add_block(self, block: Block) -> None:
@@ -191,87 +202,49 @@ def _symbols_tree(line: str, delims: List[str]) -> BlockLevels:
     return levels
 
 
-class ParseAction(Enum):
-    NO_ACTION = auto()
-
-
 @dataclass
-class ParseResult:
-    action: ParseAction
+class ParseResults:
+    material: Optional[str] = None
     prefix: Optional[str] = None
-    content: Optional[str] = None
     postfix: Optional[str] = None
-    content: Optional[str] = None
-    breket: Optional[Block] = None
-
-    @classmethod
-    def no_action(cls):
-        return cls(action=ParseAction.NO_ACTION)
+    levels: Optional[BlockLevels] = None
+    parts: List[str] = field(default_factory=list)
+    matches: List[str] = field(default_factory=list)
+    parts_count: int = 0
 
 
-class ParseRule(ABC):
-    @abstractmethod 
-    def can_apply(self, levels: BlockLevels) -> bool:
-        pass
-
-    @abstractmethod 
-    def apply(self, line: str, levels: BlockLevels) -> Optional[ParseResult]:
-        pass
-
-
-class ParsePipeline:
+class ParserV2:
     def __init__(self, delimeters: List[str]) -> None:
         self._delims = delimeters
-        self._rules: List[ParseRule] = []
 
-    def parse(self, line: str) -> ParseResult:
-        levels = _symbols_tree(line, self._delims)
+    def _no_brekets_rule(self, levels: BlockLevels) -> ParseResults:
+        general = levels.get_level(0)
+        if not general:
+            raise ValueError("Empty material string")
+        general = general[0]
 
-        for rule in self._rules:
-            if rule.can_apply(levels):
-                result = rule.apply(line, levels)
-                if result and result.action != ParseAction.NO_ACTION:
-                    return result
+        cnt = general.max_delimeter_count
+        if not general.max_delimeter or cnt < 1:
+            return ParseResults(material=general.string, parts=[general.string], parts_count=1)
 
-        return ParseResult.no_action()
+        parts = general.split_by_delim(general.max_delimeter)
+        if cnt == 1:
+            return ParseResults(material=general.string, parts=[parts[0]], postfix=parts[1], parts_count=1)
+        elif cnt >= 2:
+            return ParseResults(material=general.string, parts=parts, parts_count=len(parts))
 
-    def add_rule(self, rule: ParseRule) -> None:
-        self._rules.append(rule)
+        return ParseResults(material=general.string, parts=[general.string], parts_count=1)
 
-
-class MaterialParser:
-    def __init__(self) -> None:
-        self._delims = DELIMETERS
-
-    @property
-    def delims(self):
-        return self._delims
+    def _find_candidates(self, blocks: List[Block], general: Block) -> List[Block]:
+        candidates = []
+        cnt = general.max_delimeter_count
+        for obj in blocks:
+            obj_cnt = obj.max_delimeter_count
+            if obj_cnt > cnt and obj_cnt > 1:
+                candidates.append(obj)
+        return candidates
 
     def _clean_p1(self, text_obj: str):
-        sep = "\s*"
-        mat = "(СП[ДО]?)"
-        size = f"\(?(\d*)\)?{sep}(мм)?"
-        stuff = "[\(:]?"
-        pattern = rf"^{mat}{sep}{size}{sep}{stuff}{sep}(.*)$"
-
-        prefix_pattern = re.compile(pattern, re.IGNORECASE)
-
-        match = prefix_pattern.match(text_obj)
-
-        res = {
-            "prefix": "",
-            "thikness": "",
-            "p1": text_obj
-            }
-        if match:
-            res["prefix"] = match.group(1) or ""
-            # print(match.group(2))
-            res["thikness"] = match.group(2) or ""
-            res["p1"] = match.group(4) or ""
-
-        return res
-
-    def _extended_clean_p1(self, text_obj: str):
         sep = "\s*"
         mat = "СП[ДО]?"
         size = f"\(?\d*\)?{sep}(мм)?"
@@ -290,78 +263,175 @@ class MaterialParser:
 
         return prefix, p1
 
-    def _clean_last_p(self, part: str, text_obj: str):
-        res = {
-            "postfix": "",
-            part: text_obj
-            }
+    def _clean_last_p(self, text_obj: str):
+        postfix = ""
+        part = text_obj
+
         break_point = "(["
         green_point = ")"
         idx = -1
         for i, symbol in enumerate(text_obj):
             if symbol in break_point:
-                return res
+                return postfix, part
             if symbol in green_point:
                 idx = i
                 break
 
         if idx < 0:
+            return postfix, part
+
+        postfix = text_obj[idx + 1:].strip()
+        part = text_obj[:idx].strip()
+
+        return postfix, part
+
+    def _parse(self, line: str) -> ParseResults:
+        levels = _symbols_tree(line, self._delims)
+
+        first_level = levels.get_level(1)
+        if not first_level:
+            res = self._no_brekets_rule(levels)
+            # print(res)
             return res
-        res["postfix"] = text_obj[idx + 1:].strip()
-        res[part] = text_obj[:idx].strip()
 
-        return res
+        general = levels.get_level(0)
+        if not general:
+            raise ValueError("Empty material string")
+        general = general[0]
+
+        cnt = general.max_delimeter_count
+        candidates = self._find_candidates(first_level, general)
+        candidates_count = len(candidates)
+
+        if cnt > 1:
+            parts = general.split_by_delim(general.max_delimeter)
+            res = ParseResults(material=general.string, parts=parts, parts_count=len(parts))
+            return res
+
+        if candidates_count == 1:
+            candidate = candidates[0]
+            start_i, end_i = candidate.start, candidate.end
+            parts = candidate.split_by_delim(candidate.max_delimeter)
+            prefix = general.string[:start_i]
+            postfix = general.string[end_i + 1:]
+            res = ParseResults(material=general.string, prefix=prefix, postfix=postfix, parts=parts, parts_count=len(parts))
+            return res
+
+        return ParseResults(material=line, parts=[line], parts_count=1)
+
+    def _strip_all(self, results: ParseResults) -> ParseResults:
+        if results.prefix:
+            results.prefix = results.prefix.strip()
+        if results.postfix:
+            results.postfix = results.postfix.strip()
+        new_parts = []
+        for part in results.parts:
+            new_parts.append(part.strip())
+        results.parts = new_parts
+
+        return results
+
+    def parse(self, line: str) -> ParseResults:
+        resuts = self._parse(line)
+        if resuts.parts_count > 0:
+            # processing p1
+            prefix, p1 = self._clean_p1(resuts.parts[0])
+            prefix = prefix.strip()
+            p1 = p1.strip()
+            if prefix:
+                resuts.prefix = prefix
+            if p1:
+                resuts.parts[0] = p1
+            else:
+                del resuts.parts[0]
+
+            # processing last p
+            postfix, p = self._clean_last_p(resuts.parts[-1])
+            postfix = postfix.strip()
+            p = p.strip()
+            if postfix:
+                resuts.postfix = postfix
+            if p:
+                resuts.parts[-1] = p
+            else:
+                del resuts.parts[-1]
+
+        resuts = self._strip_all(resuts)
+        return resuts
 
 
-def development() -> None:
+class MetarialProcessor:
+    def __init__(self, pipeline: ParserV2) -> None:
+        self._pipeline = pipeline
+        self._matcher = MaterialMatcherORM()
+
+    async def process_line(self, line: str) -> Optional[ParseResults]:
+        if not line:
+            return None
+
+        parsed = self._pipeline.parse(line)
+
+        parts_from_lib = []
+        for part in parsed.parts:
+            target = await self._matcher.find_target(part)
+            parts_from_lib.append(target)
+
+        parsed.matches = parts_from_lib
+
+        return parsed
+
+
+async def development_async() -> None:
+    await initialize_app()
+
     with open("res.txt", "r") as file:
         row_lines = file.readlines()
         lines = [line.rstrip("\n") for line in row_lines]
 
-    parser = MaterialParser()
+    pipeline = ParserV2(DELIMETERS)
+    processor = MetarialProcessor(pipeline)
 
     results = []
-
-    max_count = 0
+    max_parts = 0
     for line in lines:
         if line:
-            result, max_cnt = parser.extended_delimeters_parser(line)
-            # result, max_cnt = parser.delimeters_parser(line)
-            if max_cnt > max_count:
-                max_count = max_cnt
+            parsed = await processor.process_line(line)
+            if parsed is None:
+                print("[WARN]: Empty line")
+                continue
+            if parsed.levels is not None:
+                print(parsed.levels)
+            if parsed.parts_count > max_parts:
+                max_parts = parsed.parts_count
+            result = {
+                    "material": parsed.material,
+                    "prefix": parsed.prefix,
+                    "postfix": parsed.postfix,
+                }
+            for i, (part, matched) in enumerate(zip(parsed.parts, parsed.matches)):
+                result[f"p{i + 1}"] = part
+                result[f"m{i + 1}"] = matched
             results.append(result)
 
-    if results:
-        for res in results:
-            for i in range(max_count):
-                key = f"p{i+1}"
-                if key not in res:
-                    res[key] = ""
+    await DatabaseManager.close()
 
-        ps = [f"p{i + 1}" for i in range(max_count)]
+    ps = []
+    for i in range(max_parts):
+        ps.append(f"p{i + 1}")
+        ps.append(f"m{i + 1}")
 
-        # fieldnames = list(results[0].keys())
-        fieldnames = ["material", "prefix"] + ps + ["postfix"] + parser.delims
-        with open("res.csv", "w", newline="", encoding="utf-8") as csvfile:
-            # fieldnames = ["material"] + [f"p{i+1}" for i in range(max_count)] + parser.delims
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=";")
+    fieldnames = ["material", "prefix"] + ps + ["postfix"]
 
-            writer.writeheader()
-
-            writer.writerows(results)
-    else:
-        print("N/A")
-
-    print(_brekets_and_delims_tree("aaa-aaa-(bb{c}d)-ee[f]", parser.delims))
+    with open("res.csv", "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=";")
+        writer.writeheader()
+        writer.writerows(results)
 
 
-def dev2() -> None:
-    parser = MaterialParser()
-    tree = _symbols_tree("aaa-aaa-(bb{c+b+e}d)-ee[f]", parser.delims)
-
+def development() -> None:
+    asyncio.run(development_async())
 
 
 if __name__ == "__main__":
-    # development()
-    dev2()
+    development()
 

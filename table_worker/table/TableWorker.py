@@ -420,6 +420,8 @@ def development():
 
         data = table.apply_extruder(StandartExtruder())
 
+        table.parse_materials()
+
         if data is not None:
             for sheet in data:
                 if sheet["header"] is None:
