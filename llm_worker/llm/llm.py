@@ -1,11 +1,13 @@
 from pathlib import Path
+import unicodedata
 
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from peft import PeftConfig, PeftModel
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
 
 class LLM:
-    def __init__(self, model_path: str) -> None:
+    def __init__(self, model_path: str | Path) -> None:
         print("LLM init start")
 
         self.model_path = str(model_path)
@@ -18,7 +20,7 @@ class LLM:
         print("base model:", base_model_name)
 
         print("loading tokenizer...")
-        self.tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(base_model_name, use_fast=False)
 
         print("loading base model...")
         base_model = AutoModelForSequenceClassification.from_pretrained(
@@ -37,12 +39,53 @@ class LLM:
     def train(self) -> None:
         ...
 
+    def _normalize_text(self, value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            text = value
+        elif isinstance(value, bytes):
+            text = value.decode("utf-8", errors="ignore")
+        elif isinstance(value, (list, tuple)):
+            parts = [self._normalize_text(x).strip() for x in value]
+            text = "\n".join(part for part in parts if part)
+        elif isinstance(value, dict):
+            text = " ".join(
+                f"{self._normalize_text(k)}: {self._normalize_text(v)}"
+                for k, v in value.items()
+            )
+        else:
+            text = str(value)
+
+        text = unicodedata.normalize("NFKC", text)
+
+        cleaned = []
+        for ch in text:
+            cat = unicodedata.category(ch)
+            if cat == "Cs":
+                continue
+            if ch in ("\n", "\r", "\t"):
+                cleaned.append(ch)
+                continue
+            if cat.startswith("C"):
+                continue
+            cleaned.append(ch)
+
+        text = "".join(cleaned)
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        return text.strip()
+
     def predict_prob_1(self, text: str) -> float:
+        text = self._normalize_text(text)
+
+        if not text:
+            text = " "
+
         inputs = self.tokenizer(
             text,
             return_tensors="pt",
             truncation=True,
-            padding=True,
+            padding=False,
             max_length=256,
         )
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
@@ -53,7 +96,7 @@ class LLM:
             probs = torch.softmax(logits, dim=-1)
 
         return float(probs[1].item())
-    
+
     def inference(self, text):
         return self.predict_prob_1(text)
 
@@ -62,13 +105,16 @@ def development() -> None:
     model_path = Path("../model_out/final_lora")
     model = LLM(model_path)
 
-    prob_1 = model.predict_prob_1("Добрый день. Просим сделать расчет.")
-    print(f"Добрый день. Просим сделать расчет.: {prob_1}")
-    print(f"Нужен счет, прошу выставить.: {model.predict_prob_1("Нужен счет, прошу выставить")}")  # ждём > 0.7
-    print(f"Заявка в работу, без пересчета.: {model.predict_prob_1("Заявка в работу, без пересчета")}")
+    examples = [
+        "Добрый день. Просим сделать расчет.",
+        "Нужен счет, прошу выставить.",
+        "Заявка в работу, без пересчета.",
+    ]
+
+    for text in examples:
+        prob_1 = model.predict_prob_1(text)
+        print(f"{text}: {prob_1}")
 
 
 if __name__ == "__main__":
     development()
-
-

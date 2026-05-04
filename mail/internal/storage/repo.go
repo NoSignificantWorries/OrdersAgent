@@ -9,6 +9,7 @@ import (
     "OrdersAgent/mail/internal/parser"
     "OrdersAgent/storage/api"
     minio "worker/minio/minio"
+    //"OrdersAgent/temporal/client/launcher"
 )
 
 // Repository — общий интерфейс
@@ -109,9 +110,17 @@ func (r *DBRepo) SaveOrder(userID int64, order any) error {
                 Status:       "wait",
             }
 
-            if err := r.db.InsertQueueItem(ctx, item); err != nil {
+            _, err := r.db.InsertQueueItem(ctx, item)
+            if err != nil {
                 return fmt.Errorf("insert queue item (uid=%d, key=%s): %w", emailUID, objectKey, err)
             }
+
+            // workflowID, runID, err := launcher.StartProcessQueueWorkflow(ctx, queueID, item.TargetUserID)
+            // if err != nil {
+            //     return fmt.Errorf("start workflow for queue item %d (uid=%d, key=%s): %w", queueID, emailUID, objectKey, err)
+            // }
+
+            // fmt.Printf("queue item created id=%d, workflow started workflowID=%s runID=%s\n", queueID, workflowID, runID)
         }
         return nil
     }
@@ -131,9 +140,17 @@ func (r *DBRepo) SaveOrder(userID int64, order any) error {
         Status:       "wait",
     }
 
-    if err := r.db.InsertQueueItem(ctx, item); err != nil {
+    _, err := r.db.InsertQueueItem(ctx, item)
+    if err != nil {
         return fmt.Errorf("insert queue item (uid=%d, no attachments): %w", emailUID, err)
     }
+
+    // workflowID, runID, err := launcher.StartProcessQueueWorkflow(ctx, queueID, item.TargetUserID)
+    // if err != nil {
+    //     return fmt.Errorf("start workflow for queue item %d (uid=%d, no attachments): %w", queueID, emailUID, err)
+    // }
+
+    // fmt.Printf("queue item created id=%d, workflow started workflowID=%s runID=%s\n", queueID, workflowID, runID)
 
     return nil
 }
