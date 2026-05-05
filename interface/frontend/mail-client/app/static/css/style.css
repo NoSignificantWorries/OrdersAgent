@@ -488,3 +488,204 @@ body {
 .accept-btn:active {
     transform: scale(0.98);
 }
+
+/* ===== ЛОАДЕР ===== */
+.email-loading-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 300px;
+}
+
+/* ===== СТАТУСЫ ===== */
+.email-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.status-badge {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.status-display {
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    display: inline-block;
+    border: 2px solid transparent;
+    white-space: nowrap;
+}
+
+/* Цвета статусов */
+.status-waiting {
+    color: #d97706;
+    background: #fef3c7;
+    border-color: #f59e0b;
+}
+
+.status-processing {
+    color: #2563eb;
+    background: #dbeafe;
+    border-color: #3b82f6;
+}
+
+.status-clarification {
+    color: #0891b2;
+    background: #cffafe;
+    border-color: #06b6d4;
+}
+
+.status-review {
+    color: #a855f7;
+    background: #f3e8ff;
+    border-color: #c084fc;
+}
+
+.status-completed {
+    color: #16a34a;
+    background: #dcfce7;
+    border-color: #22c55e;
+}
+
+/* ===== КАРТОЧКА ПИСЬМА ===== */
+.email-header {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-bottom: 25px;
+    border-bottom: 2px solid #f1f5f9;
+    margin-bottom: 25px;
+}
+
+.email-header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+}
+
+.status-block {
+    flex-shrink: 0;
+}
+
+.status-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.status-label {
+    font-size: 13px;
+    color: #64748b;
+    font-weight: 500;
+}
+
+/* ===== ВЛОЖЕНИЯ ===== */
+.email-attachments {
+    margin-bottom: 20px;
+    padding: 16px 20px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+}
+
+.email-attachments strong {
+    display: block;
+    margin-bottom: 10px;
+    color: #1e293b;
+    font-size: 14px;
+}
+
+.email-attachments ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.email-attachments li {
+    position: relative;
+    padding-left: 18px;
+    margin-bottom: 6px;
+    color: #475569;
+    font-size: 14px;
+}
+
+.email-attachments li::before {
+    content: "📎";
+    position: absolute;
+    left: 0;
+    top: 0;
+}
+
+/* ===== БЛОК ВЫБОРА КЛАССА ===== */
+.decision-block {
+    margin: 20px 0;
+    padding: 16px 20px;
+    background: #f8fafc;
+    border-radius: 16px;
+    border: 1px solid #e2e8f0;
+}
+
+.decision-label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+}
+
+.decision-select {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    font-size: 15px;
+    color: #0f172a;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.decision-select:focus {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.decision-save-btn {
+    margin-top: 12px;
+    min-height: 40px;
+    padding: 0 18px;
+    border-radius: 999px;
+    border: none;
+    background: #6366f1;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.decision-save-btn:hover {
+    background: #4f46e5;
+    box-shadow: 0 6px 16px rgba(79, 70, 229, 0.4);
+    transform: translateY(-1px);
+}
+
+.decision-save-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(79, 70, 229, 0.25);
+}

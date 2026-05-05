@@ -1,9 +1,15 @@
-.venv/
+
+secrets/
+
+**.env
+**.**.env
+.venv
 __pycache__/
 
-**.**.env
+dataset_emails/
+dataset/
+debug/
+app.log
 
 *.bkp
-private/
-secrets/
 
