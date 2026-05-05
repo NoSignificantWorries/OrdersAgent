@@ -1,59 +1,43 @@
 package orders
 
 import (
-    "fmt"
-    "os"
-    "path/filepath"
-    
-    "OrdersAgent/mail/internal/parser"
-    "OrdersAgent/mail/internal/storage"
+	"context"
+	"log"
+
+	"OrdersAgent/mail/internal/parser"
+	"OrdersAgent/mail/internal/storage"
+	temporalclient "OrdersAgent/temporal/client"
 )
 
 type Processor struct {
-    repo storage.Repository
-    userID int64
+	repo   storage.Repository
+	userID int64
 }
 
 func New(repo storage.Repository, userID int64) *Processor {
-    return &Processor{
-        repo: repo,
-        userID: userID,
-    }
+	return &Processor{
+		repo:   repo,
+		userID: userID,
+	}
 }
 
 func (p *Processor) ProcessEmail(email *parser.Email) error {
-    fmt.Printf("   От: %s\n", email.From)
-    fmt.Printf("   Тема: %s\n", email.Subject)
-    fmt.Printf("   Дата: %s\n", email.Date)
-    fmt.Printf("   Тело: %s\n", email.Body)
-    fmt.Printf("    UID: %d\n", email.UID)
-    
-    for _, file := range email.Files {
-        if err := p.repo.SaveFile(file); err != nil {
-            fmt.Printf("%s: %v\n", file.Name, err)
-            continue
-        }
-    }
+	log.Printf("email uid=%d from=%q subject=%q attachments=%d",
+		email.UID, email.From, email.Subject, len(email.Files))
 
-    if err := p.repo.SaveOrder(p.userID, email); err != nil {
-        return err
-    }
-    
-    fmt.Println("---")
-    return nil
-}
+	// Сначала сохраняем письмо и все вложения в process_queue / MinIO
+	if err := p.repo.SaveOrder(p.userID, email); err != nil {
+		return err
+	}
 
-func (p *Processor) saveAttachment(file parser.Attachment) error {
-    dir := "attachment"
-    if err := os.MkdirAll(dir, 0755); err != nil {
-        return fmt.Errorf("create dir: %w", err)
-    }
-    
-    fullPath := filepath.Join(dir, file.Name)
-    
-    if err := os.WriteFile(fullPath, file.Data, 0644); err != nil {
-        return fmt.Errorf("write file: %w", err)
-    }
-    
-    return nil
+	// После успешного сохранения стартуем один workflow на всё письмо
+	workflowID, runID, err := temporalclient.StartProcessEmailWorkflow(context.Background(), int64(email.UID), p.userID)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("email workflow started: email_uid=%d workflowID=%s runID=%s",
+		email.UID, workflowID, runID)
+
+	return nil
 }

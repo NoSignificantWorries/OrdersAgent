@@ -1,22 +1,24 @@
 package storage
 
 import (
+    "context"
     "fmt"
     "os"
-    "path/filepath"
-    "context"
     "time"
 
     "OrdersAgent/mail/internal/parser"
     "OrdersAgent/storage/api"
+    minio "worker/minio/minio"
+    //"OrdersAgent/temporal/client/launcher"
 )
 
+// Repository — общий интерфейс
 type Repository interface {
     SaveFile(att parser.Attachment) error
     SaveOrder(userID int64, order any) error
 }
 
-// Файловая реализация (старая).
+// FileRepo — старая файловая реализация (если больше не нужна, можно удалить целиком)
 type FileRepo struct{}
 
 func NewFileRepo() Repository {
@@ -24,44 +26,39 @@ func NewFileRepo() Repository {
 }
 
 func (f *FileRepo) SaveFile(att parser.Attachment) error {
-    dir := "attachment"
-    if err := os.MkdirAll(dir, 0755); err != nil {
-        return fmt.Errorf("create dir %s: %w", dir, err)
-    }
-
-    fullPath := filepath.Join(dir, att.Name)
-    if err := os.WriteFile(fullPath, att.Data, 0644); err != nil {
-        return fmt.Errorf("save %s: %w", att.Name, err)
-    }
-
-    fmt.Printf("Сохранено: %s (%d байт)\n", fullPath, len(att.Data))
-    return nil
+    // больше не используется
+    return fmt.Errorf("FileRepo.SaveFile is deprecated")
 }
 
 func (f *FileRepo) SaveOrder(userID int64, order any) error {
-    fmt.Println("Заказ сохранен (заглушка, FileRepo)")
+    // заглушка
     return nil
 }
 
-// DBRepo — реализация Repository, которая пишет в Postgres
+// DBRepo — пишет метаданные в Postgres и файлы в MinIO
 type DBRepo struct {
-    db *api.DB
+    db    *api.DB
+    store *minio.CloudStorage
 }
 
-func NewDBRepo(db *api.DB) Repository {
-    return &DBRepo{db: db}
+// NewDBRepo принимает и БД, и объектное хранилище
+func NewDBRepo(db *api.DB, store *minio.CloudStorage) Repository {
+    return &DBRepo{
+        db:    db,
+        store: store,
+    }
 }
 
+// SaveFile сейчас не используется, всё делаем через SaveOrder
 func (r *DBRepo) SaveFile(att parser.Attachment) error {
-    // пока вложения сохраняем только через SaveOrder (не сохраняем)
-    fmt.Printf("SaveFile: %s (пока игнорируем)\n", att.Name)
+    // намеренно ничего не делаем
     return nil
 }
 
 func (r *DBRepo) SaveOrder(userID int64, order any) error {
     email, ok := order.(*parser.Email)
     if !ok {
-        return fmt.Errorf("expected *parser.Email, got %T", order)
+        return fmt.Errorf("SaveOrder: expected *parser.Email, got %T", order)
     }
 
     ctx := context.Background()
@@ -81,40 +78,79 @@ func (r *DBRepo) SaveOrder(userID int64, order any) error {
         }
     }
 
-    // по заявке на каждый
+    bucket := os.Getenv("MINIO_BUCKET")
+    if bucket == "" {
+        bucket = "orders-attachments"
+    }
+
     if len(email.Files) > 0 {
-        for _, f := range email.Files {
+        for i, f := range email.Files {
             name := f.Name
+
+            // object key по схеме {email_uid}/{index}_{filename}
+            objectKey := fmt.Sprintf("%d/%d_%s", emailUID, i+1, name)
+
+            // 1. грузим файл в MinIO
+            if err := r.store.Upload(ctx, objectKey, f.Data); err != nil {
+                return fmt.Errorf("upload attachment %s (key=%s): %w", name, objectKey, err)
+            }
+
+            // 2. пишем строку в process_queue
             item := api.QueueItem{
-                AssignedTo: &managerID,
+                AssignedTo:   &managerID,
                 TargetUserID: userID,
-                Subject: email.Subject,
-                Body: email.Body,
-                EmailUID:   &emailUID,
+                Subject:      email.Subject,
+                Body:         email.Body,
+                EmailUID:     &emailUID,
                 EmailFrom:    emailFrom,
                 EmailDate:    emailDate,
-                DocName: &name,
-                DocData: f.Data,
-                Status: "wait",
+                DocName:      &name,
+                ObjectBucket: &bucket,
+                ObjectKey:    &objectKey,
+                Status:       "wait",
             }
-            if err := r.db.InsertQueueItem(ctx, item); err != nil {
-                return err
+
+            _, err := r.db.InsertQueueItem(ctx, item)
+            if err != nil {
+                return fmt.Errorf("insert queue item (uid=%d, key=%s): %w", emailUID, objectKey, err)
             }
+
+            // workflowID, runID, err := launcher.StartProcessQueueWorkflow(ctx, queueID, item.TargetUserID)
+            // if err != nil {
+            //     return fmt.Errorf("start workflow for queue item %d (uid=%d, key=%s): %w", queueID, emailUID, objectKey, err)
+            // }
+
+            // fmt.Printf("queue item created id=%d, workflow started workflowID=%s runID=%s\n", queueID, workflowID, runID)
         }
         return nil
     }
+
+    // если вложений нет — одна запись без document_name/object_key
     item := api.QueueItem{
-                AssignedTo: &managerID,
-                TargetUserID: userID,
-                Subject: email.Subject,
-                Body: email.Body,
-                EmailUID:   &emailUID,
-                EmailFrom:    emailFrom,
-                EmailDate:    emailDate,
-                DocName: nil,
-                DocData: nil,
-                Status: "wait",
-            }
-    // если файлов нет - заявка без document_name
-    return r.db.InsertQueueItem(ctx, item)
+        AssignedTo:   &managerID,
+        TargetUserID: userID,
+        Subject:      email.Subject,
+        Body:         email.Body,
+        EmailUID:     &emailUID,
+        EmailFrom:    emailFrom,
+        EmailDate:    emailDate,
+        DocName:      nil,
+        ObjectBucket: nil,
+        ObjectKey:    nil,
+        Status:       "wait",
+    }
+
+    _, err := r.db.InsertQueueItem(ctx, item)
+    if err != nil {
+        return fmt.Errorf("insert queue item (uid=%d, no attachments): %w", emailUID, err)
+    }
+
+    // workflowID, runID, err := launcher.StartProcessQueueWorkflow(ctx, queueID, item.TargetUserID)
+    // if err != nil {
+    //     return fmt.Errorf("start workflow for queue item %d (uid=%d, no attachments): %w", queueID, emailUID, err)
+    // }
+
+    // fmt.Printf("queue item created id=%d, workflow started workflowID=%s runID=%s\n", queueID, workflowID, runID)
+
+    return nil
 }

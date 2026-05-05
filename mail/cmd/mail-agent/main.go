@@ -1,52 +1,53 @@
 package main
 
 import (
-    "fmt"
+    "flag"
     "log"
     "os"
     "os/signal"
     "syscall"
     "time"
-    "flag"
-    
+
+    "github.com/joho/godotenv"
+
     "OrdersAgent/mail/internal/client"
     "OrdersAgent/mail/internal/config"
-    "OrdersAgent/mail/internal/parser"
     "OrdersAgent/mail/internal/orders"
+    "OrdersAgent/mail/internal/parser"
     "OrdersAgent/mail/internal/storage"
-    "github.com/joho/godotenv"
 
     "OrdersAgent/storage/api"
     "OrdersAgent/storage/configdb"
+    minio "worker/minio/minio"
 )
 
 func main() {
+    // грузим .env для DB и MinIO
     _ = godotenv.Load("storage/.env")
 
     userID := flag.Int("user-id", 0, "ID пользователя для обработки почты")
-	flag.Parse()
+    flag.Parse()
+    if *userID <= 0 {
+        log.Fatal("user-id is required, example: --user-id=2")
+    }
 
-	if *userID <= 0 {
-		log.Fatal("user-id is required, example: --user-id=2")
-	}
+    // стартовый лог один раз
+    log.Printf("mail agent started | user_id=%d", *userID)
 
-	log.Printf("starting mail agent for user_id=%d", *userID)
-
-    // Загружаем конфиг IMAP для КОНКРЕТНОГО ящика
+    // конфиг IMAP для ящика
     cfg, err := config.Load("mail/internal/config/config.json")
     if err != nil {
         log.Fatalf("config: %v", err)
     }
-    
-    fmt.Printf("OrdersAgent v1.0\n")
-    fmt.Printf("%s:%d | %s\n", cfg.Host, cfg.Port, cfg.Username)
-    
+
+    // IMAP клиент
     imapClient, err := client.New(cfg)
     if err != nil {
         log.Fatalf("IMAP client: %v", err)
     }
     defer imapClient.Close()
-    
+
+    // конфиг и подключение к Postgres
     dbCfg := configdb.FromEnv()
     db, err := api.ConnectPostgres(dbCfg)
     if err != nil {
@@ -54,22 +55,33 @@ func main() {
     }
     defer db.Conn.Close()
 
-    repo := storage.NewDBRepo(db)
+    // инициализация MinIO
+    endpoint := os.Getenv("MINIO_ENDPOINT")
+    accessKey := os.Getenv("MINIO_ACCESS_KEY")
+    secretKey := os.Getenv("MINIO_SECRET_KEY")
+    bucket := os.Getenv("MINIO_BUCKET")
+    useSSL := false
+
+    store, err := minio.NewCloudStorage(endpoint, accessKey, secretKey, bucket, useSSL)
+    if err != nil {
+        log.Fatalf("init cloud storage: %v", err)
+    }
+
+    repo := storage.NewDBRepo(db, store)
     processor := orders.New(repo, int64(*userID))
 
-    ticker := time.NewTicker(10 * time.Second)
+    ticker := time.NewTicker(30 * time.Second)
     defer ticker.Stop()
-    
+
     c := make(chan os.Signal, 1)
     signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-    
+
     for {
         select {
         case <-ticker.C:
-            fmt.Println("\nПроверка почты...")
             ProcessEmails(imapClient, c, processor)
         case <-c:
-            fmt.Printf("\nОстановка...")
+            log.Printf("mail agent stopped by signal")
             return
         }
     }
@@ -81,39 +93,38 @@ func ProcessEmails(imap *client.Client, sigChan chan os.Signal, processor *order
         log.Printf("fetch unread: %v", err)
         return
     }
-    
+
     if len(uids) == 0 {
-        fmt.Println("No new emails")
         return
     }
-    
+
+    log.Printf("found %d unread emails", len(uids))
+
     for _, uid := range uids {
         select {
         case <-sigChan:
-            fmt.Println("Прерывание...")
+            log.Printf("interrupt while processing, stopping")
             return
         default:
         }
 
-        fmt.Printf("Processing UID: %d\n", uid)
-        
         fetchCmd, err := imap.FetchMessage(uid)
         if err != nil {
-            log.Printf("fetch message: %v", err)
+            log.Printf("fetch message uid=%d: %v", uid, err)
             continue
         }
-        
+
         email, err := parser.ParseMessage(uid, fetchCmd)
         if err != nil {
-            log.Printf("parse: %v", err)
+            log.Printf("parse uid=%d: %v", uid, err)
             fetchCmd.Close()
             continue
         }
-        
+
         if err := processor.ProcessEmail(email); err != nil {
-            log.Printf("process email: %v", err)
+            log.Printf("process uid=%d: %v", uid, err)
         }
-        
+
         fetchCmd.Close()
         imap.MarkRead(uid)
     }

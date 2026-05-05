@@ -7,7 +7,6 @@ import (
     "strings"
     "mime"
     "encoding/base64"
-    "log"
 
     htmllib "golang.org/x/net/html"
 
@@ -213,7 +212,6 @@ func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, erro
 }
 
 func cleanBodyText(body string) string {
-
     // Сначала вычищаем рамки forwarded прямо в тексте,
     // а не выкидываем строки целиком.
     replacements := []string{
@@ -229,13 +227,11 @@ func cleanBodyText(body string) string {
     lines := strings.Split(body, "\n")
     var cleaned []string
 
-    for i, raw := range lines {
-        log.Printf("[LINE %d RAW]: %q", i, raw)
+    // важно: итерируемся по значениям, а не по индексам
+    for _, raw := range lines {
         line := strings.TrimSpace(raw)
-        log.Printf("[LINE %d TRIM]: %q", i, line)
 
         if line == "" {
-            log.Printf("[LINE %d] -> SKIP: empty", i)
             continue
         }
 

@@ -1,7 +1,7 @@
 from app.db import get_db_pool
 
 
-async def list_queue_for_user(user: dict, status: str = "", limit: int = 50) -> list[dict]:
+async def list_queue_for_user(user: dict, status: str = "", limit: int | None = None) -> list[dict]:
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:

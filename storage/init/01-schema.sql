@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS process_queue (
   email_from TEXT,
   email_date TIMESTAMPTZ,
   document_name VARCHAR(255),
+  object_bucket TEXT,
+  object_key TEXT,
   document_data BYTEA,
   result_document_name VARCHAR(255),
   result_document_data BYTEA,

@@ -31,8 +31,8 @@ func main() {
     }
     defer imapClient.Close()
 
-    repo := storage.NewDatasetRepo("dataset_emails")
-    processor := orders.New(repo)
+    repo := storage.NewDatasetRepo("dataset_emails", 2)
+    processor := orders.New(repo, 2)
 
     c := make(chan os.Signal, 1)
     signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)

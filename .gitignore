@@ -1,4 +1,11 @@
 
+.venv/
+.qodo/
+.vscode/
+
+secrets/
+
+
 secrets/
 
 **.env
@@ -12,4 +19,5 @@ debug/
 app.log
 
 *.bkp
+private/
 
