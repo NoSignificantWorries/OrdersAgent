@@ -15,7 +15,6 @@
             <div class="header-right">
                 <span class="user-email">{{ user.email }}</span>
                 <span class="user-name">{{ user.name }}</span>
-                <!-- Кнопка выхода как обычная ссылка, не JavaScript -->
                 <a href="/logout" class="logout-btn">Выйти</a>
             </div>
         </header>
@@ -32,11 +31,43 @@
                 </div>
             </aside>
 
-            <!-- Центральная область -->
+            <!-- Правая область с вкладками -->
             <main class="email-content">
-                <div class="email-view" id="emailView">
-                    <div class="email-placeholder">
-                        👈 Выберите письмо из списка
+                <div class="tabs-container">
+                    <div class="tabs-header">
+                        <button class="tab-button active" data-tab="emails">Письма</button>
+                        <button class="tab-button" data-tab="chat">Чат</button>
+                    </div>
+                    <div class="tabs-content">
+                        <!-- Вкладка Письма -->
+                        <div class="tab-pane active" id="tab-emails">
+                            <div class="email-view" id="emailView">
+                                <div class="email-placeholder">
+                                    👈 Выберите письмо из списка
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Вкладка Чат -->
+                        <div class="tab-pane" id="tab-chat">
+                            <div class="chat-container">
+                                <div class="chat-materials" id="chat-materials-list">
+                                    <!-- JS загрузит сюда чекбоксы материалов -->
+                                </div>
+                                <div class="chat-message">
+                                    <label for="chat-input">Ваш ответ/вопрос:</label>
+                                    <textarea id="chat-input" rows="4" placeholder="Введите сообщение..."></textarea>
+                                </div>
+                                <div class="chat-blacklist">
+                                    <label>
+                                        <input type="checkbox" id="blacklist-checkbox">
+                                        Черный список
+                                    </label>
+                                </div>
+                                <div class="chat-submit">
+                                    <button id="chat-send-btn" class="chat-send-button">Отправить</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </main>
