@@ -409,7 +409,7 @@ class TableWorker:
     def apply_extruder(self, extruder: TableExtruder):
         if self.data is None:
             # raise ValueError("[ERROR]: Empty table data.")
-            print("[ERROR]: Empy table data")
+            # print("[ERROR]: Empy table data")
             return None
 
         self.wb = extruder.process_data(self.data)
@@ -426,7 +426,7 @@ class TableWorker:
         materials = dict()
         for sheet in self.parsed_data:
             if sheet["header"] is None:
-                print("No data on sheet")
+                # print("No data on sheet")
                 continue
             material_column_idx = sheet["header"].index("material")
             for i, row in enumerate(sheet["data"]):
