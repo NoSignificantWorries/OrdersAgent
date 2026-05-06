@@ -20,49 +20,78 @@
         </header>
 
         <div class="main-layout">
-            <!-- Левая панель - список писем -->
+            <!-- ЛЕВАЯ ПАНЕЛЬ - СПИСОК ПИСЕМ -->
             <aside class="email-list">
                 <div class="list-header">
                     <h3>Входящие</h3>
-                    <span class="email-count">5 писем</span>
+                    <div class="header-controls">
+                        <span class="email-count" id="email-count-display">0 писем</span>
+                        <button id="filter-toggle-btn" class="filter-toggle" title="Фильтры">
+                            <img src="/static/images/filter-icon.png" alt="Фильтры" class="filter-icon">
+                        </button>
+                    </div>
+                </div>
+                <!-- ПАНЕЛЬ ФИЛЬТРОВ (скрыта по умолчанию) -->
+                <div id="filter-panel" class="filter-panel" style="display: none;">
+                    <div class="filter-group">
+                        <label>Статус:</label>
+                        <select id="status-filter-select">
+                            <option value="all">Все</option>
+                            <option value="waiting">Ожидание</option>
+                            <option value="processing">Обработка</option>
+                            <option value="clarification">Класс определён</option>
+                            <option value="completed">Выполнена</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Класс:</label>
+                        <select id="class-filter-select">
+                            <option value="all">Все</option>
+                            <option value="auto_0">Заявка</option>
+                            <option value="auto_1">Расчёт</option>
+                            <option value="review">Требуется ручной выбор</option>
+                            <option value="">Не задан</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Сортировка:</label>
+                        <div class="sort-buttons">
+                            <button id="sort-newest-btn" class="sort-btn active">Новые сверху</button>
+                            <button id="sort-oldest-btn" class="sort-btn">Старые сверху</button>
+                        </div>
+                    </div>
+                    <div class="filter-actions">
+                        <button id="apply-filters-btn" class="apply-filters">Применить</button>
+                        <button id="close-filter-panel" class="close-filter">✖</button>
+                    </div>
                 </div>
                 <div class="emails-container" id="emailsContainer">
-                    <!-- JS заполнит -->
+                    <!-- Список писем будет вставлен сюда -->
                 </div>
             </aside>
 
-            <!-- Правая область с вкладками -->
+            <!-- ПРАВАЯ ОБЛАСТЬ С ВКЛАДКАМИ -->
             <main class="email-content">
+                <div class="search-container">
+                    <div class="search-wrapper">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" id="search-input" placeholder="Поиск" autocomplete="off">
+                    </div>
+                </div>
                 <div class="tabs-container">
                     <div class="tabs-header">
                         <button class="tab-button active" data-tab="emails">Письма</button>
                         <button class="tab-button" data-tab="chat">Чат</button>
                     </div>
                     <div class="tabs-content">
-                        <!-- Вкладка Письма -->
                         <div class="tab-pane active" id="tab-emails">
                             <div class="email-view" id="emailView">
-                                <div class="email-placeholder">
-                                    👈 Выберите письмо из списка
-                                </div>
+                                <div class="email-placeholder">👈 Выберите письмо из списка</div>
                             </div>
                         </div>
-                        <!-- Вкладка Чат -->
                         <div class="tab-pane" id="tab-chat">
                             <div class="chat-container">
-                                <div class="chat-materials" id="chat-materials-list">
-                                    <!-- JS загрузит сюда чекбоксы материалов -->
-                                </div>
-                                <div class="chat-message">
-                                    <label for="chat-input">Ваш ответ/вопрос:</label>
-                                    <textarea id="chat-input" rows="4" placeholder="Введите сообщение..."></textarea>
-                                </div>
-                                <div class="chat-blacklist">
-                                    <label>
-                                        <input type="checkbox" id="blacklist-checkbox">
-                                        Черный список
-                                    </label>
-                                </div>
+                                <div id="chat-rows-container"></div>
                                 <div class="chat-submit">
                                     <button id="chat-send-btn" class="chat-send-button">Отправить</button>
                                 </div>
