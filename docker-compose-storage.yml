@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   postgres:
@@ -53,6 +53,8 @@ services:
       mc alias set myminio http://minio:9000 minioadmin minioadmin;
       mc mb myminio/orders-attachments --ignore-existing;
       mc version enable myminio/orders-attachments;
+      mc mb myminio/results --ignore-existing;
+      mc version enable myminio/results;
       echo 'MinIO initialized successfully!';
       "
     networks:
@@ -66,4 +68,3 @@ networks:
 volumes:
   minio_data:
   postgres_data:
-

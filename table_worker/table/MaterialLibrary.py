@@ -3,7 +3,7 @@ import asyncio
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
-from sqlalchemy import Column, String, select
+from sqlalchemy import Column, String, Boolean, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 
@@ -36,7 +36,8 @@ class Mapping(Base):
     __tablename__ = 'mappings'
     
     source = Column(String, primary_key=True, index=True)
-    target = Column(String, nullable=False)
+    target = Column(String, nullable=True)
+    black_list = Column(Boolean, nullable=False, default=False)
 
 
 class DatabaseManager:
@@ -95,12 +96,12 @@ class MaterialMatcherORM:
         async with DatabaseManager.get_session() as session:
             result = await session.get(Mapping, source)
             if result:
-                return result.target
+                return result.target, result.black_list
             return None
     
-    async def add_source(self, source: str, target: str) -> None:
+    async def add_source(self, source: str, target: str, black_list: bool) -> None:
         async with DatabaseManager.get_session() as session:
-            mapping = Mapping(source=source, target=target)
+            mapping = Mapping(source=source, target=target, black_list=black_list)
             session.add(mapping)
             try:
                 await session.commit()
@@ -117,7 +118,7 @@ class MaterialMatcherORM:
             result = await session.execute(query)
             mappings = result.scalars().all()
             
-            result_dict = {m.source: m.target for m in mappings}
+            result_dict = {m.source: (m.target, m.black_list) for m in mappings}
             
             for source in sources:
                 if source not in result_dict:
@@ -125,10 +126,10 @@ class MaterialMatcherORM:
         
         return result_dict
 
-    async def batch_add(self, mappings: List[Tuple[str, str]]) -> None:
+    async def batch_add(self, mappings: List[Tuple[str, str, bool]]) -> None:
         async with DatabaseManager.get_session() as session:
-            for source, target in mappings:
-                mapping = Mapping(source=source, target=target)
+            for source, target, black_list in mappings:
+                mapping = Mapping(source=source, target=target, black_list=black_list)
                 session.add(mapping)
             try:
                 await session.commit()
@@ -151,7 +152,7 @@ def development() -> None:
     async def run():
         await initialize_app()
 
-        await lib.batch_add([("4top", "test"), ("4", "4GO"), ("6", "6MTP")])
+        await lib.batch_add([("4top", "test", False), ("4", "4GO", False), ("6", "6MTP", False)])
         res = await lib.batch_find(["4top", "6", "12", "4"])
         print(res)
 

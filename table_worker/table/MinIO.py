@@ -20,7 +20,7 @@ class MinIOClient:
         return cls._instance
 
 
-def development():
+def development() -> None:
     bucket_name = "orders-attachments"
 
     client = MinIOClient().get_client()

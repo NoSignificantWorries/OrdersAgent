@@ -1,27 +1,32 @@
 import asyncio
-from operator import is_
-import re
 import json
+import re
 from functools import partial
 from html import escape
+from io import BytesIO
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 # data working
 import numpy as np
-import pandas as pd
-from sqlalchemy import column
-import xarray as xr
+
 # tables processing
 import openpyxl
-import xlrd
-
-from rapidfuzz import fuzz, process
-
+import pandas as pd
 import tqdm
+import xarray as xr
+import xlrd
+from rapidfuzz import fuzz, process
+from sqlalchemy import column
 
-from MaterialParser import MaterialProcessor, DatabaseManager, initialize_app, ParserV2, DELIMETERS, ParseResults
-
+from .MaterialParser import (
+    DELIMETERS,
+    DatabaseManager,
+    MaterialProcessor,
+    ParseResults,
+    ParserV2,
+    initialize_app,
+)
 
 _basic_table = """
 <!DOCTYPE html>
@@ -53,7 +58,7 @@ _basic_table = """
 
 
 def _get_filename(path: Path):
-    filename = "".join(path.name.split('.')[:-1])
+    filename = "".join(path.name.split(".")[:-1])
     return filename
 
 
@@ -129,10 +134,10 @@ class StandartExtruder(TableExtruder):
     def __init__(self) -> None:
         super().__init__(name="Standart")
         self.header_patterns = [
-            { "material": 1, "width": 1, "height": 1, "amount": 1 },
-            { "material": 1, "length": 1, "height": 1, "amount": 1 },
-            { "material": 1, "width": 1, "length": 1, "amount": 1 },
-            { "material": 1, "size": 2, "amount": 1 }
+            {"material": 1, "width": 1, "height": 1, "amount": 1},
+            {"material": 1, "length": 1, "height": 1, "amount": 1},
+            {"material": 1, "width": 1, "length": 1, "amount": 1},
+            {"material": 1, "size": 2, "amount": 1},
         ]
         self.header_classes = {
             "material": "text",
@@ -140,7 +145,7 @@ class StandartExtruder(TableExtruder):
             "length": "number",
             "width": "number",
             "height": "number",
-            "amount": "number"
+            "amount": "number",
         }
         self.sheets_data = None
 
@@ -175,7 +180,6 @@ class StandartExtruder(TableExtruder):
         if all_empty:
             return None
         return wb
-
 
     def process_data(self, table: xr.DataArray):
         def check_row(row):
@@ -237,17 +241,18 @@ def fuzzy_match(text, pattern, threshold=50) -> bool:
     val = fuzz.ratio(text, pattern)
     return val >= threshold
 
+
 def match_class(cell, config: ColumnsConfig) -> str:
     if pd.isna(cell):
         return "empty"
     cell = str(cell)
     cell = re.sub(r"\s*", "", cell)
 
-    for (cls, pattern) in config.cell_regex.items():
+    for cls, pattern in config.cell_regex.items():
         if re.fullmatch(pattern, cell):
             return cls
 
-    for (cls, associations) in config.col_asc.items():
+    for cls, associations in config.col_asc.items():
         for asc in associations:
             if fuzzy_match(cell.lower(), asc, 90):
                 return cls
@@ -269,10 +274,13 @@ async def ask_user_about_materials(materials):
 
 
 class TableWorker:
-    def __init__(self, file: Path, config: ColumnsConfig) -> None:
-        self.path = file
-        self.format = file.suffix
-        self.name = _get_filename(file)
+    def __init__(
+        self, data: Optional[BytesIO], filepath: Path, config: ColumnsConfig
+    ) -> None:
+        self.bytes_data = data
+        self.path = filepath
+        self.format = filepath.suffix
+        self.name = _get_filename(filepath)
         self.attr = ["value", "class"]
         self.data = None
         self.parsed_data = None
@@ -290,7 +298,12 @@ class TableWorker:
 
     def _open_and_clean_xls(self):
         try:
-            wb = xlrd.open_workbook(str(self.path), formatting_info=False)
+            if self.bytes_data:
+                wb = xlrd.open_workbook(
+                    file_contents=self.bytes_data.read(), formatting_info=False
+                )
+            else:
+                wb = xlrd.open_workbook(str(self.path), formatting_info=False)
         except Exception:
             return
 
@@ -306,11 +319,11 @@ class TableWorker:
 
             df = pd.DataFrame(data)
             df = df.astype(str)
-            df = df.astype(str).replace('nan', np.nan)
-            df = df.replace(r'^\s*$', np.nan, regex=True)
+            df = df.astype(str).replace("nan", np.nan)
+            df = df.replace(r"^\s*$", np.nan, regex=True)
 
-            df.dropna(axis=0, how='all', inplace=True)
-            df.dropna(axis=1, how='all', inplace=True)
+            df.dropna(axis=0, how="all", inplace=True)
+            df.dropna(axis=1, how="all", inplace=True)
             df = df.reset_index(drop=True)
 
             if not df.empty:
@@ -319,9 +332,14 @@ class TableWorker:
 
         self._sheets_to_xarray(sheets_data)
 
-
     def _open_and_clean_xlsx(self):
-        wb = openpyxl.load_workbook(self.path)
+        try:
+            if self.bytes_data:
+                wb = openpyxl.load_workbook(self.bytes_data)
+            else:
+                wb = openpyxl.load_workbook(self.path)
+        except Exception as err:
+            return
 
         sheets_data = []
         sheets = wb.sheetnames
@@ -331,11 +349,11 @@ class TableWorker:
             data = sheet.values
             df = pd.DataFrame(data)
             df = df.astype(str)
-            df = df.astype(str).replace('nan', np.nan)
-            df = df.replace(r'^\s*$', np.nan, regex=True)
+            df = df.astype(str).replace("nan", np.nan)
+            df = df.replace(r"^\s*$", np.nan, regex=True)
 
-            df.dropna(axis=0, how='all', inplace=True)
-            df.dropna(axis=1, how='all', inplace=True)
+            df.dropna(axis=0, how="all", inplace=True)
+            df.dropna(axis=1, how="all", inplace=True)
             df = df.reset_index(drop=True)
 
             if not df.empty:
@@ -355,9 +373,13 @@ class TableWorker:
         max_cols = max(shape[1] for shape in self.origin_shapes)
 
         n = len(sheets)
-        aligned_data = np.full((n, max_rows, max_cols, len(self.attr)), np.nan, dtype=object)
+        aligned_data = np.full(
+            (n, max_rows, max_cols, len(self.attr)), np.nan, dtype=object
+        )
 
-        for i, (sheet_data, (n_rows, n_cols)) in enumerate(zip(sheets, self.origin_shapes)):
+        for i, (sheet_data, (n_rows, n_cols)) in enumerate(
+            zip(sheets, self.origin_shapes)
+        ):
             aligned_data[i, :n_rows, :n_cols, 0] = sheet_data
 
         self.data = xr.DataArray(
@@ -367,8 +389,8 @@ class TableWorker:
                 "sheet": [f"sheet_{i}" for i in range(n)],
                 "row": range(max_rows),
                 "column": range(max_cols),
-                "attr": self.attr
-            }
+                "attr": self.attr,
+            },
         )
 
     def match_class_to_data(self):
@@ -423,9 +445,9 @@ class TableWorker:
             parsed = await processor.process_line(material)
             if material not in parsed_materials:
                 parsed_materials[material] = {
-                        "postfix": parsed.postfix,
-                        "parts": dict()
-                    }
+                    "postfix": parsed.postfix,
+                    "parts": dict(),
+                }
             for i, (p, m) in enumerate(zip(parsed.parts, parsed.matches)):
                 parsed_materials[material]["parts"][p] = m
                 if m is None:
@@ -465,11 +487,34 @@ class TableWorker:
             ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
             ws.merge_cells(start_row=1, start_column=11, end_row=1, end_column=13)
             ws.merge_cells(start_row=1, start_column=14, end_row=1, end_column=18)
-            for col_idx, header_content in [(10, "Характеристики"), (13, "Доп. информация")]:
+            for col_idx, header_content in [
+                (10, "Характеристики"),
+                (13, "Доп. информация"),
+            ]:
                 cell = ws.cell(row=1, column=col_idx + 1, value=header_content)
 
-            for col_idx, header_content in enumerate(["Номенклатура 1С", "П1", "Р1", "П2", "Р2", "П3", "Р3", "П4",
-                "Герметик", "Тип изделия", "X", "Y", "Кол-во", "Маркировка", "ПЗ", "ШК", "Номер фигуры", "Уточнения"]):
+            for col_idx, header_content in enumerate(
+                [
+                    "Номенклатура 1С",
+                    "П1",
+                    "Р1",
+                    "П2",
+                    "Р2",
+                    "П3",
+                    "Р3",
+                    "П4",
+                    "Герметик",
+                    "Тип изделия",
+                    "X",
+                    "Y",
+                    "Кол-во",
+                    "Маркировка",
+                    "ПЗ",
+                    "ШК",
+                    "Номер фигуры",
+                    "Уточнения",
+                ]
+            ):
                 cell = ws.cell(row=2, column=col_idx + 1, value=header_content)
 
             ws.row_dimensions[1].height = 15
@@ -478,20 +523,30 @@ class TableWorker:
             current_row = 3
             for line in sheet_data_data:
                 material, x, y, amount = line
-
-                for i, (_, matched) in enumerate(self.parsed_materials[material]["parts"].items(), start=2):
-                    cell = ws.cell(row=current_row, column=i, value=matched)
+                for i, (_, matched) in enumerate(
+                    self.parsed_materials[material]["parts"].items(), start=2
+                ):
+                    if matched:
+                        value, black_list = matched
+                        cell = ws.cell(row=current_row, column=i, value=value)
+                    else:
+                        cell = ws.cell(row=current_row, column=i, value=matched)
 
                 cell = ws.cell(row=current_row, column=1, value=material)
                 cell = ws.cell(row=current_row, column=11, value=x)
                 cell = ws.cell(row=current_row, column=12, value=y)
                 cell = ws.cell(row=current_row, column=13, value=amount)
-                cell = ws.cell(row=current_row, column=18, value=self.parsed_materials[material]["postfix"])
+                cell = ws.cell(
+                    row=current_row,
+                    column=18,
+                    value=self.parsed_materials[material]["postfix"],
+                )
                 current_row += 1
 
         if all_empty:
-            return
+            return None
         self.wb = wb
+        return wb
 
     def save_wb(self, path: Path):
         if self.wb is None:
@@ -503,7 +558,7 @@ class TableWorker:
 
 async def development_async():
     await initialize_app()
-    
+
     private_dir = Path("~/Projects/OrdersAgent/private").expanduser()
     tables_path = private_dir / Path("tables")
     result_path = private_dir / Path("results/tables")
@@ -525,7 +580,7 @@ async def development_async():
     for table_path in tables_path.iterdir():
         print("==>", table_path.name)
         count_of_files += 1
-        table = TableWorker(table_path, conf)
+        table = TableWorker(None, table_path, conf)
 
         table.open_and_clean()
 
@@ -538,7 +593,7 @@ async def development_async():
                 if sheet["header"] is None:
                     print("[WARN]: Empty sheet")
                     continue
-                
+
                 await table.parse_materials(processor)
 
                 table._make_xlsx()
@@ -581,4 +636,3 @@ def development() -> None:
 
 if __name__ == "__main__":
     development()
-

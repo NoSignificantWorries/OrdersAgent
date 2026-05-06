@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from MaterialLibrary import MaterialMatcherORM, DatabaseManager, initialize_app
+from .MaterialLibrary import MaterialMatcherORM, DatabaseManager, initialize_app
 
 
 DELIMETERS = ["-", "–", "—", "+", "x", "х", "*"]
@@ -209,7 +209,7 @@ class ParseResults:
     postfix: Optional[str] = None
     levels: Optional[BlockLevels] = None
     parts: List[str] = field(default_factory=list)
-    matches: List[str] = field(default_factory=list)
+    matches: List[Tuple[ str, bool ]] = field(default_factory=list)
     parts_count: int = 0
 
 
@@ -244,7 +244,7 @@ class ParserV2:
                 candidates.append(obj)
         return candidates
 
-    def _clean_p1(self, text_obj: str):
+    def _clean_p1_old(self, text_obj: str):
         sep = "\s*"
         mat = "СП[ДО]?"
         size = f"\(?\d*\)?{sep}(мм)?"
@@ -260,6 +260,30 @@ class ParserV2:
         if match:
             prefix = match.group(1) or ""
             p1 = match.group(3) or ""
+
+        return prefix, p1
+
+    def _clean_p1(self, text_obj: str):
+        mat_no_space = r"СП[ДО]?\d+\s*(?:мм|:)?"
+        mat_brackets = r"СП[ДО]?\s*\(\d+\)"
+        mat_with_mm = r"СП[ДО]?\s+\d+\s*мм"
+
+        mat1 = r"СП[ДО]?\s*\d+\s*^(мм)?:"
+
+        pattern = rf"^({mat1})\s*(.*)$"
+
+        prefix_pattern = re.compile(pattern, re.IGNORECASE)
+
+        match = prefix_pattern.match(text_obj)
+
+        prefix = ""
+        p1 = text_obj
+        if match:
+            print(text_obj, match.groups())
+            # prefix = match.group(1) or ""
+            # p1 = match.group(3) or ""
+        else:
+            print(text_obj)
 
         return prefix, p1
 
@@ -335,15 +359,15 @@ class ParserV2:
         resuts = self._parse(line)
         if resuts.parts_count > 0:
             # processing p1
-            prefix, p1 = self._clean_p1(resuts.parts[0])
-            prefix = prefix.strip()
-            p1 = p1.strip()
-            if prefix:
-                resuts.prefix = prefix
-            if p1:
-                resuts.parts[0] = p1
-            else:
-                del resuts.parts[0]
+            # prefix, p1 = self._clean_p1(resuts.parts[0])
+            # prefix = prefix.strip()
+            # p1 = p1.strip()
+            # if prefix:
+            #     resuts.prefix = prefix
+            # if p1:
+            #     resuts.parts[0] = p1
+            # else:
+            #     del resuts.parts[0]
 
             # processing last p
             postfix, p = self._clean_last_p(resuts.parts[-1])
