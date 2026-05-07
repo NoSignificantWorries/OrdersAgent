@@ -11,7 +11,7 @@ async def trigger_processing():
     result = await client.execute_workflow(
         "ExcelProcessingWorkflow",  # имя воркфлоу
         args=["033/1108A.xls"],  # путь к файлу в MinIO
-        id="test-run-1",  # уникальный ID
+        id="033-1",  # уникальный ID
         task_queue="processing-files-queue",
     )
 

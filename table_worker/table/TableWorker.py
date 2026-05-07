@@ -5,7 +5,7 @@ from functools import partial
 from html import escape
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 # data working
 import numpy as np
@@ -440,27 +440,37 @@ class TableWorker:
 
         material_questions = dict()
         parsed_materials = dict()
+        prepack_lib = dict()
         is_problem = False
         for material in materials.keys():
             parsed = await processor.process_line(material)
             if material not in parsed_materials:
                 parsed_materials[material] = {
                     "postfix": parsed.postfix,
-                    "parts": dict(),
+                    "parts": [],
                 }
             for i, (p, m) in enumerate(zip(parsed.parts, parsed.matches)):
-                parsed_materials[material]["parts"][p] = m
-                if m is None:
+                if m is None or m[1] is True:
                     is_problem = True
-                    if material not in material_questions:
-                        material_questions[material] = []
-                    material_questions[material].append((p, i))
+                    material_questions[p] = m[1] if m else False
+                else:
+                    prepack_lib[p] = m
+                parsed_materials[material]["parts"].append(p)
+        self.parsed_materials = {"materials": parsed_materials, "prepack": prepack_lib}
         print(material_questions)
         print(parsed_materials)
+        print(prepack_lib)
         if is_problem:
-            await ask_user_about_materials(material_questions)
+            return material_questions
 
-        self.parsed_materials = parsed_materials
+        return None
+
+    async def set_material_matches(self, matches: Dict[str, Tuple[str, bool]]):
+        if self.parsed_materials is None:
+            raise ValueError("No parsed materials.")
+
+        self.parsed_materials["prepack"].update(matches)
+        print(self.parsed_materials)
 
     def _make_xlsx(self):
         if self.parsed_data is None or self.parsed_materials is None:
@@ -523,9 +533,12 @@ class TableWorker:
             current_row = 3
             for line in sheet_data_data:
                 material, x, y, amount = line
-                for i, (_, matched) in enumerate(
-                    self.parsed_materials[material]["parts"].items(), start=2
+                for i, part in enumerate(
+                    self.parsed_materials["materials"][material]["parts"],
+                    start=2,
                 ):
+                    matched = self.parsed_materials["prepack"].get(part)
+                    # print(matched)
                     if matched:
                         value, black_list = matched
                         cell = ws.cell(row=current_row, column=i, value=value)
@@ -539,7 +552,7 @@ class TableWorker:
                 cell = ws.cell(
                     row=current_row,
                     column=18,
-                    value=self.parsed_materials[material]["postfix"],
+                    value=self.parsed_materials["materials"][material]["postfix"],
                 )
                 current_row += 1
 
@@ -594,7 +607,9 @@ async def development_async():
                     print("[WARN]: Empty sheet")
                     continue
 
-                await table.parse_materials(processor)
+                request = await table.parse_materials(processor)
+                print("Request:", request)
+                await table.set_material_matches({"14": ("123", True)})
 
                 table._make_xlsx()
 

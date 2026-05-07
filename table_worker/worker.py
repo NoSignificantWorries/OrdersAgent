@@ -24,7 +24,11 @@ async def main():
             workflows=[ExcelProcessingWorkflow],
             activities=[
                 activities.download_excel,
-                activities.process_excel,
+                # activities.process_excel,
+                activities.notify_user,
+                activities.process_excel_materials,
+                activities.process_excel_match,
+                activities.process_excel_finally,
                 activities.upload_excel,
             ],
         )
