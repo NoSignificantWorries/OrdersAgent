@@ -1,9 +1,11 @@
 import asyncio
 import io
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from temporalio import activity
+from temporalio.client import Client
 
 from table import (
     DELIMETERS,
@@ -26,6 +28,23 @@ class ExcelProcessingActivities:
         self.processor = MaterialProcessor(self.pipeline)
 
         self.table = None
+
+    @activity.defn
+    async def ask_user(
+        self, parent_workflow_id: str, filepath: str, query: Dict[str, bool]
+    ) -> Optional[Dict[str, Tuple[str, bool]]]:
+        temporal_host = os.getenv("TEMPORAL_HOST", "localhost:7233")
+        client = await Client.connect(temporal_host, namespace="default")
+
+        question_id = f"user-question-{parent_workflow_id}"
+
+        result = await client.execute_workflow(
+            "UserQuestionWorkflow",
+            args=[query],
+            id=question_id,
+            task_queue="user-queue",
+        )
+        return result
 
     @activity.defn
     async def download_excel(self, bucket: str, filepath: str) -> bytes:
@@ -72,9 +91,6 @@ class ExcelProcessingActivities:
 
         result = await loop.run_in_executor(None, _make_xlsx)
         return result
-
-    @activity.defn
-    async def notify_user(self, filepath: str, query: Dict[str, bool]): ...
 
     @activity.defn
     async def process_excel_materials(

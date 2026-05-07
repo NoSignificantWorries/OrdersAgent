@@ -465,12 +465,16 @@ class TableWorker:
 
         return None
 
-    async def set_material_matches(self, matches: Dict[str, Tuple[str, bool]]):
+    async def set_material_matches(
+        self, processor: MaterialProcessor, matches: Dict[str, Tuple[str, bool]]
+    ):
         if self.parsed_materials is None:
             raise ValueError("No parsed materials.")
 
         self.parsed_materials["prepack"].update(matches)
         print(self.parsed_materials)
+        matches_flat = [(p, m, bl) for p, (m, bl) in matches.items()]
+        processor.matcher.batch_add(matches_flat)
 
     def _make_xlsx(self):
         if self.parsed_data is None or self.parsed_materials is None:

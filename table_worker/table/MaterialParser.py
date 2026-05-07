@@ -1,11 +1,10 @@
-import re
-import csv
 import asyncio
+import csv
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from .MaterialLibrary import MaterialMatcherORM, DatabaseManager, initialize_app
-
+from .MaterialLibrary import DatabaseManager, MaterialMatcherORM, initialize_app
 
 DELIMETERS = ["-", "–", "—", "+", "x", "х", "*"]
 
@@ -47,7 +46,9 @@ def _check_breket(breket: str) -> Optional[str]:
 
 
 class Block:
-    def __init__(self, brek: str, level: int, start_i: int, end_i: Optional[int] = None):
+    def __init__(
+        self, brek: str, level: int, start_i: int, end_i: Optional[int] = None
+    ):
         self._btype = _check_breket(brek)
         if self._btype is None:
             raise ValueError(f"Unsupported breket symbol '{brek}'")
@@ -121,15 +122,17 @@ class Block:
 
     def split_by_delim(self, delim: str) -> List[str]:
         if delim not in self._delims:
-            raise ValueError(f"Undefined delimeter in the Block! Current delimeters: {list(self._delims.keys())}")
+            raise ValueError(
+                f"Undefined delimeter in the Block! Current delimeters: {list(self._delims.keys())}"
+            )
         parts = []
         last_idx = -1
         for idx in self._delims[delim].index:
             idx -= self._start + 1
-            part = self._string[last_idx+1:idx]
+            part = self._string[last_idx + 1 : idx]
             parts.append(part)
             last_idx = idx
-        part = self._string[last_idx+1:]
+        part = self._string[last_idx + 1 :]
         parts.append(part)
 
         return parts
@@ -184,7 +187,7 @@ def _symbols_tree(line: str, delims: List[str]) -> BlockLevels:
             if _check_breket(symbol) == stack[-1].btype:
                 block = stack.pop(-1)
                 block.set_end(i)
-                block.set_string(line[block.start + 1:block.end])
+                block.set_string(line[block.start + 1 : block.end])
                 levels.add_block(block)
                 idx -= 1
             else:
@@ -209,7 +212,7 @@ class ParseResults:
     postfix: Optional[str] = None
     levels: Optional[BlockLevels] = None
     parts: List[str] = field(default_factory=list)
-    matches: List[Tuple[ str, bool ]] = field(default_factory=list)
+    matches: List[Tuple[str, bool]] = field(default_factory=list)
     parts_count: int = 0
 
 
@@ -225,15 +228,26 @@ class ParserV2:
 
         cnt = general.max_delimeter_count
         if not general.max_delimeter or cnt < 1:
-            return ParseResults(material=general.string, parts=[general.string], parts_count=1)
+            return ParseResults(
+                material=general.string, parts=[general.string], parts_count=1
+            )
 
         parts = general.split_by_delim(general.max_delimeter)
         if cnt == 1:
-            return ParseResults(material=general.string, parts=[parts[0]], postfix=parts[1], parts_count=1)
+            return ParseResults(
+                material=general.string,
+                parts=[parts[0]],
+                postfix=parts[1],
+                parts_count=1,
+            )
         elif cnt >= 2:
-            return ParseResults(material=general.string, parts=parts, parts_count=len(parts))
+            return ParseResults(
+                material=general.string, parts=parts, parts_count=len(parts)
+            )
 
-        return ParseResults(material=general.string, parts=[general.string], parts_count=1)
+        return ParseResults(
+            material=general.string, parts=[general.string], parts_count=1
+        )
 
     def _find_candidates(self, blocks: List[Block], general: Block) -> List[Block]:
         candidates = []
@@ -304,7 +318,7 @@ class ParserV2:
         if idx < 0:
             return postfix, part
 
-        postfix = text_obj[idx + 1:].strip()
+        postfix = text_obj[idx + 1 :].strip()
         part = text_obj[:idx].strip()
 
         return postfix, part
@@ -329,7 +343,9 @@ class ParserV2:
 
         if cnt > 1:
             parts = general.split_by_delim(general.max_delimeter)
-            res = ParseResults(material=general.string, parts=parts, parts_count=len(parts))
+            res = ParseResults(
+                material=general.string, parts=parts, parts_count=len(parts)
+            )
             return res
 
         if candidates_count == 1:
@@ -337,8 +353,14 @@ class ParserV2:
             start_i, end_i = candidate.start, candidate.end
             parts = candidate.split_by_delim(candidate.max_delimeter)
             prefix = general.string[:start_i]
-            postfix = general.string[end_i + 1:]
-            res = ParseResults(material=general.string, prefix=prefix, postfix=postfix, parts=parts, parts_count=len(parts))
+            postfix = general.string[end_i + 1 :]
+            res = ParseResults(
+                material=general.string,
+                prefix=prefix,
+                postfix=postfix,
+                parts=parts,
+                parts_count=len(parts),
+            )
             return res
 
         return ParseResults(material=line, parts=[line], parts_count=1)
@@ -387,7 +409,7 @@ class ParserV2:
 class MaterialProcessor:
     def __init__(self, pipeline: ParserV2) -> None:
         self._pipeline = pipeline
-        self._matcher = MaterialMatcherORM()
+        self.matcher = MaterialMatcherORM()
 
     async def process_line(self, line: str) -> Optional[ParseResults]:
         if not line:
@@ -397,7 +419,7 @@ class MaterialProcessor:
 
         parts_from_lib = []
         for part in parsed.parts:
-            target = await self._matcher.find_target(part)
+            target = await self.matcher.find_target(part)
             parts_from_lib.append(target)
 
         parsed.matches = parts_from_lib
@@ -428,10 +450,10 @@ async def development_async() -> None:
             if parsed.parts_count > max_parts:
                 max_parts = parsed.parts_count
             result = {
-                    "material": parsed.material,
-                    "prefix": parsed.prefix,
-                    "postfix": parsed.postfix,
-                }
+                "material": parsed.material,
+                "prefix": parsed.prefix,
+                "postfix": parsed.postfix,
+            }
             for i, (part, matched) in enumerate(zip(parsed.parts, parsed.matches)):
                 result[f"p{i + 1}"] = part
                 result[f"m{i + 1}"] = matched
@@ -458,4 +480,3 @@ def development() -> None:
 
 if __name__ == "__main__":
     development()
-
