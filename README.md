@@ -100,20 +100,6 @@
 │   ├── .env.example
 │   └── docker-compose.yml
 ├── table_worker/                        # отдельный воркер/утилиты для обработки таблиц-вложений
-├── temporal/
-│   ├── cmd/
-│   │   ├── worker/
-│   │   │   └── main.go                  # Go-воркер Temporal (регистрация workflows/activities)
-│   │   └── email-starter/               # старый CLI-стартер по email_uid
-│   │       └── main.go
-│   ├── client/
-│   │   └── email.go                     # StartProcessEmailWorkflow (запуск workflow по email_uid)
-│   ├── launcher/
-│   │   └── start.go                     # StartProcessQueueWorkflow (по id строки process_queue, запасной вариант)
-│   ├── workflows/
-│   │   └── email_workflow.go            # ProcessEmailWorkflow (цепочка SetStatus → GetGroup → RunLLM → SaveClassification)
-│   └── activities/
-│       └── activities.go                # QueueActivities: GetEmailGroupActivity, RunLLMActivity, SaveClassificationActivity и т.д.
 ├── go.mod
 ├── go.sum
 ```
@@ -135,24 +121,16 @@ uvicorn app.main:app
 
 Подробнее в README в папке `interface/frontend/mail-client`
 
-3. Почтовый агент + LLM через temporal  
-Поднять контейнеры для minio,  temporal и БД. Затем в отдельных терминалах:  
+Поднять контейнеры для minio и БД. Затем в отдельных терминалах:  
 
-    1) запуск воркера
-    ```
-    cd <корень репозитория>
-    go run ./temporal/cmd/worker
-    ```
+2. Запуск агента
+```
+cd <корень репозитория>
+ go run ./mail/cmd/mail-agent --user-id=1
+```
 
-    2) запуск агента
-    ```
-    cd <корень репозитория>
-    go run ./mail/cmd/mail-agent --user-id=2
-    ```
-
-    --user-id — id пользователя в БД, для которого агент будет забирать письма и класть их в очередь.
+--user-id — id пользователя в БД, для которого агент будет забирать письма и класть их в очередь.
 
 Контейнеры:
 - minio  из папки `.\cloud\`
 - БД из папки `.\storage\`
-- temporal из папки `.\temporal`
