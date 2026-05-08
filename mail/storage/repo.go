@@ -6,7 +6,7 @@ import (
     "os"
     "time"
 
-    "OrdersAgent/mail/internal/parser"
+    "OrdersAgent/mail/parser"
     "OrdersAgent/storage/api"
     minio "worker/minio/minio"
     //"OrdersAgent/temporal/client/launcher"
@@ -16,6 +16,7 @@ import (
 type Repository interface {
     SaveFile(att parser.Attachment) error
     SaveOrder(userID int64, order any) error
+    HasEmailInQueue(userID, emailUID int64) (bool, error)
 }
 
 // FileRepo — старая файловая реализация (если больше не нужна, можно удалить целиком)
@@ -33,6 +34,12 @@ func (f *FileRepo) SaveFile(att parser.Attachment) error {
 func (f *FileRepo) SaveOrder(userID int64, order any) error {
     // заглушка
     return nil
+}
+
+// HasEmailInQueue для FileRepo всегда возвращает false,
+// так как файловая реализация очереди не использует.
+func (f *FileRepo) HasEmailInQueue(userID, emailUID int64) (bool, error) {
+    return false, nil
 }
 
 // DBRepo — пишет метаданные в Postgres и файлы в MinIO
@@ -153,4 +160,9 @@ func (r *DBRepo) SaveOrder(userID int64, order any) error {
     // fmt.Printf("queue item created id=%d, workflow started workflowID=%s runID=%s\n", queueID, workflowID, runID)
 
     return nil
+}
+
+func (r *DBRepo) HasEmailInQueue(userID, emailUID int64) (bool, error) {
+    ctx := context.Background()
+    return r.db.HasEmailInQueue(ctx, userID, emailUID)
 }

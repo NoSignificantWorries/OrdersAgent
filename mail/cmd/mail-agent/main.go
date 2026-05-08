@@ -1,20 +1,21 @@
+// DEPRECATED: mail-agent заменён Temporal MailboxWatcherWorkflow + PollMailboxActivity.
+// В dev/production запускать watcher, а не mail-agent.
+//go:build legacy_mail_agent
 package main
 
 import (
+    "context"
     "flag"
     "log"
     "os"
-    "os/signal"
-    "syscall"
-    "time"
 
     "github.com/joho/godotenv"
 
-    "OrdersAgent/mail/internal/client"
-    "OrdersAgent/mail/internal/config"
-    "OrdersAgent/mail/internal/orders"
-    "OrdersAgent/mail/internal/parser"
-    "OrdersAgent/mail/internal/storage"
+    "OrdersAgent/mail/client"
+    "OrdersAgent/mail/config"
+    "OrdersAgent/mail/orders"
+    "OrdersAgent/mail/storage"
+    "OrdersAgent/mail/sync"
 
     "OrdersAgent/storage/api"
     "OrdersAgent/storage/configdb"
@@ -22,7 +23,6 @@ import (
 )
 
 func main() {
-    // грузим .env для DB и MinIO
     _ = godotenv.Load("storage/.env")
 
     userID := flag.Int("user-id", 0, "ID пользователя для обработки почты")
@@ -31,23 +31,19 @@ func main() {
         log.Fatal("user-id is required, example: --user-id=2")
     }
 
-    // стартовый лог один раз
     log.Printf("mail agent started | user_id=%d", *userID)
 
-    // конфиг IMAP для ящика
     cfg, err := config.Load("mail/internal/config/config.json")
     if err != nil {
         log.Fatalf("config: %v", err)
     }
 
-    // IMAP клиент
     imapClient, err := client.New(cfg)
     if err != nil {
         log.Fatalf("IMAP client: %v", err)
     }
     defer imapClient.Close()
 
-    // конфиг и подключение к Postgres
     dbCfg := configdb.FromEnv()
     db, err := api.ConnectPostgres(dbCfg)
     if err != nil {
@@ -55,7 +51,6 @@ func main() {
     }
     defer db.Conn.Close()
 
-    // инициализация MinIO
     endpoint := os.Getenv("MINIO_ENDPOINT")
     accessKey := os.Getenv("MINIO_ACCESS_KEY")
     secretKey := os.Getenv("MINIO_SECRET_KEY")
@@ -68,64 +63,14 @@ func main() {
     }
 
     repo := storage.NewDBRepo(db, store)
-    processor := orders.New(repo, int64(*userID))
+    processor := orders.New(repo, int64(*userID), nil)
 
-    ticker := time.NewTicker(30 * time.Second)
-    defer ticker.Stop()
+    syncService := sync.New(processor)
 
-    c := make(chan os.Signal, 1)
-    signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-
-    for {
-        select {
-        case <-ticker.C:
-            ProcessEmails(imapClient, c, processor)
-        case <-c:
-            log.Printf("mail agent stopped by signal")
-            return
-        }
-    }
-}
-
-func ProcessEmails(imap *client.Client, sigChan chan os.Signal, processor *orders.Processor) {
-    uids, err := imap.FetchUnread()
-    if err != nil {
-        log.Printf("fetch unread: %v", err)
-        return
+    // Один проход
+    if err := syncService.SyncMailboxOnce(context.Background(), imapClient); err != nil {
+        log.Printf("sync mailbox once: %v", err)
     }
 
-    if len(uids) == 0 {
-        return
-    }
-
-    log.Printf("found %d unread emails", len(uids))
-
-    for _, uid := range uids {
-        select {
-        case <-sigChan:
-            log.Printf("interrupt while processing, stopping")
-            return
-        default:
-        }
-
-        fetchCmd, err := imap.FetchMessage(uid)
-        if err != nil {
-            log.Printf("fetch message uid=%d: %v", uid, err)
-            continue
-        }
-
-        email, err := parser.ParseMessage(uid, fetchCmd)
-        if err != nil {
-            log.Printf("parse uid=%d: %v", uid, err)
-            fetchCmd.Close()
-            continue
-        }
-
-        if err := processor.ProcessEmail(email); err != nil {
-            log.Printf("process uid=%d: %v", uid, err)
-        }
-
-        fetchCmd.Close()
-        imap.MarkRead(uid)
-    }
+    log.Printf("mail agent finished one sync | user_id=%d", *userID)
 }

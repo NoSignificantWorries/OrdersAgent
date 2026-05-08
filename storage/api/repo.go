@@ -381,6 +381,127 @@ func (db *DB) GetEmailGroupByUID(ctx context.Context, emailUID int64) (EmailGrou
 	return res, nil
 }
 
+// GetEmailFilesByUID — получить все файлы письма по email_uid.
+func (db *DB) GetEmailFilesByUID(ctx context.Context, emailUID int64) ([]QueueItem, error) {
+	const q = `
+		SELECT
+			id,
+			assigned_to,
+			target_user_id,
+			email_subject,
+			email_body,
+			email_uid,
+			email_from,
+			email_date,
+			document_name,
+			object_bucket,
+			object_key,
+			status,
+			created_at,
+			prob_1,
+			predicted_class,
+			model_decision
+		FROM process_queue
+		WHERE email_uid = $1
+		ORDER BY id
+	`
+
+	rows, err := db.Conn.QueryContext(ctx, q, emailUID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var res []QueueItem
+
+	for rows.Next() {
+		var it QueueItem
+
+		var assignedTo sql.NullInt64
+		var emailUIDCol sql.NullInt64
+		var emailFrom sql.NullString
+		var emailDate sql.NullTime
+		var docName sql.NullString
+		var objectBucket sql.NullString
+		var objectKey sql.NullString
+		var prob1 sql.NullFloat64
+		var predClass sql.NullInt16
+		var modelDecision sql.NullString
+		var emailBody sql.NullString
+
+		if err := rows.Scan(
+			&it.ID,
+			&assignedTo,
+			&it.TargetUserID,
+			&it.Subject,
+			&emailBody,
+			&emailUIDCol,
+			&emailFrom,
+			&emailDate,
+			&docName,
+			&objectBucket,
+			&objectKey,
+			&it.Status,
+			&it.CreatedAt,
+			&prob1,
+			&predClass,
+			&modelDecision,
+		); err != nil {
+			return nil, err
+		}
+
+		if emailBody.Valid {
+			it.Body = emailBody.String
+		} else {
+			it.Body = ""
+		}
+		if assignedTo.Valid {
+			v := assignedTo.Int64
+			it.AssignedTo = &v
+		}
+		if emailUIDCol.Valid {
+			v := emailUIDCol.Int64
+			it.EmailUID = &v
+		}
+		if emailFrom.Valid {
+			v := emailFrom.String
+			it.EmailFrom = &v
+		}
+		if emailDate.Valid {
+			t := emailDate.Time
+			it.EmailDate = &t
+		}
+		if docName.Valid {
+			v := docName.String
+			it.DocName = &v
+		}
+		if objectBucket.Valid {
+			v := objectBucket.String
+			it.ObjectBucket = &v
+		}
+		if objectKey.Valid {
+			v := objectKey.String
+			it.ObjectKey = &v
+		}
+		if prob1.Valid {
+			v := prob1.Float64
+			it.Prob1 = &v
+		}
+		if predClass.Valid {
+			v := predClass.Int16
+			it.PredictedClass = &v
+		}
+		if modelDecision.Valid {
+			v := modelDecision.String
+			it.ModelDecision = &v
+		}
+
+		res = append(res, it)
+	}
+
+	return res, rows.Err()
+}
+
 // UpdateQueueStatusByEmailUID — обновить статус всех строк письма по email_uid
 func (db *DB) UpdateQueueStatusByEmailUID(ctx context.Context, emailUID int64, status string) error {
 	const q = `
@@ -418,4 +539,24 @@ func (db *DB) UpdateClassificationByEmailUID(
 
 	_, err := db.Conn.ExecContext(ctx, q, prob1, predicted, modelDecision, emailUID)
 	return err
+}
+
+// HasEmailInQueue проверяет, есть ли уже хотя бы одна строка
+// в process_queue для (target_user_id, email_uid).
+func (db *DB) HasEmailInQueue(ctx context.Context, targetUserID, emailUID int64) (bool, error) {
+    const q = `
+        SELECT 1
+        FROM process_queue
+        WHERE target_user_id = $1 AND email_uid = $2
+        LIMIT 1
+    `
+    var dummy int
+    err := db.Conn.QueryRowContext(ctx, q, targetUserID, emailUID).Scan(&dummy)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return false, nil
+        }
+        return false, err
+    }
+    return true, nil
 }

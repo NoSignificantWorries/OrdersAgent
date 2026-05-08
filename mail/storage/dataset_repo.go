@@ -5,7 +5,7 @@ import (
     "os"
     "path/filepath"
 
-    "OrdersAgent/mail/internal/parser"
+    "OrdersAgent/mail/parser"
 )
 
 type DatasetRepo struct {

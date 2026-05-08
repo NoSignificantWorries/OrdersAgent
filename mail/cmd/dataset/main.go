@@ -8,16 +8,16 @@ import (
     "syscall"
     "time"
 
-    "OrdersAgent/mail/internal/client"
-    "OrdersAgent/mail/internal/config"
-    "OrdersAgent/mail/internal/parser"
-    "OrdersAgent/mail/internal/orders"
-    "OrdersAgent/mail/internal/storage"
+    "OrdersAgent/mail/client"
+    "OrdersAgent/mail/config"
+    "OrdersAgent/mail/parser"
+    "OrdersAgent/mail/orders"
+    "OrdersAgent/mail/storage"
 )
 
 func main() {	
     fmt.Printf("OrdersAgent dataset builder\n")
-    cfg, err := config.Load("mail/internal/config/config.json")
+    cfg, err := config.Load("mail/config/config.json")
     if err != nil {
         log.Fatalf("config: %v", err)
     }

@@ -3,18 +3,21 @@ package main
 import (
 	"log"
 
-	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/worker"
-
+	"OrdersAgent/temporal/contracts"
+	emaillauncher "OrdersAgent/temporal/launcher"
 	"OrdersAgent/temporal/internal/activities"
 	"OrdersAgent/temporal/workflows"
+
+	"go.temporal.io/sdk/activity"
+	sdkclient "go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/worker"
+	workflowapi "go.temporal.io/sdk/workflow"
 )
 
-const TaskQueue = "manager-1-orchestrator"
+const TaskQueue = contracts.EmailProcessingTaskQueue
 
 func main() {
-	c, err := client.Dial(client.Options{
+	c, err := sdkclient.Dial(sdkclient.Options{
 		HostPort: "localhost:7233",
 	})
 	if err != nil {
@@ -29,19 +32,11 @@ func main() {
 		log.Fatalf("unable to init activities: %v", err)
 	}
 
-	// Workflow'и
-	w.RegisterWorkflow(workflows.ProcessQueueItemWorkflow) // старый
-	w.RegisterWorkflow(workflows.ProcessEmailWorkflow)     // новый
-
-	// Item-level activities
-	w.RegisterActivityWithOptions(acts.GetQueueItemActivity, activity.RegisterOptions{
-		Name: "GetQueueItemActivity",
+	w.RegisterWorkflowWithOptions(workflows.ProcessEmailWorkflow, workflowapi.RegisterOptions{
+		Name: emaillauncher.ProcessEmailWorkflowName,
 	})
-	w.RegisterActivityWithOptions(acts.SetStatusActivity, activity.RegisterOptions{
-		Name: "SetStatusActivity",
-	})
+	w.RegisterWorkflow(workflows.MailboxWatcherWorkflow)
 
-	// Email-level activities
 	w.RegisterActivityWithOptions(acts.SetEmailStatusActivity, activity.RegisterOptions{
 		Name: "SetEmailStatusActivity",
 	})
@@ -54,6 +49,10 @@ func main() {
 	w.RegisterActivityWithOptions(acts.SaveClassificationActivity, activity.RegisterOptions{
 		Name: "SaveClassificationActivity",
 	})
+	w.RegisterActivityWithOptions(acts.EnqueueFilesProcessingActivity, activity.RegisterOptions{
+		Name: "EnqueueFilesProcessingActivity",
+	})
+	w.RegisterActivity(activities.PollMailboxActivity)
 
 	log.Printf("Temporal worker started, task queue = %s", TaskQueue)
 

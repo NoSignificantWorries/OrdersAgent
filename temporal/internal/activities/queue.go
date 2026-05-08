@@ -20,14 +20,14 @@ type QueueActivities struct {
 }
 
 // QueueItemDTO — упрощённый view записи очереди для workflow (item-level)
-type QueueItemDTO struct {
-	ID           int64
-	TargetUserID int64
-	EmailUID     *int64
-	ObjectBucket *string
-	ObjectKey    *string
-	Status       string
-}
+// type QueueItemDTO struct {
+// 	ID           int64
+// 	TargetUserID int64
+// 	EmailUID     *int64
+// 	ObjectBucket *string
+// 	ObjectKey    *string
+// 	Status       string
+// }
 
 // EmailGroupDTO — агрегированное представление письма (email_uid-level)
 type EmailGroupDTO struct {
@@ -64,32 +64,32 @@ func NewQueueActivities() (*QueueActivities, error) {
 // Старые item-level activity
 // =====================
 
-func (a *QueueActivities) GetQueueItemActivity(ctx context.Context, id int64) (*QueueItemDTO, error) {
-	activity.GetLogger(ctx).Info("GetQueueItemActivity called", "id", id)
+// func (a *QueueActivities) GetQueueItemActivity(ctx context.Context, id int64) (*QueueItemDTO, error) {
+// 	activity.GetLogger(ctx).Info("GetQueueItemActivity called", "id", id)
 
-	item, err := a.DB.GetQueueItemByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("get queue item %d: %w", id, err)
-	}
+// 	item, err := a.DB.GetQueueItemByID(ctx, id)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("get queue item %d: %w", id, err)
+// 	}
 
-	return &QueueItemDTO{
-		ID:           item.ID,
-		TargetUserID: item.TargetUserID,
-		EmailUID:     item.EmailUID,
-		ObjectBucket: item.ObjectBucket,
-		ObjectKey:    item.ObjectKey,
-		Status:       item.Status,
-	}, nil
-}
+// 	return &QueueItemDTO{
+// 		ID:           item.ID,
+// 		TargetUserID: item.TargetUserID,
+// 		EmailUID:     item.EmailUID,
+// 		ObjectBucket: item.ObjectBucket,
+// 		ObjectKey:    item.ObjectKey,
+// 		Status:       item.Status,
+// 	}, nil
+// }
 
-func (a *QueueActivities) SetStatusActivity(ctx context.Context, id int64, status string) error {
-	activity.GetLogger(ctx).Info("SetStatusActivity called", "id", id, "status", status)
+// func (a *QueueActivities) SetStatusActivity(ctx context.Context, id int64, status string) error {
+// 	activity.GetLogger(ctx).Info("SetStatusActivity called", "id", id, "status", status)
 
-	if err := a.DB.UpdateQueueItemStatus(ctx, id, status); err != nil {
-		return fmt.Errorf("update status for %d: %w", id, err)
-	}
-	return nil
-}
+// 	if err := a.DB.UpdateQueueItemStatus(ctx, id, status); err != nil {
+// 		return fmt.Errorf("update status for %d: %w", id, err)
+// 	}
+// 	return nil
+// }
 
 // =====================
 // Новые email-level activity
@@ -201,5 +201,40 @@ func (a *QueueActivities) SaveClassificationActivity(ctx context.Context, emailU
 	if err := a.DB.UpdateClassificationByEmailUID(ctx, emailUID, res.Prob1, res.PredictedClass, res.ModelDecision); err != nil {
 		return fmt.Errorf("update classification email_uid=%d: %w", emailUID, err)
 	}
+	return nil
+}
+
+func (a *QueueActivities) EnqueueFilesProcessingActivity(ctx context.Context, emailUID int64) error {
+	logger := activity.GetLogger(ctx)
+	logger.Info("EnqueueFilesProcessingActivity called",
+		"email_uid", emailUID,
+	)
+
+	items, err := a.DB.GetEmailFilesByUID(ctx, emailUID)
+	if err != nil {
+		return fmt.Errorf("get files for email_uid=%d: %w", emailUID, err)
+	}
+
+	if len(items) == 0 {
+		logger.Info("no files found for email_uid",
+			"email_uid", emailUID,
+		)
+		return nil
+	}
+
+	for _, it := range items {
+		logger.Info("file prepared for processing-files-queue",
+			"queue_id", it.ID,
+			"email_uid", emailUID,
+			"document_name", it.DocName,
+			"object_bucket", it.ObjectBucket,
+			"object_key", it.ObjectKey,
+		)
+
+		// TODO: когда будет готов table_worker:
+		// здесь отправить сообщение в processing-files-queue
+		// с использованием it.ObjectBucket, it.ObjectKey, it.DocName.
+	}
+
 	return nil
 }

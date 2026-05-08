@@ -3,7 +3,7 @@ package client
 import (
     "fmt"
 
-    "OrdersAgent/mail/internal/config"
+    "OrdersAgent/mail/config"
     "github.com/emersion/go-imap/v2"
     "github.com/emersion/go-imap/v2/imapclient"
 )
