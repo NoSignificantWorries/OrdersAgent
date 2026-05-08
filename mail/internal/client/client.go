@@ -13,29 +13,6 @@ type Client struct {
 	cfg  *config.Config
 }
 
-// Старый конструктор по логину/паролю приложений (можно оставить на время миграции).
-func New(cfg *config.Config) (*Client, error) {
-	c, err := imapclient.DialTLS(
-		fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		nil,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("dial: %w", err)
-	}
-
-	if err := c.Login(cfg.Username, cfg.Password).Wait(); err != nil {
-		c.Close()
-		return nil, fmt.Errorf("login: %w", err)
-	}
-
-	if _, err := c.Select("INBOX", nil).Wait(); err != nil {
-		c.Close()
-		return nil, fmt.Errorf("select INBOX: %w", err)
-	}
-
-	return &Client{conn: c, cfg: cfg}, nil
-}
-
 // Новый конструктор по OAuth2 (XOAUTH2).
 func NewOAuth(cfg *config.Config, email, accessToken string) (*Client, error) {
 	c, err := imapclient.DialTLS(
