@@ -30,6 +30,7 @@ def read_config(path: Path):
 
     return (llm_config,)
 
+
 def get_db_connection():
     load_dotenv("../storage/.env")
 
@@ -86,7 +87,9 @@ def decide_by_thresholds(prob_1: float):
     return "review", None, "review"
 
 
-def update_classification(conn, email_uid, prob_1, predicted_class, model_decision, status):
+def update_classification(
+    conn, email_uid, prob_1, predicted_class, model_decision, status
+):
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -102,10 +105,13 @@ def update_classification(conn, email_uid, prob_1, predicted_class, model_decisi
         )
 
 
-def classify_email_text(llm_worker, subject: str, body: str, files_text: str | None) -> float:
+def classify_email_text(
+    llm_worker, subject: str, body: str, files_text: str | None
+) -> float:
     parts = [subject or "", files_text or "", body or ""]
     text = "\n\n".join(part for part in parts if part).strip()
     return llm_worker.predict_prob_1(text)
+
 
 def main():
     logger = logging.getLogger(__name__)
@@ -115,7 +121,7 @@ def main():
     print(f"2. model path = {model_path}")
 
     logger.info("Loading model from %s", model_path)
-    
+
     llm_worker = LLM(model_path)
     print("3. model loaded")
 
@@ -134,7 +140,9 @@ def main():
         for email_uid, subject, body, files_text in rows:
             try:
                 prob_1 = classify_email_text(llm_worker, subject, body, files_text)
-                model_decision, predicted_class, new_status = decide_by_thresholds(prob_1)
+                model_decision, predicted_class, new_status = decide_by_thresholds(
+                    prob_1
+                )
 
                 update_classification(
                     conn=conn,
@@ -166,9 +174,9 @@ def main():
     finally:
         conn.close()
 
+
 if __name__ == "__main__":
     setup_logging()
     logger = logging.getLogger(__name__)
 
     main()
-

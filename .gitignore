@@ -19,7 +19,5 @@ app.log
 *.bkp
 private/
 
-*.bin
 *.exe
 build/
-
