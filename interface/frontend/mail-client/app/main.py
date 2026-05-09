@@ -57,9 +57,9 @@ async def login_page(request: Request):
         return RedirectResponse(url="/")
     
     return templates.TemplateResponse(
-    request,
-    "login.html",
-    {"request": request}
+        request,
+        "login.html",
+        {"request": request}
     )
 
 @app.get("/debug")

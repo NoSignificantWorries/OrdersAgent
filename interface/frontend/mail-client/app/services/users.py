@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 import asyncpg
@@ -18,7 +19,6 @@ async def get_or_create_user_by_email(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        # 1. Пытаемся найти
         row = await conn.fetchrow(
             """
             SELECT id, login, email, role
@@ -35,11 +35,7 @@ async def get_or_create_user_by_email(
                 "role": row["role"],
             }
 
-        # 2. Если нет — создаём
-        # pass_hash сейчас заглушка, так как авторизация идёт через Яндекс
-        fake_password = "oauth_yandex"  # можно сгенерировать случайно
-        # crypt(...) вызывается в твоей sql-функции, здесь можно хранить просто заглушку,
-        # либо вызвать create_admin_user для админа, но для менеджера INSERT обычный.
+        fake_password = "oauth_yandex"
         row = await conn.fetchrow(
             """
             INSERT INTO users (login, email, pass_hash, role)
@@ -56,4 +52,48 @@ async def get_or_create_user_by_email(
             "login": row["login"],
             "email": row["email"],
             "role": row["role"],
+        }
+
+
+async def update_user_mail_tokens(
+    user_id: int,
+    access_token: str,
+    refresh_token: Optional[str],
+    access_expires_at: datetime,
+) -> dict:
+    """
+    Обновляет OAuth-токены Яндекс Почты у пользователя в таблице users.
+
+    Требует, чтобы в users были поля:
+    - mail_access_token TEXT
+    - mail_refresh_token TEXT
+    - mail_access_expires_at TIMESTAMPTZ
+    """
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE users
+            SET
+                mail_access_token = $1,
+                mail_refresh_token = $2,
+                mail_access_expires_at = $3
+            WHERE id = $4
+            RETURNING id, email, mail_access_expires_at
+            """,
+            access_token,
+            refresh_token,
+            access_expires_at,
+            user_id,
+        )
+
+        if not row:
+            raise ValueError(f"user not found: id={user_id}")
+
+        return {
+            "id": row["id"],
+            "email": row["email"],
+            "mail_access_expires_at": row["mail_access_expires_at"],
         }

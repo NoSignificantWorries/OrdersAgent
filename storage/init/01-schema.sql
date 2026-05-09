@@ -5,6 +5,11 @@ CREATE TABLE IF NOT EXISTS users (
   pass_hash CHAR(60) NOT NULL,
   role VARCHAR(20) NOT NULL DEFAULT 'manager',
   current_load INT DEFAULT 0,
+
+  mail_access_token TEXT,
+  mail_refresh_token TEXT,
+  mail_access_expires_at TIMESTAMPTZ,
+
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 /* добавлены поля:
