@@ -1,4 +1,5 @@
 import os
+from io import BytesIO
 from typing import Optional
 
 from minio import Minio
@@ -18,6 +19,35 @@ class MinIOClient:
                 secure=False,
             )
         return cls._instance
+
+
+def get_bytes_object(client: Minio, bucket: str, filename: str) -> Optional[BytesIO]:
+    try:
+        response = client.get_object(bucket, filename)
+        file_data = BytesIO(response.read())
+        response.close()
+        response.release_conn()
+        return file_data
+    except Exception:
+        print("Errors while file reading")
+        return None
+
+
+def put_bytes_object(
+    client: Minio, bucket: str, filename: str, data: BytesIO, content_type: str
+) -> bool:
+    try:
+        client.put_object(
+            bucket_name=bucket,
+            object_name=filename,
+            data=data,
+            length=data.getbuffer().nbytes,
+            content_type=content_type,
+        )
+        return False
+    except Exception:
+        print("Error while saving file in the cloud")
+        return True
 
 
 def development() -> None:

@@ -4,7 +4,7 @@ from typing import Dict, List
 
 import openpyxl
 
-from cloud import MinIOClient
+from cloud import MinIOClient, get_bytes_object, put_bytes_object
 from database import DatabaseManager, MaterialRepository, init_database
 from materials import DELIMETERS, ParseResults, ParserV2
 from table import TableParseResults, TableWorker
@@ -126,14 +126,16 @@ def development() -> None:
     # testfile = Path("../private/tables/1108A.xls")
     filename = "033/1108A.xls"
 
-    try:
-        response = cloud_client.get_object(ATTACHMENTS_BUCKET, filename)
-        file_data = BytesIO(response.read())
-        response.close()
-        response.release_conn()
-    except Exception:
-        print("Errors while file reading")
-        return
+    file_data = get_bytes_object(cloud_client, ATTACHMENTS_BUCKET, filename)
+    print(file_data)
+    # try:
+    #     response = cloud_client.get_object(ATTACHMENTS_BUCKET, filename)
+    #     file_data = BytesIO(response.read())
+    #     response.close()
+    #     response.release_conn()
+    # except Exception:
+    #     print("Errors while file reading")
+    #     return
 
     # worker = TableWorker(None, testfile)
     worker = TableWorker(file_data, Path(filename))
@@ -205,16 +207,24 @@ def development() -> None:
     wb.save(data)
     data.seek(0)
 
-    try:
-        cloud_client.put_object(
-            bucket_name=RESULTS_BUCKET,
-            object_name=filename,
-            data=data,
-            length=data.getbuffer().nbytes,
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    except Exception:
-        print("Error while saving file in the cloud")
+    err = put_bytes_object(
+        cloud_client,
+        RESULTS_BUCKET,
+        filename,
+        data,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    print(err)
+    # try:
+    #     cloud_client.put_object(
+    #         bucket_name=RESULTS_BUCKET,
+    #         object_name=filename,
+    #         data=data,
+    #         length=data.getbuffer().nbytes,
+    #         content_type=,
+    #     )
+    # except Exception:
+    #     print("Error while saving file in the cloud")
 
     DatabaseManager.close()
 
