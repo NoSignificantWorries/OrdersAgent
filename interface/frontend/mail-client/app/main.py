@@ -39,7 +39,8 @@ async def root(request: Request):
     if user:
         print("Пользователь авторизован - показываем главную")
         return templates.TemplateResponse(
-            "index.html", 
+            request,
+            "index.html",
             {"request": request, "user": user}
         )
     else:
@@ -55,7 +56,11 @@ async def login_page(request: Request):
         print("Уже авторизован - редирект на главную")
         return RedirectResponse(url="/")
     
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"request": request}
+    )
 
 @app.get("/debug")
 async def debug_session(request: Request):
