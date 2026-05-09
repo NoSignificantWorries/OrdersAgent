@@ -1,10 +1,7 @@
-import asyncio
 import csv
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-
-from .MaterialLibrary import DatabaseManager, MaterialMatcherORM, initialize_app
+from typing import Dict, List, Optional, Tuple
 
 DELIMETERS = ["-", "–", "—", "+", "x", "х", "*"]
 
@@ -258,25 +255,6 @@ class ParserV2:
                 candidates.append(obj)
         return candidates
 
-    def _clean_p1_old(self, text_obj: str):
-        sep = "\s*"
-        mat = "СП[ДО]?"
-        size = f"\(?\d*\)?{sep}(мм)?"
-        stuff = "[\(:]?"
-        pattern = rf"^({mat}{sep}{size}{sep}){sep}{stuff}{sep}(.*)$"
-
-        prefix_pattern = re.compile(pattern, re.IGNORECASE)
-
-        match = prefix_pattern.match(text_obj)
-
-        prefix = ""
-        p1 = text_obj
-        if match:
-            prefix = match.group(1) or ""
-            p1 = match.group(3) or ""
-
-        return prefix, p1
-
     def _clean_p1(self, text_obj: str):
         mat_no_space = r"СП[ДО]?\d+\s*(?:мм|:)?"
         mat_brackets = r"СП[ДО]?\s*\(\d+\)"
@@ -406,42 +384,19 @@ class ParserV2:
         return resuts
 
 
-class MaterialProcessor:
-    def __init__(self, pipeline: ParserV2) -> None:
-        self._pipeline = pipeline
-        self.matcher = MaterialMatcherORM()
-
-    async def process_line(self, line: str) -> Optional[ParseResults]:
-        if not line:
-            return None
-
-        parsed = self._pipeline.parse(line)
-
-        parts_from_lib = []
-        for part in parsed.parts:
-            target = await self.matcher.find_target(part)
-            parts_from_lib.append(target)
-
-        parsed.matches = parts_from_lib
-
-        return parsed
-
-
-async def development_async() -> None:
-    await initialize_app()
+def development() -> None:
 
     with open("res.txt", "r") as file:
         row_lines = file.readlines()
         lines = [line.rstrip("\n") for line in row_lines]
 
     pipeline = ParserV2(DELIMETERS)
-    processor = MaterialProcessor(pipeline)
 
     results = []
     max_parts = 0
     for line in lines:
         if line:
-            parsed = await processor.process_line(line)
+            parsed = pipeline.parse(line)
             if parsed is None:
                 print("[WARN]: Empty line")
                 continue
@@ -459,8 +414,6 @@ async def development_async() -> None:
                 result[f"m{i + 1}"] = matched
             results.append(result)
 
-    await DatabaseManager.close()
-
     ps = []
     for i in range(max_parts):
         ps.append(f"p{i + 1}")
@@ -472,10 +425,6 @@ async def development_async() -> None:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=";")
         writer.writeheader()
         writer.writerows(results)
-
-
-def development() -> None:
-    asyncio.run(development_async())
 
 
 if __name__ == "__main__":

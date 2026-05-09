@@ -12,7 +12,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - .storage/init:/docker-entrypoint-initdb.d
+      - ./storage/init:/docker-entrypoint-initdb.d
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
@@ -60,65 +60,6 @@ services:
     networks:
       - app_network
 
-  temporal-postgres:
-    image: postgres:18-alpine
-    container_name: temporal-db
-    environment:
-      POSTGRES_USER: temporal
-      POSTGRES_PASSWORD: temporal
-      POSTGRES_DB: temporal
-    volumes:
-      - temporal_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - app_network
-
-  temporal-server:
-    image: temporalio/auto-setup:latest
-    ports:
-      - "7233:7233"
-    environment:
-      - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=temporal
-      - POSTGRES_PWD=temporal
-      - POSTGRES_SEEDS=temporal-postgres
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "tctl",
-          "--address",
-          "temporal-server:7233",
-          "cluster",
-          "health",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    depends_on:
-      temporal-postgres:
-        condition: service_healthy
-    networks:
-      - app_network
-
-  temporal-web:
-    image: temporalio/web:latest
-    container_name: temporal-web
-    ports:
-      - "8088:8088"
-    environment:
-      - TEMPORAL_GRPC_ENDPOINT=temporal-server:7233
-    depends_on:
-      temporal-server:
-        condition: service_healthy
-    networks:
-      - app_network
-
 networks:
   app_network:
     driver: bridge
@@ -127,4 +68,3 @@ networks:
 volumes:
   minio_data:
   postgres_data:
-  temporal_postgres_data:
