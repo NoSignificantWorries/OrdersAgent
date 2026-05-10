@@ -6,11 +6,20 @@ import openpyxl
 
 from cloud import MinIOClient, get_bytes_object, put_bytes_object
 from database import DatabaseManager, MaterialRepository, init_database
+from llm import LLM, decide_by_thresholds
 from materials import DELIMETERS, ParseResults, ParserV2
 from table import TableParseResults, TableWorker
 
 ATTACHMENTS_BUCKET = "orders-attachments"
 RESULTS_BUCKET = "results"
+
+
+def classify_email_text(
+    llm_worker, subject: str, body: str, files_text: str | None
+) -> float:
+    parts = [subject or "", files_text or "", body or ""]
+    text = "\n\n".join(part for part in parts if part).strip()
+    return llm_worker.predict_prob_1(text)
 
 
 def make_xlsx(origin_table: List[TableParseResults], elements: Dict[str, ParseResults]):
@@ -229,6 +238,26 @@ def development() -> None:
     DatabaseManager.close()
 
 
+def dev_llm():
+    model_path = Path("model_out/final_lora")
+
+    llm_worker = LLM(model_path)
+    print("LLM loaded:", llm_worker)
+
+    examples = [
+        "Добрый день. Просим сделать расчет.",
+        "Нужен счет, прошу выставить.",
+        "Заявка в работу, без пересчета.",
+    ]
+
+    for text in examples:
+        prob_1 = llm_worker.predict_prob_1(text)
+        print(f"{text}: {prob_1}")
+        model_decision, predicted_class, new_status = decide_by_thresholds(prob_1)
+        print(model_decision, predicted_class, new_status)
+
+
 if __name__ == "__main__":
     # main()
-    development()
+    dev_llm()
+    # development()

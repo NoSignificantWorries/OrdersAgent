@@ -1,135 +1,125 @@
 -- ============================================
--- 1. ENUM ТИПЫ (создаем до таблиц!)
+-- 1. ENUM для статусов задач
 -- ============================================
 
--- Проверяем существование перед созданием
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'task_type') THEN
-        CREATE TYPE task_type AS ENUM (
-            'classify_email',
-            'manual_classify',
-            'parse_documents',
-            'manual_identify_materials',
-            'reparse_with_manual_input'
-        );
-    END IF;
-
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'task_status') THEN
         CREATE TYPE task_status AS ENUM (
-            'pending',
-            'in_progress',
-            'awaiting_user',
+            'new',
+            'downloaded',
+            'files_saved',
+            'ml_processing',
+            'ml_classified',
+            'ml_low_confidence',
+            'excel_ambiguous',
+            'manual_review_done',
             'completed',
-            'failed',
-            'skipped'
+            'error'
         );
     END IF;
 END$$;
+
 
 -- ============================================
 -- 2. ТАБЛИЦЫ
 -- ============================================
 
+-- Пользователи
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     login VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     pass_hash CHAR(60) NOT NULL,
-    role VARCHAR(20) NOT NULL DEFAULT 'manager',
-    current_load INT DEFAULT 0,
-    mail_access_token TEXT,
-    mail_refresh_token TEXT,
-    mail_access_expires_at TIMESTAMPTZ,
+    role VARCHAR(20) NOT NULL DEFAULT 'manager',   -- 'admin' или 'manager'
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Письма и их метаданные
+-- Маппинг материалов
+CREATE TABLE IF NOT EXISTS mappings (
+    source VARCHAR(255) PRIMARY KEY,
+    target VARCHAR(255),
+    black_list BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+-- Письма
 CREATE TABLE IF NOT EXISTS emails (
     id BIGSERIAL PRIMARY KEY,
-    target_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    email_uid BIGINT UNIQUE,  -- уникальный идентификатор письма в почтовом ящике
+    mailbox VARCHAR(100) NOT NULL,
+    email_uid BIGINT NOT NULL,
     email_from TEXT,
-    email_subject VARCHAR(255),
-    email_body TEXT,
+    email_subject VARCHAR(500),
+    raw_email TEXT,
     email_date TIMESTAMPTZ,
     prob_1 DOUBLE PRECISION,
     predicted_class SMALLINT,
     model_decision TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(mailbox, email_uid)
 );
 
--- Документы (отдельно от писем)
+-- Вложения
 CREATE TABLE IF NOT EXISTS documents (
     id BIGSERIAL PRIMARY KEY,
     email_id BIGINT NOT NULL REFERENCES emails(id) ON DELETE CASCADE,
-    document_name VARCHAR(255),
-    object_bucket TEXT,
-    object_key TEXT,
-    document_data BYTEA,
-    result_document_name VARCHAR(255),
-    result_document_data BYTEA,
+    filename VARCHAR(500),
+    minio_object_key TEXT,
+    content_type VARCHAR(100),
+    size_bytes BIGINT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ЗАДАЧИ (сквозная очередь) — теперь типы ENUM существуют
+-- Задачи
 CREATE TABLE IF NOT EXISTS tasks (
     id BIGSERIAL PRIMARY KEY,
     email_id BIGINT NOT NULL REFERENCES emails(id) ON DELETE CASCADE,
+    document_id BIGINT REFERENCES documents(id) ON DELETE SET NULL,
 
-    -- Тип задачи
-    type task_type NOT NULL,
+    status task_status NOT NULL DEFAULT 'new',
 
-    -- Статус задачи
-    status task_status NOT NULL DEFAULT 'pending',
-
-    -- Приоритет (чем меньше число, тем выше приоритет)
-    priority INT DEFAULT 100,
-
-    -- Кто обрабатывает
-    assigned_to BIGINT REFERENCES users(id) ON DELETE SET NULL,
-
-    -- Данные для задачи (гибкий JSON)
-    input_data JSONB DEFAULT '{}',
-
-    -- Результаты (включая классификацию)
+    -- Результаты ML и парсинга
     output_data JSONB DEFAULT '{}',
 
-    -- Метаданные выполнения
-    attempts INT DEFAULT 0,
-    max_attempts INT DEFAULT 3,
-    error_message TEXT,
+    -- Ручное решение пользователя
+    manual_decision JSONB,
 
-    -- Тайминги
+    -- Кто взял задачу (для связи с users)
+    assigned_to BIGINT REFERENCES users(id) ON DELETE SET NULL,
+
+    -- Трекинг ошибок
+    error_message TEXT,
+    retry_count INT DEFAULT 0,
+
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    started_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     completed_at TIMESTAMPTZ
 );
+
 
 -- ============================================
 -- 3. ИНДЕКСЫ
 -- ============================================
 
--- Основной индекс для получения следующей задачи
-CREATE INDEX IF NOT EXISTS idx_tasks_next
-    ON tasks(priority, created_at)
-    WHERE status = 'pending';
+-- Планировщик: получить задачи на обработку
+CREATE INDEX IF NOT EXISTS idx_tasks_pending
+    ON tasks(status, created_at)
+    WHERE status IN ('new', 'downloaded', 'files_saved', 'manual_review_done');
 
--- Индекс для воркеров
-CREATE INDEX IF NOT EXISTS idx_tasks_type_pending
-    ON tasks(type, priority, created_at)
-    WHERE status = 'pending';
+-- WebUI: задачи, ожидающие ручного вмешательства
+CREATE INDEX IF NOT EXISTS idx_tasks_manual
+    ON tasks(status, created_at)
+    WHERE status IN ('ml_low_confidence', 'excel_ambiguous');
 
--- Индекс для поиска задач, ожидающих пользователя
-CREATE INDEX IF NOT EXISTS idx_tasks_awaiting
-    ON tasks(assigned_to, created_at)
-    WHERE status = 'awaiting_user';
+-- WebUI: задачи конкретного пользователя
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned
+    ON tasks(assigned_to, status, created_at)
+    WHERE assigned_to IS NOT NULL;
 
--- Предотвращение зависших задач (мониторинг)
-CREATE INDEX IF NOT EXISTS idx_tasks_stuck
-    ON tasks(started_at)
-    WHERE status = 'in_progress';
+-- Поиск задач по письму
+CREATE INDEX IF NOT EXISTS idx_tasks_email_id
+    ON tasks(email_id);
 
--- Быстрый поиск по email_id
-CREATE INDEX IF NOT EXISTS idx_tasks_email
-    ON tasks(email_id, status);
+-- Мониторинг зависших задач
+CREATE INDEX IF NOT EXISTS idx_tasks_stale
+    ON tasks(updated_at)
+    WHERE status NOT IN ('completed', 'error');
