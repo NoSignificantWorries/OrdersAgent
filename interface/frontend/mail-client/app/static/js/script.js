@@ -247,7 +247,13 @@ function renderEmailCard(email) {
         return `<p>${escapeHtml(line)}</p>`;
     }).join('');
     const attachmentBlock = email.document_names?.length ? `
-        <div class="email-attachments"><strong>Вложения:</strong><ul>${email.document_names.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul></div>
+        <div class="email-attachments">
+            <strong>Вложения:</strong>
+            <ul>
+                ${email.document_names.map(n => `<li>${escapeHtml(n)}</li>`).join('')}
+            </ul>
+            <button class="save-all-attachments-btn" data-email-id="${email.id}">Скачать</button>
+        </div>
     ` : '';
     const metaSender = email.email ? `${escapeHtml(email.sender)} (${escapeHtml(email.email)})` : escapeHtml(email.sender);
     const decisionValue = email.model_decision || "";
@@ -293,20 +299,36 @@ function renderEmailCard(email) {
             } catch(e) { alert("Ошибка"); }
         };
     }
+    const saveAttachmentsBtn = document.querySelector('.save-all-attachments-btn');
+    if (saveAttachmentsBtn) {
+        saveAttachmentsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            alert(`Функция сохранения вложений для письма "${email.subject}" будет реализована позже.`);
+        });
+    }
 }
 
 // ========== ЧАТ ==========
 function renderChatForEmail(email) {
     const container = document.getElementById('chat-rows-container');
+    const submitContainer = document.querySelector('.chat-submit');
     if (!container) return;
+
+    // По умолчанию скрываем кнопку
+    if (submitContainer) submitContainer.style.display = 'none';
+
     if (!email) {
         container.innerHTML = '<div class="chat-placeholder">Выберите письмо</div>';
         return;
     }
+
     if (!email.chatItems || email.chatItems.length === 0) {
         container.innerHTML = '<div class="chat-placeholder">Нет материалов для этого письма</div>';
         return;
     }
+
+    // Если есть материалы – показываем кнопку
+    if (submitContainer) submitContainer.style.display = 'block';
 
     let html = '';
     email.chatItems.forEach((item, idx) => {
@@ -322,6 +344,7 @@ function renderChatForEmail(email) {
     });
     container.innerHTML = html;
 
+    // Привязываем события
     email.chatItems.forEach((item, idx) => {
         const row = container.querySelector(`.chat-row[data-row="${idx}"]`);
         if (!row) return;
@@ -340,6 +363,30 @@ function renderChatForEmail(email) {
             });
         }
     });
+    // Если статус письма "completed", добавить блок с файлами и кнопкой "Сохранить все"
+    if (email.status === 'completed') {
+        const resultBlock = document.createElement('div');
+        resultBlock.className = 'chat-result-block';
+        resultBlock.innerHTML = `
+            <div class="email-attachments" style="margin-top: 20px;">
+                <strong>Результаты обработки:</strong>
+                <ul>
+                    <li>Файл результата 1.pdf</li>
+                    <li>Файл результата 2.pdf</li>
+                </ul>
+                <button class="save-all-results-btn" data-email-id="${email.id}">Скачать</button>
+            </div>
+        `;
+        container.appendChild(resultBlock);
+        
+        const saveResultsBtn = resultBlock.querySelector('.save-all-results-btn');
+        if (saveResultsBtn) {
+            saveResultsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                alert(`Функция сохранения файлов результатов для письма "${email.subject}" будет реализована позже.`);
+            });
+        }
+    }
 }
 
 async function sendChatData() {
@@ -388,8 +435,16 @@ async function refreshEmailsSilently() {
         } else {
             renderEmailCard(emails.find(e => e.id === prevId));
         }
-    } else if (emails.length > 0) {
-        selectEmail(emails[0].id);
+    } else {
+        // если выбранного письма больше нет, сбрасываем чат и скрываем кнопку
+        if (document.getElementById('tab-chat').classList.contains('active')) {
+            renderChatForEmail(null);
+        }
+    }
+    // дополнительная страховка: если писем нет, скрыть кнопку
+    if (emails.length === 0) {
+        const submitContainer = document.querySelector('.chat-submit');
+        if (submitContainer) submitContainer.style.display = 'none';
     }
 }
 

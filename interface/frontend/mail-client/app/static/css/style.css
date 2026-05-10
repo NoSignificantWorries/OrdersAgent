@@ -823,3 +823,30 @@ body {
         width: 100%;
     }
 }
+
+/* Кнопки "Сохранить все" (во вложениях и в результатах чата) - серая гамма */
+.save-all-attachments-btn, .save-all-results-btn {
+    margin-top: 12px;
+    min-height: 36px;
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+.save-all-attachments-btn:hover, .save-all-results-btn:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+    transform: translateY(-1px);
+}
+.save-all-attachments-btn:active, .save-all-results-btn:active {
+    transform: translateY(0);
+    background: #cbd5e1;
+}
