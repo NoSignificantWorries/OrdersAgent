@@ -4,12 +4,10 @@ import os
 from pathlib import Path
 
 import psycopg2
+from psycopg2.extras import Json
 from dotenv import load_dotenv
 
-# custom modules
 from llm.llm import LLM
-
-# configs
 from logging_config import setup_logging
 
 
@@ -27,12 +25,12 @@ def read_config(path: Path):
         config_data = json.load(config_file)
 
     llm_config = Table(config_data["llm"])
-
     return (llm_config,)
 
 
 def get_db_connection():
-    load_dotenv("../storage/.env")
+    env_path = (Path(__file__).resolve().parent / "../storage/.env").resolve()
+    load_dotenv(env_path)
 
     return psycopg2.connect(
         host=os.environ["POSTGRES_HOST"],
@@ -43,35 +41,36 @@ def get_db_connection():
     )
 
 
-def fetch_pending_emails(conn, limit=100):
+def fetch_new_classify_tasks(conn, limit: int = 100):
+    """
+    Берём задачи на LLM-классификацию из новой схемы:
+      - tasks.status = 'new'
+    Собираем текст из темы, raw_email и списка имён файлов.
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT
-                email_uid,
-                MIN(email_subject) AS email_subject,
-                MIN(email_body) AS email_body,
+                t.id AS task_id,
+                e.id AS email_id,
+                e.email_uid,
+                e.email_subject,
+                e.raw_email,
                 STRING_AGG(
-                    'FILE_' || file_idx::text || ': ' || document_name,
-                    E'\n'
-                    ORDER BY file_idx
+                    d.filename,
+                    E'\n' ORDER BY d.id
                 ) AS files_text
-            FROM (
-                SELECT
-                    email_uid,
-                    email_subject,
-                    email_body,
-                    document_name,
-                    id,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY email_uid
-                        ORDER BY id
-                    ) AS file_idx
-                FROM process_queue
-                WHERE status = 'wait'
-            ) t
-            GROUP BY email_uid
-            ORDER BY MIN(id)
+            FROM tasks t
+            JOIN emails e ON e.id = t.email_id
+            LEFT JOIN documents d ON d.email_id = e.id
+            WHERE t.status = 'new'
+            GROUP BY
+                t.id,
+                e.id,
+                e.email_uid,
+                e.email_subject,
+                e.raw_email
+            ORDER BY t.created_at
             LIMIT %s
             """,
             (limit,),
@@ -79,34 +78,98 @@ def fetch_pending_emails(conn, limit=100):
         return cur.fetchall()
 
 
-def decide_by_thresholds(prob_1: float):
-    if prob_1 <= 0.25:
-        return "auto_0", 0, "classified"
-    if prob_1 >= 0.60:
-        return "auto_1", 1, "classified"
-    return "review", None, "review"
-
-
-def update_classification(
-    conn, email_uid, prob_1, predicted_class, model_decision, status
-):
+def mark_task_processing(conn, task_id: int):
     with conn.cursor() as cur:
         cur.execute(
             """
-            UPDATE process_queue
+            UPDATE tasks
+            SET status = 'ml_processing'::task_status
+            WHERE id = %s
+            """,
+            (task_id,),
+        )
+
+
+def decide_by_thresholds(prob_1: float):
+    """
+    Маппинг порогов:
+      - prob_1 <= 0.25 → auto_0, класс 0, статус ml_classified
+      - prob_1 >= 0.60 → auto_1, класс 1, статус ml_classified
+      - иначе → review, класс не ставим, статус ml_low_confidence
+    """
+    if prob_1 <= 0.25:
+        return "auto_0", 0, "ml_classified"
+    if prob_1 >= 0.60:
+        return "auto_1", 1, "ml_classified"
+    return "review", None, "ml_low_confidence"
+
+
+def update_classification(
+    conn,
+    task_id: int,
+    email_id: int,
+    prob_1: float,
+    predicted_class: int | None,
+    model_decision: str,
+    new_task_status: str,
+):
+    """
+    Обновляет:
+      - tasks.output_data: prob_1/predicted_class/model_decision
+      - tasks.status: ml_classified или ml_low_confidence
+      - tasks.completed_at: не ставим, так как это не final-status
+      - emails: дублируем prob_1/predicted_class/model_decision
+    """
+    output_payload = {
+        "prob_1": prob_1,
+        "predicted_class": predicted_class,
+        "model_decision": model_decision,
+    }
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tasks
+            SET
+                output_data = COALESCE(%s::jsonb, '{}'::jsonb),
+                status = %s::task_status
+            WHERE id = %s
+            """,
+            (Json(output_payload), new_task_status, task_id),
+        )
+
+        cur.execute(
+            """
+            UPDATE emails
             SET
                 prob_1 = %s,
                 predicted_class = %s,
-                model_decision = %s,
-                status = %s
-            WHERE email_uid = %s
+                model_decision = %s
+            WHERE id = %s
             """,
-            (prob_1, predicted_class, model_decision, status, email_uid),
+            (prob_1, predicted_class, model_decision, email_id),
+        )
+
+
+def mark_task_error(conn, task_id: int, error_message: str):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tasks
+            SET
+                status = 'error'::task_status,
+                error_message = %s
+            WHERE id = %s
+            """,
+            (error_message[:2000], task_id),
         )
 
 
 def classify_email_text(
-    llm_worker, subject: str, body: str, files_text: str | None
+    llm_worker: LLM,
+    subject: str | None,
+    body: str | None,
+    files_text: str | None,
 ) -> float:
     parts = [subject or "", files_text or "", body or ""]
     text = "\n\n".join(part for part in parts if part).strip()
@@ -121,7 +184,6 @@ def main():
     print(f"2. model path = {model_path}")
 
     logger.info("Loading model from %s", model_path)
-
     llm_worker = LLM(model_path)
     print("3. model loaded")
 
@@ -129,48 +191,63 @@ def main():
     print("4. db connected")
 
     try:
-        rows = fetch_pending_emails(conn, limit=200)
+        rows = fetch_new_classify_tasks(conn, limit=200)
 
         if not rows:
-            logger.info("Нет записей со статусом wait")
+            logger.info("Нет задач со статусом new для LLM-классификации")
             return
 
-        logger.info("Найдено %d писем для классификации", len(rows))
+        logger.info("Найдено %d задач для классификации", len(rows))
 
-        for email_uid, subject, body, files_text in rows:
+        for task_id, email_id, email_uid, subject, body, files_text in rows:
             try:
+                mark_task_processing(conn, task_id)
+                conn.commit()
+
                 prob_1 = classify_email_text(llm_worker, subject, body, files_text)
-                model_decision, predicted_class, new_status = decide_by_thresholds(
+                model_decision, predicted_class, new_task_status = decide_by_thresholds(
                     prob_1
                 )
 
                 update_classification(
                     conn=conn,
-                    email_uid=email_uid,
+                    task_id=task_id,
+                    email_id=email_id,
                     prob_1=prob_1,
                     predicted_class=predicted_class,
                     model_decision=model_decision,
-                    status=new_status,
+                    new_task_status=new_task_status,
                 )
+                conn.commit()
 
                 logger.info(
-                    "id=%s prob_1=%.4f decision=%s predicted_class=%s status=%s",
+                    "task_id=%s email_uid=%s prob_1=%.4f decision=%s "
+                    "predicted_class=%s task_status=%s",
+                    task_id,
                     email_uid,
                     prob_1,
                     model_decision,
                     predicted_class,
-                    new_status,
+                    new_task_status,
                 )
 
             except Exception as e:
-                logger.exception("Ошибка обработки записи id=%s: %s", email_uid, e)
+                conn.rollback()
+                try:
+                    mark_task_error(conn, task_id, str(e))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
 
-        conn.commit()
+                logger.exception(
+                    "Ошибка обработки задачи task_id=%s email_uid=%s: %s",
+                    task_id,
+                    email_uid,
+                    e,
+                )
+
         logger.info("Классификация завершена")
 
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()
 
@@ -178,5 +255,4 @@ def main():
 if __name__ == "__main__":
     setup_logging()
     logger = logging.getLogger(__name__)
-
     main()

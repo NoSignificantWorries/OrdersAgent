@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(255) UNIQUE NOT NULL,
     pass_hash CHAR(60) NOT NULL,
     role VARCHAR(20) NOT NULL DEFAULT 'manager',   -- 'admin' или 'manager'
+    mail_access_token TEXT,
+    mail_refresh_token TEXT,
+    mail_access_expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

@@ -1,74 +1,54 @@
 package storage
 
 import (
-	"context"
-	"database/sql"
-	"fmt"
-	"os"
-	"time"
+    "context"
+    "database/sql"
+    "encoding/json"
+    "fmt"
+    "time"
 
-	"OrdersAgent/mail/internal/parser"
-	"OrdersAgent/storage/api"
-	minio "worker/minio/minio"
+    "OrdersAgent/mail/internal/parser"
+    "OrdersAgent/storage/api"
+    minio "worker/minio/minio"
 )
 
 // Repository — общий интерфейс хранилища.
 type Repository interface {
-	SaveFile(att parser.Attachment) error
-	SaveOrder(userID int64, order any) error
-	HasEmailInQueue(userID, emailUID int64) (bool, error)
+    SaveOrder(userID int64, order any) error
+    HasEmail(mailbox string, emailUID int64) (bool, error)
 }
 
 // UserMailAuth — OAuth‑данные почты пользователя из таблицы users.
 type UserMailAuth struct {
-	Email           string
-	AccessToken     string
-	RefreshToken    string
-	AccessExpiresAt time.Time
+    Email           string
+    AccessToken     string
+    RefreshToken    string
+    AccessExpiresAt time.Time
 }
 
 // MailUser — пользователь, у которого настроена почта.
 type MailUser struct {
-	ID    int64
-	Email string
-}
-
-// FileRepo — старая файловая реализация (если больше не нужна, можно удалить целиком).
-type FileRepo struct{}
-
-func NewFileRepo() Repository {
-	return &FileRepo{}
-}
-
-func (f *FileRepo) SaveFile(att parser.Attachment) error {
-	return fmt.Errorf("FileRepo.SaveFile is deprecated")
-}
-
-func (f *FileRepo) SaveOrder(userID int64, order any) error {
-	return nil
-}
-
-func (f *FileRepo) HasEmailInQueue(userID, emailUID int64) (bool, error) {
-	return false, nil
+    ID    int64
+    Email string
 }
 
 // DBRepo — пишет метаданные в Postgres и файлы в MinIO.
 type DBRepo struct {
-	db    *api.DB
-	store *minio.CloudStorage
+    db    *api.DB
+    store *minio.CloudStorage
 }
 
 // NewDBRepo — создаёт репозиторий с Postgres и MinIO.
 func NewDBRepo(db *api.DB, store *minio.CloudStorage) Repository {
-	return &DBRepo{
-		db:    db,
-		store: store,
-	}
+    return &DBRepo{
+        db:    db,
+        store: store,
+    }
 }
 
 // GetUserMailAuth достаёт из users email и почтовые OAuth‑токены.
 func GetUserMailAuth(db *api.DB, userID int64) (*UserMailAuth, error) {
-	row := db.Conn.QueryRow(`
+    row := db.Conn.QueryRow(`
         SELECT
             email,
             mail_access_token,
@@ -78,139 +58,174 @@ func GetUserMailAuth(db *api.DB, userID int64) (*UserMailAuth, error) {
         WHERE id = $1
     `, userID)
 
-	var email string
-	var accessToken sql.NullString
-	var refreshToken sql.NullString
-	var accessExpiresAt sql.NullTime
+    var email string
+    var accessToken sql.NullString
+    var refreshToken sql.NullString
+    var accessExpiresAt sql.NullTime
 
-	if err := row.Scan(&email, &accessToken, &refreshToken, &accessExpiresAt); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("user not found: id=%d", userID)
-		}
-		return nil, fmt.Errorf("query user mail auth: %w", err)
-	}
+    if err := row.Scan(&email, &accessToken, &refreshToken, &accessExpiresAt); err != nil {
+        if err == sql.ErrNoRows {
+            return nil, fmt.Errorf("user not found: id=%d", userID)
+        }
+        return nil, fmt.Errorf("query user mail auth: %w", err)
+    }
 
-	if !accessToken.Valid || accessToken.String == "" {
-		return nil, fmt.Errorf("user id=%d has no mail_access_token", userID)
-	}
+    if !accessToken.Valid || accessToken.String == "" {
+        return nil, fmt.Errorf("user id=%d has no mail_access_token", userID)
+    }
 
-	if !accessExpiresAt.Valid {
-		return nil, fmt.Errorf("user id=%d has no mail_access_expires_at", userID)
-	}
+    if !accessExpiresAt.Valid {
+        return nil, fmt.Errorf("user id=%d has no mail_access_expires_at", userID)
+    }
 
-	auth := &UserMailAuth{
-		Email:           email,
-		AccessToken:     accessToken.String,
-		AccessExpiresAt: accessExpiresAt.Time,
-	}
+    auth := &UserMailAuth{
+        Email:           email,
+        AccessToken:     accessToken.String,
+        AccessExpiresAt: accessExpiresAt.Time,
+    }
 
-	if refreshToken.Valid {
-		auth.RefreshToken = refreshToken.String
-	}
+    if refreshToken.Valid {
+        auth.RefreshToken = refreshToken.String
+    }
 
-	return auth, nil
+    return auth, nil
 }
 
-// SaveFile сейчас не используется, всё делаем через SaveOrder.
-func (r *DBRepo) SaveFile(att parser.Attachment) error {
-	return nil
+// SaveOrder — сохраняет письмо и вложения в MinIO, а метаданные — в emails/documents/tasks.
+func (r *DBRepo) SaveOrder(userID int64, order any) (err error) {
+    // ВАЖНО: теперь ждём значение parser.Email, а не *parser.Email
+    email, ok := order.(parser.Email)
+    if !ok {
+        return fmt.Errorf("SaveOrder: expected parser.Email, got %T", order)
+    }
+
+    ctx := context.Background()
+    emailUID := int64(email.UID)
+
+    // Получаем email пользователя (для логики / MinIO-ключей)
+    var userEmail string
+    row := r.db.Conn.QueryRowContext(ctx, `
+        SELECT email
+        FROM users
+        WHERE id = $1
+    `, userID)
+    if scanErr := row.Scan(&userEmail); scanErr != nil {
+        if scanErr == sql.ErrNoRows {
+            return fmt.Errorf("SaveOrder: user not found id=%d", userID)
+        }
+        return fmt.Errorf("SaveOrder: get user email: %w", scanErr)
+    }
+
+    // Поля письма (в виде обычных значений, не указателей)
+    emailFromValue := ""
+    if email.From != "" {
+        emailFromValue = email.From
+    }
+
+    emailSubjectValue := ""
+    if email.Subject != "" {
+        emailSubjectValue = email.Subject
+    }
+
+    rawEmailValue := ""
+    if email.Body != "" {
+        rawEmailValue = email.Body
+    }
+
+    var emailDateValue time.Time
+    if email.Date != "" {
+        if parsed, parseErr := time.Parse("2006-01-02 15:04", email.Date); parseErr == nil {
+            emailDateValue = parsed
+        }
+    }
+
+    tx, err := r.db.Conn.BeginTx(ctx, nil)
+    if err != nil {
+        return fmt.Errorf("begin tx: %w", err)
+    }
+    defer func() {
+        if err != nil {
+            _ = tx.Rollback()
+        }
+    }()
+
+    // emails: upsert по (mailbox, email_uid)
+    emailID, err := r.db.UpsertEmailTx(ctx, tx, api.EmailRecord{
+        Mailbox:      userEmail,
+        EmailUID:     emailUID,
+        EmailFrom:    emailFromValue,
+        EmailSubject: emailSubjectValue,
+        RawEmail:     rawEmailValue,
+        EmailDate:    emailDateValue,
+    })
+    if err != nil {
+        return fmt.Errorf("upsert email (user_id=%d, uid=%d): %w", userID, emailUID, err)
+    }
+
+    // Сохраняем вложения в MinIO и documents
+    var firstDocumentID *int64
+
+    if len(email.Files) > 0 {
+        for i, f := range email.Files {
+            name := f.Name
+            // Ключ в MinIO: userEmail/uid/index_name
+            objectKey := fmt.Sprintf("%s/%d/%d_%s", userEmail, emailUID, i+1, name)
+
+            if upErr := r.store.Upload(ctx, objectKey, f.Data); upErr != nil {
+                err = fmt.Errorf("upload attachment %s (key=%s): %w", name, objectKey, upErr)
+                return err
+            }
+
+            // В новой схеме documents
+            docID, insErr := r.db.InsertDocumentTx(ctx, tx, api.DocumentRecord{
+                EmailID:        emailID,
+                Filename:       name,
+                MinioObjectKey: objectKey,
+                ContentType:    "", // при желании можно взять из f
+                SizeBytes:      int64(len(f.Data)),
+            })
+            if insErr != nil {
+                return fmt.Errorf("insert document (email_id=%d, key=%s): %w", emailID, objectKey, insErr)
+            }
+
+            if firstDocumentID == nil {
+                firstDocumentID = &docID
+            }
+        }
+    }
+
+    // Создаём стартовую задачу классификации письма
+    _, err = r.db.CreateTaskTx(ctx, tx, api.TaskRecord{
+        EmailID:        emailID,
+        DocumentID:     firstDocumentID,
+        Status:         "new",
+        OutputData:     json.RawMessage(`{}`),
+        ManualDecision: nil,
+        AssignedTo:     nil,
+        ErrorMessage:   nil,
+        RetryCount:     0,
+        CompletedAt:    nil,
+    })
+    if err != nil {
+        return fmt.Errorf("create classify_email task (email_id=%d): %w", emailID, err)
+    }
+
+    if err = tx.Commit(); err != nil {
+        return fmt.Errorf("commit tx: %w", err)
+    }
+
+    return nil
 }
 
-// SaveOrder — сохраняет письмо и вложения в MinIO и process_queue.
-func (r *DBRepo) SaveOrder(userID int64, order any) error {
-	email, ok := order.(*parser.Email)
-	if !ok {
-		return fmt.Errorf("SaveOrder: expected *parser.Email, got %T", order)
-	}
-
-	ctx := context.Background()
-	managerID := int64(1)
-	emailUID := int64(email.UID)
-
-	var emailFrom *string
-	if email.From != "" {
-		from := email.From
-		emailFrom = &from
-	}
-
-	var emailDate *time.Time
-	if email.Date != "" {
-		if parsed, err := time.Parse("2006-01-02 15:04", email.Date); err == nil {
-			emailDate = &parsed
-		}
-	}
-
-	bucket := os.Getenv("MINIO_BUCKET")
-	if bucket == "" {
-		bucket = "orders-attachments"
-	}
-
-	if len(email.Files) > 0 {
-		for i, f := range email.Files {
-			name := f.Name
-
-			// object key по схеме {email_uid}/{index}_{filename}
-			objectKey := fmt.Sprintf("%d/%d_%s", emailUID, i+1, name)
-
-			// 1. грузим файл в MinIO
-			if err := r.store.Upload(ctx, objectKey, f.Data); err != nil {
-				return fmt.Errorf("upload attachment %s (key=%s): %w", name, objectKey, err)
-			}
-
-			// 2. пишем строку в process_queue
-			item := api.QueueItem{
-				AssignedTo:   &managerID,
-				TargetUserID: userID,
-				Subject:      email.Subject,
-				Body:         email.Body,
-				EmailUID:     &emailUID,
-				EmailFrom:    emailFrom,
-				EmailDate:    emailDate,
-				DocName:      &name,
-				ObjectBucket: &bucket,
-				ObjectKey:    &objectKey,
-				Status:       "wait",
-			}
-
-			_, err := r.db.InsertQueueItem(ctx, item)
-			if err != nil {
-				return fmt.Errorf("insert queue item (uid=%d, key=%s): %w", emailUID, objectKey, err)
-			}
-		}
-		return nil
-	}
-
-	// Если вложений нет — одна запись без document_name/object_key
-	item := api.QueueItem{
-		AssignedTo:   &managerID,
-		TargetUserID: userID,
-		Subject:      email.Subject,
-		Body:         email.Body,
-		EmailUID:     &emailUID,
-		EmailFrom:    emailFrom,
-		EmailDate:    emailDate,
-		DocName:      nil,
-		ObjectBucket: nil,
-		ObjectKey:    nil,
-		Status:       "wait",
-	}
-
-	_, err := r.db.InsertQueueItem(ctx, item)
-	if err != nil {
-		return fmt.Errorf("insert queue item (uid=%d, no attachments): %w", emailUID, err)
-	}
-
-	return nil
-}
-
-func (r *DBRepo) HasEmailInQueue(userID, emailUID int64) (bool, error) {
-	ctx := context.Background()
-	return r.db.HasEmailInQueue(ctx, userID, emailUID)
+// HasEmail — проверяет, есть ли уже письмо в emails по (mailbox, email_uid).
+func (r DBRepo) HasEmail(mailbox string, emailUID int64) (bool, error) {
+    ctx := context.Background()
+    return r.db.HasEmail(ctx, mailbox, emailUID)
 }
 
 // UpdateUserMailTokens — обновляет почтовые токены пользователя в таблице users.
 func UpdateUserMailTokens(db *api.DB, userID int64, auth *UserMailAuth) error {
-	_, err := db.Conn.Exec(`
+    _, err := db.Conn.Exec(`
         UPDATE users
         SET
             mail_access_token = $1,
@@ -218,43 +233,43 @@ func UpdateUserMailTokens(db *api.DB, userID int64, auth *UserMailAuth) error {
             mail_access_expires_at = $3
         WHERE id = $4
     `,
-		auth.AccessToken,
-		auth.RefreshToken,
-		auth.AccessExpiresAt,
-		userID,
-	)
-	if err != nil {
-		return fmt.Errorf("update user mail tokens: %w", err)
-	}
-	return nil
+        auth.AccessToken,
+        auth.RefreshToken,
+        auth.AccessExpiresAt,
+        userID,
+    )
+    if err != nil {
+        return fmt.Errorf("update user mail tokens: %w", err)
+    }
+    return nil
 }
 
 // GetUsersWithMailAuth — возвращает всех пользователей, у которых есть почтовые токены.
 func GetUsersWithMailAuth(db *api.DB) ([]MailUser, error) {
-	rows, err := db.Conn.Query(`
+    rows, err := db.Conn.Query(`
         SELECT id, email
         FROM users
         WHERE mail_access_token IS NOT NULL
           AND mail_access_expires_at IS NOT NULL
         ORDER BY id
     `)
-	if err != nil {
-		return nil, fmt.Errorf("query users with mail auth: %w", err)
-	}
-	defer rows.Close()
+    if err != nil {
+        return nil, fmt.Errorf("query users with mail auth: %w", err)
+    }
+    defer rows.Close()
 
-	var users []MailUser
-	for rows.Next() {
-		var u MailUser
-		if err := rows.Scan(&u.ID, &u.Email); err != nil {
-			return nil, fmt.Errorf("scan user with mail auth: %w", err)
-		}
-		users = append(users, u)
-	}
+    var users []MailUser
+    for rows.Next() {
+        var u MailUser
+        if err := rows.Scan(&u.ID, &u.Email); err != nil {
+            return nil, fmt.Errorf("scan user with mail auth: %w", err)
+        }
+        users = append(users, u)
+    }
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows users with mail auth: %w", err)
-	}
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("rows users with mail auth: %w", err)
+    }
 
-	return users, nil
+    return users, nil
 }
