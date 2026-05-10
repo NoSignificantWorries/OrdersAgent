@@ -1,17 +1,33 @@
+import logging
+import time
+from cgitb import handler
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List
 
-import openpyxl
-
 from cloud import MinIOClient, get_bytes_object, put_bytes_object
-from database import DatabaseManager, MaterialRepository, init_database
+from database import (
+    DatabaseManager,
+    DocumentRepository,
+    EmailRepository,
+    MappingRepository,
+    TaskRepository,
+    init_database,
+)
+from database.models import TaskStatus
 from llm import LLM, decide_by_thresholds
 from materials import DELIMETERS, ParseResults, ParserV2
-from table import TableParseResults, TableWorker
+from table import TableParseResults, TableWorker, make_xlsx
 
+POLL_INTERVAL = 30
+BUSY_INTERVAL = 5
+IDLE_INTERVAL = 120
+BATCH_SIZE = 10
+MODEL_PATH = Path("model_out/final_lora")
 ATTACHMENTS_BUCKET = "orders-attachments"
 RESULTS_BUCKET = "results"
+
+logger = logging.getLogger("mail_processor")
 
 
 def classify_email_text(
@@ -22,129 +38,224 @@ def classify_email_text(
     return llm_worker.predict_prob_1(text)
 
 
-def make_xlsx(origin_table: List[TableParseResults], elements: Dict[str, ParseResults]):
-    wb = openpyxl.Workbook()
+def process_new(
+    task, email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
+) -> None:
+    email = email_repo.get_by_id(task.email_id)
+    if email is None:
+        task_repo.mark_error(task.id, "Email not found")
+        return
 
-    default_sheet = wb.active
-    wb.remove(default_sheet)
+    documents = doc_repo.get_by_email_id(task.email_id)
+    file_names = [doc.filename for doc in documents if doc.filename]
+    files = ", ".join(file_names).strip() if file_names else None
 
-    all_empty = True
-    for i, sheet_data in enumerate(origin_table):
-        ws = wb.create_sheet(title=f"Sheet {i}")
+    parts = [email.email_subject or "", email.raw_email or "", files or ""]
+    text = "\n\n".join(part for part in parts if part).strip()
 
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
-        ws.merge_cells(start_row=1, start_column=11, end_row=1, end_column=13)
-        ws.merge_cells(start_row=1, start_column=14, end_row=1, end_column=18)
-        for col_idx, header_content in [
-            (10, "Характеристики"),
-            (13, "Доп. информация"),
-        ]:
-            cell = ws.cell(row=1, column=col_idx + 1, value=header_content)
+    prob_1 = llm_worker.predict_prob_1(text)
+    model_decision, predicted_class, new_status = decide_by_thresholds(prob_1)
+    logger.info(
+        f"Task {task.id}: prob={prob_1:.3f} decision={model_decision} class={predicted_class} status={new_status}"
+    )
 
-        for col_idx, header_content in enumerate(
-            [
-                "Номенклатура 1С",
-                "П1",
-                "Р1",
-                "П2",
-                "Р2",
-                "П3",
-                "Р3",
-                "П4",
-                "Герметик",
-                "Тип изделия",
-                "X",
-                "Y",
-                "Кол-во",
-                "Маркировка",
-                "ПЗ",
-                "ШК",
-                "Номер фигуры",
-                "Уточнения",
-            ]
-        ):
-            cell = ws.cell(row=2, column=col_idx + 1, value=header_content)
+    email_repo.set_ml_result(email.id, prob_1, predicted_class, model_decision)
 
-        ws.row_dimensions[1].height = 15
-        ws.row_dimensions[2].height = 25
+    if predicted_class is None:
+        task_status = "ml_review"
+    else:
+        task_status = "ml_classified"
+    task_repo.update_status(task.id, task_status)
 
-        if sheet_data.empty or sheet_data.material is None or sheet_data.amount is None:
-            print("Empty sheet")
-            continue
 
-        X, Y = None, None
-        if sheet_data.width is None:
-            X = sheet_data.length
-            Y = sheet_data.height
-        elif sheet_data.length is None:
-            X = sheet_data.width
-            Y = sheet_data.height
-        elif sheet_data.height is None:
-            X = sheet_data.width
-            Y = sheet_data.length
+def process_classified_excel(
+    task, email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
+):
+    doc = doc_repo.get_by_id(task.document_id)
+    documents = doc_repo.get_by_email_id(task.email_id)
+    for doc in documents:
+        filename = doc.filename
+        file_data = get_bytes_object(cloud, ATTACHMENTS_BUCKET, filename)
+        if file_data is None:
+            logger.error(f"Task {task.id}: Can't open file {filename}")
+            return
 
-        if X is None or Y is None:
-            print("No enough sides on sheet")
-            continue
+        # opening table
+        worker = TableWorker(file_data, Path(filename))
+        worker.open_and_clean()
+        if worker.tables is None or not bool(worker.tables):
+            logger.error(f"Task {task.id}: Unexpected errors with the file {filename}")
+            task_repo.update_status(task.id, "error")
+            return
 
-        all_empty = False
+        # parsing simple strategy
+        res = worker.simple_parser()
 
-        current_row = 3
-        for obj_i in range(sheet_data.size):
-            material, x, y, amount = (
-                sheet_data.material[obj_i],
-                X[obj_i],
-                Y[obj_i],
-                sheet_data.amount[obj_i],
-            )
-            for i, part in enumerate(
-                elements[material].matches,
-                start=2,
-            ):
-                cell = ws.cell(row=current_row, column=i, value=part)
+        # finding unique materials
+        unique_materials = set()
+        for table in res:
+            if table.empty:
+                continue
+            unique_materials |= set(table.material)
+        unique_materials = list(unique_materials)
 
-            cell = ws.cell(row=current_row, column=1, value=material)
-            cell = ws.cell(row=current_row, column=11, value=x)
-            cell = ws.cell(row=current_row, column=12, value=y)
-            cell = ws.cell(row=current_row, column=13, value=amount)
-            cell = ws.cell(
-                row=current_row,
-                column=18,
-                value=elements[material].postfix,
-            )
-            current_row += 1
+        # parsing materials (finding unique parts)
+        parser = ParserV2(DELIMETERS)
+        unique_materials_dict = {}
+        unique_parts = set()
+        for material in unique_materials:
+            parse_results = parser.parse(material)
+            unique_materials_dict[material] = parse_results
+            unique_parts |= set(parse_results.parts)
+        unique_parts = list(unique_parts)
 
-    if all_empty:
-        return None
-    return wb
+        # searching materials
+        matches = material_repo.batch_find(unique_parts)
+        questions = []
+        for part, mat_match in matches.items():
+            if mat_match is None:
+                questions.append({part: False})
+                continue
+            _, bl = mat_match
+            if bl:
+                questions.append({part: True})
+                continue
+
+        if questions:
+            task_repo.update_status(task.id, "materials_review", output_data=questions)
+            logger.info(f"Task {task.id}: Needs manual matching for material parts")
+            return
+
+        for material, material_obj in unique_materials_dict.items():
+            for part in material_obj.parts:
+                material_obj.matches.append(matches[part][0])
+
+        wb = make_xlsx(res, unique_materials_dict)
+
+        if wb is None:
+            task_repo.update_status(task.id, "error")
+            logger.warning(f"Task {task.id}: Empty output file")
+            return
+
+        data = BytesIO()
+        wb.save(data)
+        data.seek(0)
+
+        err = put_bytes_object(
+            cloud,
+            RESULTS_BUCKET,
+            filename,
+            data,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        if err:
+            logger.error(f"Task {task.id}: Can't save file, retrying...")
+        else:
+            task_repo.update_status(task.id, "completed")
+            logger.info(f"Task {task.id}: Succesfully parsed file {filename}")
+
+
+def process_manual_matching(
+    task, email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
+):
+    answers = task.manual_decision
+    answers_flat = [(part, data[0], data[1]) for part, data in answers.items()]
+    material_repo.batch_add(answers_flat)
+
+    task_repo.update_status(task.id, "ml_classified")
+
+
+HANDLERS = {
+    TaskStatus.NEW.value: process_new,
+    TaskStatus.ML_CLASSIFIED.value: process_classified_excel,
+    TaskStatus.MANUAL_REVIEW_DONE.value: process_manual_matching,
+}
+
+
+def process_single_task(task, **deps) -> None:
+    handler = HANDLERS.get(task.status)
+    if handler is None:
+        logger.warning(f"Task {task.id}: no handler for '{task.status}'")
+        return
+    try:
+        handler(task, **deps)
+    except Exception as err:
+        logger.exception(f"Task {task.id} failed: {err}")
+        deps["task_repo"].mark_error(task.id, str(err))
+
+
+def main_loop(
+    email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
+) -> None:
+    logging.info("Starting main loop")
+
+    while True:
+        try:
+            while True:
+                pending = task_repo.fetch_pending(limit=BATCH_SIZE)
+                if not pending:
+                    break
+
+                logging.info(f"Processing {len(pending)} tasks")
+                for task in pending:
+                    process_single_task(
+                        task,
+                        email_repo=email_repo,
+                        task_repo=task_repo,
+                        doc_repo=doc_repo,
+                        material_repo=material_repo,
+                        cloud=cloud,
+                        llm_worker=llm_worker,
+                    )
+
+            if task_repo.has_manual():
+                interval = BUSY_INTERVAL
+            else:
+                interval = IDLE_INTERVAL
+
+            logging.debug(f"Sleeping {interval}s")
+            time.sleep(interval)
+
+        except KeyboardInterrupt:
+            logging.info("Keyboard interruption")
+            break
+        except Exception as err:
+            logging.error(f"Main loop error: {err}")
+            time.sleep(POLL_INTERVAL)
 
 
 def main() -> None:
-    try:
-        init_database()
-        cloud_client = MinIOClient.get_client()
+    init_database(pool_size=5)
 
+    email_repo = EmailRepository()
+    task_repo = TaskRepository()
+    doc_repo = DocumentRepository()
+    material_repo = MappingRepository()
+    cloud = MinIOClient.get_client()
+    llm_worker = LLM(MODEL_PATH)
+
+    try:
+        main_loop(
+            email_repo=email_repo,
+            task_repo=task_repo,
+            doc_repo=doc_repo,
+            material_repo=material_repo,
+            cloud=cloud,
+            llm_worker=llm_worker,
+        )
     finally:
-        ...
+        DatabaseManager.close()
 
 
 def development() -> None:
     init_database()
-    cloud_client = MinIOClient.get_client()
+    cloud = MinIOClient.get_client()
 
     # testfile = Path("../private/tables/1108A.xls")
     filename = "033/1108A.xls"
 
-    file_data = get_bytes_object(cloud_client, ATTACHMENTS_BUCKET, filename)
+    file_data = get_bytes_object(cloud, ATTACHMENTS_BUCKET, filename)
     print(file_data)
-    # try:
-    #     response = cloud_client.get_object(ATTACHMENTS_BUCKET, filename)
-    #     file_data = BytesIO(response.read())
-    #     response.close()
-    #     response.release_conn()
-    # except Exception:
-    #     print("Errors while file reading")
-    #     return
 
     # worker = TableWorker(None, testfile)
     worker = TableWorker(file_data, Path(filename))
@@ -175,7 +286,7 @@ def development() -> None:
     print(unique_materials_dict)
     print(unique_parts)
 
-    material_repo = MaterialRepository()
+    material_repo = MappingRepository()
     matches = material_repo.batch_find(unique_parts)
     print(matches)
     questions = []
@@ -217,23 +328,13 @@ def development() -> None:
     data.seek(0)
 
     err = put_bytes_object(
-        cloud_client,
+        cloud,
         RESULTS_BUCKET,
         filename,
         data,
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     print(err)
-    # try:
-    #     cloud_client.put_object(
-    #         bucket_name=RESULTS_BUCKET,
-    #         object_name=filename,
-    #         data=data,
-    #         length=data.getbuffer().nbytes,
-    #         content_type=,
-    #     )
-    # except Exception:
-    #     print("Error while saving file in the cloud")
 
     DatabaseManager.close()
 
@@ -258,6 +359,11 @@ def dev_llm():
 
 
 if __name__ == "__main__":
-    # main()
-    dev_llm()
+    # dev_llm()
     # development()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    )
+    main()

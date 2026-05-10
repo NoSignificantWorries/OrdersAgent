@@ -1,169 +1,131 @@
-from datetime import datetime
-from enum import Enum
-from typing import Any, Optional
+# models.py
+import enum
 
 from sqlalchemy import (
-    JSON,
     BigInteger,
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
-    Index,
     Integer,
+    SmallInteger,
     String,
     Text,
-    text,
+    UniqueConstraint,
 )
-from sqlalchemy import Enum as SAEnum
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.sql import func
 
-from .base import Base
-
-# ============================================================
-# ENUM-ы (совпадают с PG enum-ами)
-# ============================================================
+Base = declarative_base()
 
 
-class TaskType(str, Enum):
-    CLASSIFY_EMAIL = "classify_email"
-    MANUAL_CLASSIFY = "manual_classify"
-    PARSE_DOCUMENTS = "parse_documents"
-    MANUAL_IDENTIFY_MATERIALS = "manual_identify_materials"
-    REPARSE_WITH_MANUAL_INPUT = "reparse_with_manual_input"
-
-
-class TaskStatus(str, Enum):
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
+class TaskStatus(str, enum.Enum):
+    NEW = "new"
+    DOWNLOADED = "downloaded"
+    FILES_SAVED = "files_saved"
+    ML_PROCESSING = "ml_processing"
+    ML_CLASSIFIED = "ml_classified"
+    ML_LOW_CONFIDENCE = "ml_low_confidence"
+    EXCEL_AMBIGUOUS = "excel_ambiguous"
+    MANUAL_REVIEW_DONE = "manual_review_done"
     COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-
-
-# ============================================================
-# Модели
-# ============================================================
+    ERROR = "error"
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    login: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    pass_hash: Mapped[str] = mapped_column(String(60), nullable=False)  # bcrypt hash
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="manager")
-    current_load: Mapped[int] = mapped_column(Integer, default=0)
-
-    mail_access_token: Mapped[Optional[str]] = mapped_column(Text)
-    mail_refresh_token: Mapped[Optional[str]] = mapped_column(Text)
-    mail_access_expires_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True)
-    )
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("NOW()")
-    )
-
-
-class Email(Base):
-    __tablename__ = "emails"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    target_user_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
-    )
-    email_uid: Mapped[Optional[int]] = mapped_column(BigInteger, unique=True)
-    email_from: Mapped[Optional[str]] = mapped_column(Text)
-    email_subject: Mapped[Optional[str]] = mapped_column(String(255))
-    email_body: Mapped[Optional[str]] = mapped_column(Text)
-    email_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("NOW()")
-    )
-
-    target_user: Mapped[Optional["User"]] = relationship("User")
-
-
-class Document(Base):
-    __tablename__ = "documents"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    email_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("emails.id", ondelete="CASCADE"), nullable=False
-    )
-    document_name: Mapped[Optional[str]] = mapped_column(String(255))
-    object_bucket: Mapped[Optional[str]] = mapped_column(Text)
-    object_key: Mapped[Optional[str]] = mapped_column(Text)
-    document_data: Mapped[Optional[bytes]] = mapped_column(Text)  # BYTEA
-    result_document_name: Mapped[Optional[str]] = mapped_column(String(255))
-    result_document_data: Mapped[Optional[bytes]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("NOW()")
-    )
-
-    email: Mapped["Email"] = relationship("Email")
-
-
-class Task(Base):
-    __tablename__ = "tasks"
-    __table_args__ = (
-        Index(
-            "idx_tasks_next",
-            "priority",
-            "created_at",
-            postgresql_where=text("status = 'pending'"),
-        ),
-        Index(
-            "idx_tasks_type_pending",
-            "type",
-            "priority",
-            "created_at",
-            postgresql_where=text("status = 'pending'"),
-        ),
-        Index("idx_tasks_email", "email_id", "status"),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    email_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("emails.id", ondelete="CASCADE"), nullable=False
-    )
-
-    type: Mapped[TaskType] = mapped_column(
-        SAEnum(TaskType, name="task_type", create_type=False), nullable=False
-    )
-    status: Mapped[TaskStatus] = mapped_column(
-        SAEnum(TaskStatus, name="task_status", create_type=False),
-        nullable=False,
-        default=TaskStatus.PENDING,
-    )
-
-    priority: Mapped[int] = mapped_column(Integer, default=100)
-    assigned_to: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
-    )
-
-    input_data: Mapped[Any] = mapped_column(JSON, default=dict)
-    output_data: Mapped[Any] = mapped_column(JSON, default=dict)
-
-    attempts: Mapped[int] = mapped_column(Integer, default=0)
-    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("NOW()")
-    )
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-
-    email: Mapped["Email"] = relationship("Email")
-    assigned_user: Mapped[Optional["User"]] = relationship("User")
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    login = Column(String(50), unique=True, nullable=False)
+    email = Column(String(255), unique=True, nullable=False)
+    pass_hash = Column(String(60), nullable=False)  # bcrypt hash
+    role = Column(String(20), nullable=False, default="manager")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Mapping(Base):
     __tablename__ = "mappings"
 
-    source = Column(String, primary_key=True, index=True)
-    target = Column(String, nullable=True)
+    source = Column(String(255), primary_key=True)
+    target = Column(String(255), nullable=True)
     black_list = Column(Boolean, nullable=False, default=False)
+
+
+class Email(Base):
+    __tablename__ = "emails"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mailbox = Column(String(100), nullable=False)
+    email_uid = Column(BigInteger, nullable=False)
+    email_from = Column(Text, nullable=True)
+    email_subject = Column(String(500), nullable=True)
+    raw_email = Column(Text, nullable=True)
+    email_date = Column(DateTime(timezone=True), nullable=True)
+    prob_1 = Column(Float, nullable=True)
+    predicted_class = Column(SmallInteger, nullable=True)
+    model_decision = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    documents = relationship("Document", back_populates="email")
+    tasks = relationship("Task", back_populates="email")
+
+    __table_args__ = (UniqueConstraint("mailbox", "email_uid"),)
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    email_id = Column(
+        BigInteger, ForeignKey("emails.id", ondelete="CASCADE"), nullable=False
+    )
+    filename = Column(String(500), nullable=True)
+    minio_object_key = Column(Text, nullable=True)
+    content_type = Column(String(100), nullable=True)
+    size_bytes = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    email = relationship("Email", back_populates="documents")
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    email_id = Column(
+        BigInteger, ForeignKey("emails.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id = Column(
+        BigInteger, ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
+    )
+
+    status = Column(
+        String(50),
+        nullable=False,
+        default=TaskStatus.NEW.value,
+        index=True,
+    )
+
+    # Гибкий результат
+    output_data = Column(JSONB, default={})
+    # Ручное решение
+    manual_decision = Column(JSONB, nullable=True)
+    # Кто взял
+    assigned_to = Column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    email = relationship("Email", back_populates="tasks")
+    document = relationship("Document")
+    assigned_user = relationship("User")

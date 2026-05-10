@@ -11,6 +11,8 @@ import xlrd
 from openpyxl import cell
 from rapidfuzz import fuzz
 
+from materials import ParseResults
+
 
 class CellType(Flag):
     TEXT = auto()
@@ -477,6 +479,103 @@ class TableWorker:
             results.append(_parse_sheet(sheet))
 
         return results
+
+
+def make_xlsx(origin_table: List[TableParseResults], elements: Dict[str, ParseResults]):
+    wb = openpyxl.Workbook()
+
+    default_sheet = wb.active
+    wb.remove(default_sheet)
+
+    all_empty = True
+    for i, sheet_data in enumerate(origin_table):
+        ws = wb.create_sheet(title=f"Sheet {i}")
+
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
+        ws.merge_cells(start_row=1, start_column=11, end_row=1, end_column=13)
+        ws.merge_cells(start_row=1, start_column=14, end_row=1, end_column=18)
+        for col_idx, header_content in [
+            (10, "Характеристики"),
+            (13, "Доп. информация"),
+        ]:
+            cell = ws.cell(row=1, column=col_idx + 1, value=header_content)
+
+        for col_idx, header_content in enumerate(
+            [
+                "Номенклатура 1С",
+                "П1",
+                "Р1",
+                "П2",
+                "Р2",
+                "П3",
+                "Р3",
+                "П4",
+                "Герметик",
+                "Тип изделия",
+                "X",
+                "Y",
+                "Кол-во",
+                "Маркировка",
+                "ПЗ",
+                "ШК",
+                "Номер фигуры",
+                "Уточнения",
+            ]
+        ):
+            cell = ws.cell(row=2, column=col_idx + 1, value=header_content)
+
+        ws.row_dimensions[1].height = 15
+        ws.row_dimensions[2].height = 25
+
+        if sheet_data.empty or sheet_data.material is None or sheet_data.amount is None:
+            print("Empty sheet")
+            continue
+
+        X, Y = None, None
+        if sheet_data.width is None:
+            X = sheet_data.length
+            Y = sheet_data.height
+        elif sheet_data.length is None:
+            X = sheet_data.width
+            Y = sheet_data.height
+        elif sheet_data.height is None:
+            X = sheet_data.width
+            Y = sheet_data.length
+
+        if X is None or Y is None:
+            print("No enough sides on sheet")
+            continue
+
+        all_empty = False
+
+        current_row = 3
+        for obj_i in range(sheet_data.size):
+            material, x, y, amount = (
+                sheet_data.material[obj_i],
+                X[obj_i],
+                Y[obj_i],
+                sheet_data.amount[obj_i],
+            )
+            for i, part in enumerate(
+                elements[material].matches,
+                start=2,
+            ):
+                cell = ws.cell(row=current_row, column=i, value=part)
+
+            cell = ws.cell(row=current_row, column=1, value=material)
+            cell = ws.cell(row=current_row, column=11, value=x)
+            cell = ws.cell(row=current_row, column=12, value=y)
+            cell = ws.cell(row=current_row, column=13, value=amount)
+            cell = ws.cell(
+                row=current_row,
+                column=18,
+                value=elements[material].postfix,
+            )
+            current_row += 1
+
+    if all_empty:
+        return None
+    return wb
 
 
 def development():
