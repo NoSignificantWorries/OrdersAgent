@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS emails (
     email_subject VARCHAR(255),
     email_body TEXT,
     email_date TIMESTAMPTZ,
+    prob_1 DOUBLE PRECISION,
+    predicted_class SMALLINT,
+    model_decision TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
