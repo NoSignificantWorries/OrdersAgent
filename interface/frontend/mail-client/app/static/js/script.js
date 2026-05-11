@@ -45,6 +45,99 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+async function downloadBlob(url, filename) {
+    const resp = await fetch(url, {
+        method: 'GET',
+        credentials: 'same-origin'
+    });
+
+    if (!resp.ok) {
+        let message = 'Ошибка скачивания файла';
+
+        try {
+            const data = await resp.json();
+            if (data && data.detail) {
+                message = data.detail;
+            }
+        } catch (_) {}
+
+        throw new Error(message);
+    }
+
+    const blob = await resp.blob();
+    const objectUrl = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename || 'file';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+
+async function downloadEmailAttachments(email) {
+    const docs = getDisplayDocuments(email).filter(doc => doc && doc.id);
+
+    if (!docs.length) {
+        alert("Нет файлов для скачивания");
+        return;
+    }
+
+    try {
+        for (const doc of docs) {
+            await downloadBlob(
+                `/api/documents/${doc.id}/download`,
+                doc.document_name
+            );
+        }
+    } catch (e) {
+        console.error(e);
+        alert(e.message || "Ошибка скачивания файлов");
+    }
+}
+
+
+async function downloadChatResultDocument(email) {
+    if (!email?.task?.id) {
+        alert("У письма нет связанной задачи");
+        return;
+    }
+
+    const output = email?.task?.output_data || {};
+    const documentId =
+        email?.task?.document_id ??
+        output?.document_id ??
+        output?.result_document_id ??
+        output?.result_doc_id;
+
+    if (!documentId) {
+        alert("У задачи нет document_id результирующего файла");
+        return;
+    }
+
+    const doc = (email?.documents || []).find(d => String(d?.id) === String(documentId));
+    const filename =
+        doc?.document_name ||
+        output?.result_document_name ||
+        output?.filename ||
+        output?.result_filename ||
+        output?.document_name ||
+        `result-${documentId}`;
+
+    try {
+        await downloadBlob(
+            `/api/documents/${documentId}/result-download`,
+            filename
+        );
+    } catch (e) {
+        console.error(e);
+        alert(e.message || "Ошибка скачивания результирующего файла");
+    }
+}
+
 function mapTaskStatusToUiStatus(taskStatus) {
     switch ((taskStatus || "").toLowerCase()) {
         case "new":
@@ -66,7 +159,7 @@ function mapTaskStatusToUiStatus(taskStatus) {
             return "processing";
 
         case "manual_review_done":
-            return "completed";
+            return "processing";
 
         case "completed":
             return "completed";
@@ -169,26 +262,20 @@ function extractMaterialsFromOutput(output) {
     return [];
 }
 
-function buildFilesBlock(email, buttonClass = 'save-all-attachments-btn') {
-    const docsWithName = (email?.documents || []).filter(
-        doc => doc && doc.document_name && String(doc.document_name).trim() !== ""
-    );
+function getDisplayDocuments(email) {
+    const docs = Array.isArray(email?.documents) ? email.documents : [];
+    const seenNames = new Set();
 
-    if (!docsWithName.length) {
-        return '<div class="chat-placeholder">Готовые файлы не найдены</div>';
-    }
+    return docs.filter(doc => {
+        const documentName = String(doc?.document_name ?? "").trim();
+        if (!documentName) return false;
 
-    return `
-        <div class="email-attachments">
-            <strong>Файлы:</strong>
-            <ul>
-                ${docsWithName.map(doc => `
-                    <li>${escapeHtml(doc.document_name)}</li>
-                `).join('')}
-            </ul>
-            <button class="${buttonClass}" data-email-id="${email.id}">Скачать</button>
-        </div>
-    `;
+        const key = documentName.toLowerCase();
+
+        if (seenNames.has(key)) return false;
+        seenNames.add(key);
+        return true;
+    });
 }
 
 function buildChatItemsFromOutput(output, emailId) {
@@ -251,6 +338,7 @@ function normalizeApiItem(item, idx) {
 
         task: {
             id: item.id ?? null,
+            document_id: item.documentid ?? null,
             type: item.type || null,
             status: item.status || null,
             priority: item.priority ?? 100,
@@ -275,8 +363,6 @@ function normalizeApiItem(item, idx) {
     };
 
     normalized.chatItems = buildChatItemsFromOutput(output, normalized.id);
-    console.log('task', normalized.id, 'output_data JSON:', JSON.stringify(output, null, 2));
-    console.log('task', normalized.id, 'chatItems:', normalized.chatItems);
     chatStorage.set(normalized.id, normalized.chatItems);
 
     return normalized;
@@ -421,9 +507,7 @@ function renderEmailCard(email) {
         return `<p>${escapeHtml(line)}</p>`;
     }).join('') || '<p>...</p>';
 
-    const docsWithName = (email.documents || []).filter(
-        doc => doc && doc.document_name && String(doc.document_name).trim() !== ""
-    );
+    const docsWithName = getDisplayDocuments(email);
 
     const attachmentBlock = docsWithName.length ? `
         <div class="email-attachments">
@@ -547,9 +631,9 @@ function renderEmailCard(email) {
 
     const saveAttachmentsBtn = document.querySelector('.save-all-attachments-btn');
     if (saveAttachmentsBtn) {
-        saveAttachmentsBtn.addEventListener('click', (e) => {
+        saveAttachmentsBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            alert(`Функция сохранения вложений для письма "${email.subject}" будет реализована позже.`);
+            await downloadEmailAttachments(email);
         });
     }
 }
@@ -571,13 +655,40 @@ function renderChatForEmail(email) {
     const taskStatus = (email.task_status || '').toLowerCase();
 
     if (taskStatus === 'completed') {
-        container.innerHTML = buildFilesBlock(email, 'save-all-attachments-btn');
+        const output = email?.task?.output_data || {};
+        const documentId =
+            email?.task?.document_id ??
+            output?.document_id ??
+            output?.result_document_id ??
+            output?.result_doc_id;
+
+        const resultDoc = (email?.documents || []).find(
+            doc => String(doc?.id) === String(documentId)
+        );
+
+        const resultFileName =
+            resultDoc?.document_name ||
+            output?.result_document_name ||
+            output?.filename ||
+            output?.result_filename ||
+            output?.document_name ||
+            `result-task-${email.task.id}`;
+
+        container.innerHTML = `
+            <div class="email-attachments">
+                <strong>Результирующий файл:</strong>
+                <ul>
+                    <li>${escapeHtml(String(resultFileName))}</li>
+                </ul>
+                <button class="save-all-attachments-btn" data-email-id="${email.id}">Скачать</button>
+            </div>
+        `;
 
         const downloadBtn = container.querySelector('.save-all-attachments-btn');
         if (downloadBtn) {
-            downloadBtn.addEventListener('click', (e) => {
+            downloadBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                alert(`Функция сохранения вложений для письма "${email.subject}" будет реализована позже.`);
+                await downloadChatResultDocument(email);
             });
         }
 

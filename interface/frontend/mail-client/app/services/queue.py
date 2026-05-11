@@ -100,6 +100,7 @@ async def list_queue_for_user(
                 e.created_at AS email_created_at,
 
                 t.id AS task_id,
+                t.document_id AS task_document_id,
                 NULL::text AS task_type,
                 t.status AS task_status,
                 100 AS task_priority,
@@ -135,6 +136,7 @@ async def list_queue_for_user(
             LEFT JOIN LATERAL (
                 SELECT
                     tt.id,
+                    tt.document_id,
                     NULL::text AS type,
                     tt.status,
                     100 AS priority,
@@ -183,6 +185,7 @@ async def list_queue_for_user(
         sql += f"""
             GROUP BY
                 e.id,
+                t.document_id,
                 e.mailbox,
                 e.email_uid,
                 e.email_from,
@@ -257,6 +260,7 @@ async def list_queue_for_user(
                 item.update(
                     {
                         "id": row["task_id"],
+                        "documentid":row["task_document_id"],
                         "type": row["task_type"],
                         "status": row["task_status"],
                         "priority": row["task_priority"],
@@ -281,6 +285,7 @@ async def list_queue_for_user(
                 item.update(
                     {
                         "id": row["email_id"],
+                        "documentid":None,
                         "type": None,
                         "status": None,
                         "priority": 100,

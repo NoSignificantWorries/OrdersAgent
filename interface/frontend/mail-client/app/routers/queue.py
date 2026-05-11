@@ -1,15 +1,20 @@
 import json
+from io import BytesIO
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.db import get_db_pool
 from app.routers import auth
 from app.services.queue import list_queue_for_user
+from processors.cloud.minio import MinIOClient
 
 
 router = APIRouter(prefix="/api", tags=["queue"])
-
+SOURCE_ATTACHMENTS_BUCKET = "orders-attachments"
+RESULTS_BUCKET = "results"
 
 class DecisionUpdate(BaseModel):
     predicted_class: int | None = None
@@ -17,6 +22,16 @@ class DecisionUpdate(BaseModel):
 
 class MaterialsManualDecisionUpdate(BaseModel):
     manual_decision: dict[str, list]
+
+
+async def _load_document_bytes_from_storage(bucket_name: str, object_key: str) -> bytes:
+    client = MinIOClient.get_client()
+    response = client.get_object(bucket_name, object_key)
+    try:
+        return response.read()
+    finally:
+        response.close()
+        response.release_conn()
 
 
 @router.get("/queue")
@@ -47,6 +62,90 @@ async def get_queue(
         "items": items,
     }
 
+async def _download_document_by_id(
+    document_id: int,
+    request: Request,
+    bucket_name: str,
+    not_found_detail: str = "Файл не найден",
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    d.id,
+                    d.filename,
+                    d.minio_object_key,
+                    e.mailbox
+                FROM documents d
+                JOIN emails e ON e.id = d.email_id
+                WHERE d.id = $1
+                """,
+                document_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    d.id,
+                    d.filename,
+                    d.minio_object_key,
+                    e.mailbox
+                FROM documents d
+                JOIN emails e ON e.id = d.email_id
+                WHERE d.id = $1
+                  AND e.mailbox = $2
+                """,
+                document_id,
+                user["email"],
+            )
+
+    if not row:
+        raise HTTPException(status_code=404, detail=not_found_detail)
+
+    object_key = row["minio_object_key"]
+    filename = row["filename"] or f"document-{document_id}"
+
+    if not object_key:
+        raise HTTPException(status_code=404, detail="У файла отсутствует object_key")
+
+    try:
+        file_bytes = await _load_document_bytes_from_storage(bucket_name, object_key)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка чтения файла: {e}")
+
+    return StreamingResponse(
+        BytesIO(file_bytes),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"
+        },
+    )
+
+@router.get("/documents/{document_id}/download")
+async def download_source_document(document_id: int, request: Request):
+    return await _download_document_by_id(
+        document_id=document_id,
+        request=request,
+        bucket_name=SOURCE_ATTACHMENTS_BUCKET,
+        not_found_detail="Файл не найден",
+    )
+
+
+@router.get("/documents/{document_id}/result-download")
+async def download_result_document(document_id: int, request: Request):
+    return await _download_document_by_id(
+        document_id=document_id,
+        request=request,
+        bucket_name=RESULTS_BUCKET,
+        not_found_detail="Файл не найден",
+    )
 
 @router.post("/queue/{task_id}/decision")
 async def update_queue_decision(
@@ -281,12 +380,6 @@ async def update_materials_manual_decision(
                     )
 
                 normalized_manual_decision[material] = [user_value, blacklist_value]
-
-            output_patch = {
-                "manual_decision": normalized_manual_decision,
-                "manual_updated_by": user["id"],
-                "manual_review": True,
-            }
 
             updated_task = await conn.fetchrow(
                 """
