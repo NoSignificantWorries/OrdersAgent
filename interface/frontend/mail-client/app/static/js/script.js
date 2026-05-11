@@ -169,6 +169,28 @@ function extractMaterialsFromOutput(output) {
     return [];
 }
 
+function buildFilesBlock(email, buttonClass = 'save-all-attachments-btn') {
+    const docsWithName = (email?.documents || []).filter(
+        doc => doc && doc.document_name && String(doc.document_name).trim() !== ""
+    );
+
+    if (!docsWithName.length) {
+        return '<div class="chat-placeholder">Готовые файлы не найдены</div>';
+    }
+
+    return `
+        <div class="email-attachments">
+            <strong>Файлы:</strong>
+            <ul>
+                ${docsWithName.map(doc => `
+                    <li>${escapeHtml(doc.document_name)}</li>
+                `).join('')}
+            </ul>
+            <button class="${buttonClass}" data-email-id="${email.id}">Скачать</button>
+        </div>
+    `;
+}
+
 function buildChatItemsFromOutput(output, emailId) {
     const materials = extractMaterialsFromOutput(output);
 
@@ -546,7 +568,23 @@ function renderChatForEmail(email) {
         return;
     }
 
-    if ((email.task_status || '').toLowerCase() !== 'materials_review') {
+    const taskStatus = (email.task_status || '').toLowerCase();
+
+    if (taskStatus === 'completed') {
+        container.innerHTML = buildFilesBlock(email, 'save-all-attachments-btn');
+
+        const downloadBtn = container.querySelector('.save-all-attachments-btn');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                alert(`Функция сохранения вложений для письма "${email.subject}" будет реализована позже.`);
+            });
+        }
+
+        return;
+    }
+
+    if (taskStatus !== 'materials_review') {
         container.innerHTML = '<div class="chat-placeholder">Для этого письма ручной выбор материалов не требуется</div>';
         return;
     }
