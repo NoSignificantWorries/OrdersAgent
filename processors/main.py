@@ -30,14 +30,6 @@ RESULTS_BUCKET = "results"
 logger = logging.getLogger("mail_processor")
 
 
-def classify_email_text(
-    llm_worker, subject: str, body: str, files_text: str | None
-) -> float:
-    parts = [subject or "", files_text or "", body or ""]
-    text = "\n\n".join(part for part in parts if part).strip()
-    return llm_worker.predict_prob_1(text)
-
-
 def process_new(
     task, email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
 ) -> None:
@@ -48,7 +40,7 @@ def process_new(
 
     documents = doc_repo.get_by_email_id(task.email_id)
     file_names = [doc.filename for doc in documents if doc.filename]
-    files = ", ".join(file_names).strip() if file_names else None
+    files = "\n".join(file_names).strip() if file_names else None
 
     parts = [email.email_subject or "", email.raw_email or "", files or ""]
     text = "\n\n".join(part for part in parts if part).strip()
@@ -71,8 +63,9 @@ def process_new(
 def process_classified_excel(
     task, email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
 ):
-    doc = doc_repo.get_by_id(task.document_id)
     documents = doc_repo.get_by_email_id(task.email_id)
+    docnames = [doc.filename for doc in documents]
+    logger.info(f"Task {task.id}: Processing documents: {', '.join(docnames)}")
     for doc in documents:
         filename = doc.filename
         file_data = get_bytes_object(cloud, ATTACHMENTS_BUCKET, filename)
@@ -150,15 +143,19 @@ def process_classified_excel(
         )
         if err:
             logger.error(f"Task {task.id}: Can't save file, retrying...")
-        else:
-            task_repo.update_status(task.id, "completed")
-            logger.info(f"Task {task.id}: Succesfully parsed file {filename}")
+
+    task_repo.update_status(task.id, "completed")
+    logger.info(f"Task {task.id}: Succesfully parsed files")
 
 
 def process_manual_matching(
     task, email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
 ):
     answers = task.manual_decision
+    if answers is None:
+        task_repo.update_status(task.id, "error")
+        logger.info(f"Task {task.id}: Empty answers")
+        return
     answers_flat = [(part, data[0], data[1]) for part, data in answers.items()]
     material_repo.batch_add(answers_flat)
 
@@ -198,15 +195,19 @@ def main_loop(
 
                 logging.info(f"Processing {len(pending)} tasks")
                 for task in pending:
-                    process_single_task(
-                        task,
-                        email_repo=email_repo,
-                        task_repo=task_repo,
-                        doc_repo=doc_repo,
-                        material_repo=material_repo,
-                        cloud=cloud,
-                        llm_worker=llm_worker,
-                    )
+                    try:
+                        process_single_task(
+                            task,
+                            email_repo=email_repo,
+                            task_repo=task_repo,
+                            doc_repo=doc_repo,
+                            material_repo=material_repo,
+                            cloud=cloud,
+                            llm_worker=llm_worker,
+                        )
+                    except Exception as err:
+                        task_repo.update_status(task.id, "error")
+                        logger.exception(f"Task {task.id}: Error on task: {err}")
 
             if task_repo.has_manual():
                 interval = BUSY_INTERVAL
