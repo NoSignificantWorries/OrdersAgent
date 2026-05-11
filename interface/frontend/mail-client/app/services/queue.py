@@ -12,8 +12,8 @@ def _task_status_order_sql() -> str:
             WHEN tt.status = 'new' THEN 0
             WHEN tt.status = 'downloaded' THEN 1
             WHEN tt.status = 'files_saved' THEN 2
-            WHEN tt.status = 'ml_low_confidence' THEN 3
-            WHEN tt.status = 'excel_ambiguous' THEN 4
+            WHEN tt.status = 'ml_review' THEN 3
+            WHEN tt.status = 'materials_review' THEN 4
             WHEN tt.status = 'manual_review_done' THEN 5
             WHEN tt.status = 'completed' THEN 6
             WHEN tt.status = 'error' THEN 7

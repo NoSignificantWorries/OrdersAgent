@@ -48,23 +48,31 @@ function escapeHtml(text) {
 function mapTaskStatusToUiStatus(taskStatus) {
     switch ((taskStatus || "").toLowerCase()) {
         case "new":
-            return "waiting";          // только что создана
-        case "ml_processing":
-            return "processing";       // LLM сейчас считает
-        case "ml_classified":
-            return "completed";        // уверенное авто-решение
-        case "ml_low_confidence":
-            return "review";           // требуется ручная проверка
-        case "excel_ambiguous":
-            return "review";           // спорный Excel, тоже на ручной разбор
+            return "waiting";      // задача создана, но ещё не обработана
+
+        case "downloaded":
+            return "waiting";      // письмо скачано, задача стоит в очереди
+
+        case "files_saved":
+            return "waiting";      // вложения сохранены, ждёт обработки моделью
+
         case "manual_review_done":
-            return "completed";        // ручная проверка сделана
+            return "completed";    // ручная проверка выполнена, решение принято
+
         case "completed":
-            return "completed";        // финальный статус (если будешь использовать)
+            return "completed";    // задача полностью завершена
+
+        case "ml_review":
+            return "review";       // модель отправила на ручную проверку
+
+        case "materials_review":
+            return "review";       // материалы требуют ручного уточнения
+
         case "error":
-            return "error";
+            return "error";        // ошибка при обработке задачи
+
         default:
-            return "waiting";
+            return "processing";   // любой промежуточный/неизвестный статус считаем обработкой
     }
 }
 
@@ -78,7 +86,7 @@ function canManualDecision(emailItem) {
 
     // Разрешаем ручную установку класса,
     // если модель сказала "review" или статус = ml_low_confidence
-    return status === 'ml_low_confidence' || decision === 'review';
+    return status === 'ml_review' || status === 'materials_review' || decision === 'review';
 }
 
 function showLoading() {

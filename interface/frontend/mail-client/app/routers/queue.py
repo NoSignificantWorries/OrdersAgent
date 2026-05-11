@@ -103,7 +103,7 @@ async def update_queue_decision(
                 raise HTTPException(status_code=404, detail="Задача не найдена")
 
             current_status = task_row["status"]
-            if current_status != "ml_low_confidence":
+            if current_status != "ml_review":
                 raise HTTPException(
                     status_code=400,
                     detail=f"Ручное решение нельзя применить для статуса {current_status}",
@@ -146,7 +146,7 @@ async def update_queue_decision(
                 UPDATE tasks
                 SET
                     output_data = COALESCE(output_data, '{}'::jsonb) || $1::jsonb,
-                    status = 'manual_review_done'::task_status,
+                    status = 'ml_classified'::task_status,
                     assigned_to = $2,
                     completed_at = NOW()
                 WHERE id = $3
