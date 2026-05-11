@@ -9,14 +9,15 @@ from app.db import get_db_pool
 def _task_status_order_sql() -> str:
     return """
         CASE
-            WHEN tt.status = 'new' THEN 0
-            WHEN tt.status = 'downloaded' THEN 1
-            WHEN tt.status = 'files_saved' THEN 2
-            WHEN tt.status = 'ml_review' THEN 3
-            WHEN tt.status = 'materials_review' THEN 4
-            WHEN tt.status = 'manual_review_done' THEN 5
-            WHEN tt.status = 'completed' THEN 6
-            WHEN tt.status = 'error' THEN 7
+            WHEN tt.status = 'completed' THEN 0
+            WHEN tt.status = 'manual_review_done' THEN 1
+            WHEN tt.status = 'ml_classified' THEN 2
+            WHEN tt.status = 'materials_review' THEN 3
+            WHEN tt.status = 'ml_review' THEN 4
+            WHEN tt.status = 'files_saved' THEN 5
+            WHEN tt.status = 'downloaded' THEN 6
+            WHEN tt.status = 'new' THEN 7
+            WHEN tt.status = 'error' THEN 8
             ELSE 100
         END
     """
@@ -209,12 +210,18 @@ async def list_queue_for_user(
         result: list[dict] = []
 
         for row in rows:
-            task_output = row["output_data"] or {}
-            if isinstance(task_output, str):
+            task_output = row["output_data"]
+
+            if task_output is None:
+                task_output = {}
+            elif isinstance(task_output, str):
                 try:
                     task_output = json.loads(task_output)
                 except Exception:
                     task_output = {}
+
+            if not isinstance(task_output, (dict, list)):
+                task_output = {}
 
             predicted_class = None
             model_decision = None
@@ -254,7 +261,7 @@ async def list_queue_for_user(
                         "status": row["task_status"],
                         "priority": row["task_priority"],
                         "inputdata": row["input_data"] or {},
-                        "outputdata": row["output_data"] or {},
+                        "outputdata": task_output,
                         "assignedto": row["assigned_to"],
                         "errormessage": row["error_message"],
                         "attempts": row["attempts"],
