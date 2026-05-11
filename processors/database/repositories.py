@@ -278,8 +278,8 @@ class TaskRepository:
                 .where(
                     Task.status.in_(
                         [
-                            TaskStatus.ML_LOW_CONFIDENCE.value,
-                            TaskStatus.EXCEL_AMBIGUOUS.value,
+                            TaskStatus.ML_REVIEW.value,
+                            TaskStatus.MATERIALS_REVIEW.value,
                         ]
                     )
                 )
@@ -305,8 +305,8 @@ class TaskRepository:
                 .where(
                     Task.status.in_(
                         [
-                            TaskStatus.ML_LOW_CONFIDENCE.value,
-                            TaskStatus.EXCEL_AMBIGUOUS.value,
+                            TaskStatus.ML_REVIEW.value,
+                            TaskStatus.MATERIALS_REVIEW.value,
                         ]
                     )
                 )
@@ -334,7 +334,7 @@ class TaskRepository:
         )
 
         if conf < 0.7:
-            new_status = TaskStatus.ML_LOW_CONFIDENCE.value
+            new_status = TaskStatus.ML_REVIEW.value
         else:
             new_status = TaskStatus.ML_CLASSIFIED.value
 
@@ -348,7 +348,7 @@ class TaskRepository:
         self, task_id: int, parsed_data: Dict, ambiguous: Optional[List] = None
     ) -> None:
         if ambiguous:
-            new_status = TaskStatus.EXCEL_AMBIGUOUS.value
+            new_status = TaskStatus.MATERIALS_REVIEW.value
             output = {"parsed": parsed_data, "ambiguous": ambiguous}
         else:
             new_status = TaskStatus.COMPLETED.value
