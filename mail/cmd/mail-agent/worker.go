@@ -5,13 +5,13 @@ import (
 	"os"
 	"time"
 
-	"OrdersAgent/mail/internal/client"
-	"OrdersAgent/mail/internal/config"
-	"OrdersAgent/mail/internal/orders"
-	"OrdersAgent/mail/internal/parser"
-	"OrdersAgent/mail/internal/storage"
+	"mail/internal/client"
+	"mail/internal/config"
+	"mail/internal/orders"
+	"mail/internal/parser"
+	"mail/internal/storage"
 
-	"OrdersAgent/storage/api"
+	"mail/storage/api"
 )
 
 // Воркер для одного пользователя: управляет токенами, IMAP-клиентом и обработкой писем.

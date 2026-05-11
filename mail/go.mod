@@ -1,4 +1,4 @@
-module OrdersAgent
+module mail
 
 go 1.26.2
 

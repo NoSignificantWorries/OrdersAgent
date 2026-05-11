@@ -10,18 +10,18 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"OrdersAgent/mail/internal/config"
-	"OrdersAgent/mail/internal/storage"
+	"mail/internal/config"
+	"mail/internal/storage"
 
-	"OrdersAgent/storage/api"
-	"OrdersAgent/storage/configdb"
+	"mail/storage/api"
+	"mail/storage/configdb"
 	minio "worker/minio/minio"
 )
 
 func main() {
-	_ = godotenv.Load("storage/.env")
+	_ = godotenv.Load(".env")
 
-	cfg, err := config.Load("mail/internal/config/config.json")
+	cfg, err := config.Load("internal/config/config.json")
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}

@@ -18,6 +18,7 @@ class DatabaseConfig:
     @classmethod
     def from_env(cls) -> "DatabaseConfig":
         return cls(
+            host=os.getenv("POSTGRES_HOST", "localhost"),
             database=os.getenv("POSTGRES_DB", "materials_db"),
             user=os.getenv("POSTGRES_USER", "user"),
             password=os.getenv("POSTGRES_PASSWORD", "pass"),
