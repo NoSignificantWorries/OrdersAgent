@@ -111,7 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_pending
 -- WebUI: задачи, ожидающие ручного вмешательства
 CREATE INDEX IF NOT EXISTS idx_tasks_manual
     ON tasks(status, created_at)
-    WHERE status IN ('ml_low_confidence', 'excel_ambiguous');
+    WHERE status IN ('ml_review', 'materials_review');
 
 -- WebUI: задачи конкретного пользователя
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned
