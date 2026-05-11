@@ -7,6 +7,7 @@ import (
     "strings"
     "mime"
     "encoding/base64"
+    "log"
 
     htmllib "golang.org/x/net/html"
 
@@ -305,6 +306,19 @@ func parseBody(email *Email, literal io.Reader) error {
             continue
         }
 
+        // 3. Вложенное письмо message/rfc822 (типично для Fwd:)
+        if strings.HasPrefix(contentType, "message/rfc822") {
+            nestedRaw, _ := io.ReadAll(p.Body)
+            // Простой способ: вытащить текст как из HTML
+            nestedText := strings.TrimSpace(extractTextFromHTML(string(nestedRaw)))
+            if nestedText != "" {
+                parts = append(parts, nestedText)
+            }
+            // Более продвинутый вариант — создать новый mail.Reader
+            // и пройтись по нему так же, как по основному письму.
+            continue
+        }
+
         // Вложения
         disposition := p.Header.Get("Content-Disposition")
         if strings.Contains(disposition, "attachment") ||
@@ -323,6 +337,8 @@ func parseBody(email *Email, literal io.Reader) error {
             email.Files = append(email.Files, att)
         }
     }
+
+    log.Printf("parseBody: UID=%d parts before clean: %d", email.UID, len(parts))
 
     email.Body = strings.Join(parts, "\n\n")
     email.Body = cleanBodyText(email.Body)

@@ -20,7 +20,6 @@
         </header>
 
         <div class="main-layout">
-            <!-- ЛЕВАЯ ПАНЕЛЬ - СПИСОК ПИСЕМ -->
             <aside class="email-list">
                 <div class="list-header">
                     <h3>Входящие</h3>
@@ -31,7 +30,7 @@
                         </button>
                     </div>
                 </div>
-                <!-- ПАНЕЛЬ ФИЛЬТРОВ (скрыта по умолчанию) -->
+
                 <div id="filter-panel" class="filter-panel" style="display: none;">
                     <div class="filter-group">
                         <label>Статус:</label>
@@ -39,10 +38,12 @@
                             <option value="all">Все</option>
                             <option value="waiting">Ожидание</option>
                             <option value="processing">Обработка</option>
-                            <option value="clarification">Класс определён</option>
-                            <option value="completed">Выполнена</option>
+                            <option value="review">Требуется ручная проверка</option>
+                            <option value="completed">Завершено</option>
+                            <option value="error">Ошибка</option>
                         </select>
                     </div>
+
                     <div class="filter-group">
                         <label>Класс:</label>
                         <select id="class-filter-select">
@@ -53,6 +54,7 @@
                             <option value="">Не задан</option>
                         </select>
                     </div>
+
                     <div class="filter-group">
                         <label>Сортировка:</label>
                         <div class="sort-buttons">
@@ -60,17 +62,18 @@
                             <button id="sort-oldest-btn" class="sort-btn">Старые сверху</button>
                         </div>
                     </div>
+
                     <div class="filter-actions">
                         <button id="apply-filters-btn" class="apply-filters">Применить</button>
                         <button id="close-filter-panel" class="close-filter">✖</button>
                     </div>
                 </div>
+
                 <div class="emails-container" id="emailsContainer">
                     <!-- Список писем будет вставлен сюда -->
                 </div>
             </aside>
 
-            <!-- ПРАВАЯ ОБЛАСТЬ С ВКЛАДКАМИ -->
             <main class="email-content">
                 <div class="search-container">
                     <div class="search-wrapper">
@@ -78,17 +81,20 @@
                         <input type="text" id="search-input" placeholder="Поиск" autocomplete="off">
                     </div>
                 </div>
+
                 <div class="tabs-container">
                     <div class="tabs-header">
                         <button class="tab-button active" data-tab="emails">Письма</button>
                         <button class="tab-button" data-tab="chat">Чат</button>
                     </div>
+
                     <div class="tabs-content">
                         <div class="tab-pane active" id="tab-emails">
                             <div class="email-view" id="emailView">
                                 <div class="email-placeholder">👈 Выберите письмо из списка</div>
                             </div>
                         </div>
+
                         <div class="tab-pane" id="tab-chat">
                             <div class="chat-container">
                                 <div id="chat-rows-container"></div>

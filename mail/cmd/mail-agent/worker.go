@@ -127,7 +127,7 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
 			continue
 		}
 
-		if err := processor.ProcessEmail(email); err != nil {
+		if err := processor.ProcessEmail(*email); err != nil {
 			log.Printf("process uid=%d: %v", uid, err)
 		}
 

@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
@@ -43,9 +45,9 @@ async def get_queue(
     }
 
 
-@router.post("/queue/{item_id}/decision")
+@router.post("/queue/{task_id}/decision")
 async def update_queue_decision(
-    item_id: int,
+    task_id: int,
     payload: DecisionUpdate,
     request: Request,
 ):
@@ -59,73 +61,133 @@ async def update_queue_decision(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        if user.get("role") == "admin":
-            row = await conn.fetchrow(
+        async with conn.transaction():
+            if user.get("role") == "admin":
+                task_row = await conn.fetchrow(
+                    """
+                    SELECT
+                        t.id,
+                        t.email_id,
+                        t.status,
+                        t.assigned_to,
+                        t.output_data,
+                        e.mailbox,
+                        e.email_uid
+                    FROM tasks t
+                    JOIN emails e ON e.id = t.email_id
+                    WHERE t.id = $1
+                    """,
+                    task_id,
+                )
+            else:
+                task_row = await conn.fetchrow(
+                    """
+                    SELECT
+                        t.id,
+                        t.email_id,
+                        t.status,
+                        t.assigned_to,
+                        t.output_data,
+                        e.mailbox,
+                        e.email_uid
+                    FROM tasks t
+                    JOIN emails e ON e.id = t.email_id
+                    WHERE t.id = $1
+                      AND e.mailbox = $2
+                    """,
+                    task_id,
+                    user["email"],
+                )
+
+            if not task_row:
+                raise HTTPException(status_code=404, detail="Задача не найдена")
+
+            current_status = task_row["status"]
+            if current_status != "ml_low_confidence":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Ручное решение нельзя применить для статуса {current_status}",
+                )
+
+            model_decision = payload.model_decision
+            predicted_class = payload.predicted_class
+
+            if predicted_class is None:
+                if model_decision == "auto_0":
+                    predicted_class = 0
+                elif model_decision == "auto_1":
+                    predicted_class = 1
+                elif model_decision == "review":
+                    predicted_class = None
+
+            if model_decision not in {"auto_0", "auto_1"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Нужно выбрать итоговый класс: 'Заявка' или 'Расчёт'"
+                )
+
+            if predicted_class not in {0, 1}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Итоговый класс должен быть 0 или 1"
+                )
+
+            output_patch = {
+                "predicted_class": predicted_class,
+                "manual_updated_by": user["id"],
+                "manual_review": True,
+            }
+
+            if model_decision is not None:
+                output_patch["model_decision"] = model_decision
+
+            updated_task = await conn.fetchrow(
                 """
-                SELECT id, email_uid
-                FROM process_queue
-                WHERE id = $1
+                UPDATE tasks
+                SET
+                    output_data = COALESCE(output_data, '{}'::jsonb) || $1::jsonb,
+                    status = 'manual_review_done'::task_status,
+                    assigned_to = $2,
+                    completed_at = NOW()
+                WHERE id = $3
+                RETURNING
+                    id,
+                    email_id,
+                    status,
+                    assigned_to,
+                    output_data,
+                    completed_at
                 """,
-                item_id,
-            )
-        else:
-            row = await conn.fetchrow(
-                """
-                SELECT id, email_uid
-                FROM process_queue
-                WHERE id = $1 AND target_user_id = $2
-                """,
-                item_id,
+                json.dumps(output_patch),
                 user["id"],
+                task_id,
             )
 
-        if not row:
-            raise HTTPException(status_code=404, detail="Запись не найдена")
-
-        email_uid = row["email_uid"]
-        if not email_uid:
-            raise HTTPException(status_code=400, detail="У записи отсутствует email_uid")
-
-        fields = []
-        values = []
-
-        if payload.predicted_class is not None:
-            fields.append(f"predicted_class = ${len(values) + 1}")
-            values.append(payload.predicted_class)
-
-        if payload.model_decision is not None:
-            fields.append(f"model_decision = ${len(values) + 1}")
-            values.append(payload.model_decision)
-
-            if payload.model_decision in ("auto_0", "auto_1"):
-                fields.append(f"status = ${len(values) + 1}")
-                values.append("clarification")
-            elif payload.model_decision == "review":
-                fields.append(f"status = ${len(values) + 1}")
-                values.append("review")
-
-        values.append(email_uid)
-
-        if user.get("role") == "admin":
-            sql = f"""
-                UPDATE process_queue
-                SET {", ".join(fields)}
-                WHERE email_uid = ${len(values)}
-            """
-        else:
-            values.append(user["id"])
-            sql = f"""
-                UPDATE process_queue
-                SET {", ".join(fields)}
-                WHERE email_uid = ${len(values) - 1}
-                  AND target_user_id = ${len(values)}
-            """
-
-        result = await conn.execute(sql, *values)
+            await conn.execute(
+                """
+                UPDATE emails
+                SET
+                    predicted_class = $1,
+                    model_decision = $2
+                WHERE id = $3
+                """,
+                predicted_class,
+                model_decision,
+                task_row["email_id"],
+            )
 
     return {
         "ok": True,
-        "id": item_id,
-        "email_uid": email_uid,
-        "updated": result,
+        "task": {
+            "id": updated_task["id"],
+            "email_id": updated_task["email_id"],
+            "status": updated_task["status"],
+            "assigned_to": updated_task["assigned_to"],
+            "output_data": updated_task["output_data"] or {},
+            "completed_at": updated_task["completed_at"].isoformat() if updated_task["completed_at"] else None,
+        },
+        "email": {
+            "id": task_row["email_id"],
+            "email_uid": task_row["email_uid"],
+        },
     }
