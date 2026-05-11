@@ -1,0 +1,36 @@
+# Version control & docs
+README.md
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.env/
+*.env
+.python-version
+
+# Data files (везде)
+**/*.csv
+**/*.xls
+**/*.xlsx
+**/*.txt
+**/res.*
+**/results.*
+
+# Logs & temp
+*.log
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Docker
+Dockerfile*
+.dockerignore
+

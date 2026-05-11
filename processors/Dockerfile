@@ -29,5 +29,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 USER appuser
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl --fail http://localhost:8000/health || exit 1
+CMD ["python3", "-u", "main.py"]
+
+# HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+#     CMD curl --fail http://localhost:8000/health || exit 1
