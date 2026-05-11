@@ -259,6 +259,7 @@ class TaskRepository:
                     Task.status.in_(
                         [
                             TaskStatus.NEW.value,
+                            TaskStatus.ML_CLASSIFIED.value,
                             TaskStatus.DOWNLOADED.value,
                             TaskStatus.FILES_SAVED.value,
                             TaskStatus.MANUAL_REVIEW_DONE.value,

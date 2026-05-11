@@ -13,7 +13,7 @@ let currentSearchTerm = '';
 const statusConfig = {
     waiting:    { name: "Ожидание" },
     processing: { name: "Обработка" },
-    review:     { name: "Требуется ручная проверка" },
+    review:     { name: "Требуется проверка" },
     completed:  { name: "Завершено" },
     error:      { name: "Ошибка" }
 };

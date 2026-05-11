@@ -67,7 +67,7 @@ def process_classified_excel(
     docnames = [doc.filename for doc in documents]
     logger.info(f"Task {task.id}: Processing documents: {', '.join(docnames)}")
     for doc in documents:
-        filename = doc.filename
+        filename = doc.minio_object_key
         file_data = get_bytes_object(cloud, ATTACHMENTS_BUCKET, filename)
         if file_data is None:
             logger.error(f"Task {task.id}: Can't open file {filename}")
