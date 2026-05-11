@@ -77,6 +77,11 @@ class LLM:
     def predict_prob_1(self, text: str) -> float:
         text = self._normalize_text(text)
 
+        # ЛОГ: что идёт в классификацию
+        print("=== LLM INPUT START ===")
+        print(text)
+        print("=== LLM INPUT END ===")
+
         if not text:
             text = " "
 

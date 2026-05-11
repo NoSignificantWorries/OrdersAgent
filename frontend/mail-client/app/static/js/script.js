@@ -13,7 +13,7 @@ let currentSearchTerm = '';
 const statusConfig = {
     waiting:    { name: "Ожидание" },
     processing: { name: "Обработка" },
-    review:     { name: "Требуется ручная проверка" },
+    review:     { name: "Требуется проверка" },
     completed:  { name: "Завершено" },
     error:      { name: "Ошибка" }
 };
@@ -48,23 +48,34 @@ function escapeHtml(text) {
 function mapTaskStatusToUiStatus(taskStatus) {
     switch ((taskStatus || "").toLowerCase()) {
         case "new":
-            return "waiting";          // только что создана
-        case "ml_processing":
-            return "processing";       // LLM сейчас считает
+            return "waiting";
+
+        case "downloaded":
+            return "waiting";
+
+        case "files_saved":
+            return "waiting";
+
+        case "ml_review":
+            return "review";
+
+        case "materials_review":
+            return "review";
+
         case "ml_classified":
-            return "completed";        // уверенное авто-решение
-        case "ml_low_confidence":
-            return "review";           // требуется ручная проверка
-        case "excel_ambiguous":
-            return "review";           // спорный Excel, тоже на ручной разбор
+            return "processing";
+
         case "manual_review_done":
-            return "completed";        // ручная проверка сделана
+            return "completed";
+
         case "completed":
-            return "completed";        // финальный статус (если будешь использовать)
+            return "completed";
+
         case "error":
             return "error";
+
         default:
-            return "waiting";
+            return "processing";
     }
 }
 
@@ -78,7 +89,7 @@ function canManualDecision(emailItem) {
 
     // Разрешаем ручную установку класса,
     // если модель сказала "review" или статус = ml_low_confidence
-    return status === 'ml_low_confidence' || decision === 'review';
+    return status === 'ml_review' || status === 'materials_review' || decision === 'review';
 }
 
 function showLoading() {
@@ -94,6 +105,125 @@ function highlightSelectedEmail(id) {
     if (selected) selected.classList.add('selected');
 }
 
+function extractMaterialNames(value) {
+    if (!value) return [];
+
+    if (Array.isArray(value)) {
+        return value.flatMap(item => {
+            if (typeof item === "string") {
+                const s = item.trim();
+                return s ? [s] : [];
+            }
+
+            if (item && typeof item === "object" && !Array.isArray(item)) {
+                return Object.keys(item)
+                    .map(k => String(k).trim())
+                    .filter(Boolean);
+            }
+
+            return [];
+        });
+    }
+
+    if (value && typeof value === "object") {
+        return Object.keys(value)
+            .map(k => String(k).trim())
+            .filter(Boolean);
+    }
+
+    return [];
+}
+
+function extractMaterialsFromOutput(output) {
+    if (!output || typeof output !== "object") return [];
+
+    // 1. Если output_data сам является массивом материалов
+    if (Array.isArray(output)) {
+        return extractMaterialNames(output);
+    }
+
+    // 2. Самые вероятные ключи
+    const candidates = [
+        output.queries,
+        output.requests,
+        output.materials,
+        output.material_queries,
+        output.output_data,
+        output.data,
+        output.items,
+        output.result
+    ];
+
+    for (const value of candidates) {
+        const names = extractMaterialNames(value);
+        if (names.length > 0) return names;
+    }
+
+    // 3. Запасной вариант:
+    // если во всем output_data есть хоть одно поле-массив/объект с материалами
+    for (const value of Object.values(output)) {
+        const names = extractMaterialNames(value);
+        if (names.length > 0) return names;
+    }
+
+    return [];
+}
+
+function buildFilesBlock(email, buttonClass = 'save-all-attachments-btn') {
+    const docsWithName = (email?.documents || []).filter(
+        doc => doc && doc.document_name && String(doc.document_name).trim() !== ""
+    );
+
+    if (!docsWithName.length) {
+        return '<div class="chat-placeholder">Готовые файлы не найдены</div>';
+    }
+
+    return `
+        <div class="email-attachments">
+            <strong>Файлы:</strong>
+            <ul>
+                ${docsWithName.map(doc => `
+                    <li>${escapeHtml(doc.document_name)}</li>
+                `).join('')}
+            </ul>
+            <button class="${buttonClass}" data-email-id="${email.id}">Скачать</button>
+        </div>
+    `;
+}
+
+function buildChatItemsFromOutput(output, emailId) {
+    const materials = extractMaterialsFromOutput(output);
+
+    const manualDecision =
+        output &&
+        !Array.isArray(output) &&
+        output.manual_decision &&
+        typeof output.manual_decision === "object" &&
+        !Array.isArray(output.manual_decision)
+            ? output.manual_decision
+            : {};
+
+    const chatItems = materials.map((material) => {
+        const saved = manualDecision[material];
+        return {
+            material,
+            answer: Array.isArray(saved) ? String(saved[0] ?? "") : "",
+            blacklist: Array.isArray(saved) ? Boolean(saved[1]) : false
+        };
+    });
+
+    const cached = chatStorage.get(emailId);
+    if (Array.isArray(cached) && cached.length > 0) {
+        return chatItems.map(item => {
+            const fromCache = cached.find(x => x.material === item.material);
+            return fromCache
+                ? { ...item, answer: fromCache.answer, blacklist: fromCache.blacklist }
+                : item;
+        });
+    }
+
+    return chatItems;
+}
 
 // ========== НОРМАЛИЗАЦИЯ ДАННЫХ API ==========
 function normalizeApiItem(item, idx) {
@@ -144,16 +274,10 @@ function normalizeApiItem(item, idx) {
             .filter(name => name && String(name).trim() !== ""),
     };
 
-    if (chatStorage.has(normalized.id)) {
-        normalized.chatItems = chatStorage.get(normalized.id);
-    } else {
-        normalized.chatItems = [
-            { material: "Стекло",  answer: "", blacklist: false },
-            { material: "Пластик", answer: "", blacklist: false },
-            { material: "Ручки",   answer: "", blacklist: false }
-        ];
-        chatStorage.set(normalized.id, normalized.chatItems);
-    }
+    normalized.chatItems = buildChatItemsFromOutput(output, normalized.id);
+    console.log('task', normalized.id, 'output_data JSON:', JSON.stringify(output, null, 2));
+    console.log('task', normalized.id, 'chatItems:', normalized.chatItems);
+    chatStorage.set(normalized.id, normalized.chatItems);
 
     return normalized;
 }
@@ -444,8 +568,29 @@ function renderChatForEmail(email) {
         return;
     }
 
+    const taskStatus = (email.task_status || '').toLowerCase();
+
+    if (taskStatus === 'completed') {
+        container.innerHTML = buildFilesBlock(email, 'save-all-attachments-btn');
+
+        const downloadBtn = container.querySelector('.save-all-attachments-btn');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                alert(`Функция сохранения вложений для письма "${email.subject}" будет реализована позже.`);
+            });
+        }
+
+        return;
+    }
+
+    if (taskStatus !== 'materials_review') {
+        container.innerHTML = '<div class="chat-placeholder">Для этого письма ручной выбор материалов не требуется</div>';
+        return;
+    }
+
     if (!email.chatItems || email.chatItems.length === 0) {
-        container.innerHTML = '<div class="chat-placeholder">Нет материалов для этого письма</div>';
+        container.innerHTML = '<div class="chat-placeholder">В output_data нет материалов для ручного выбора</div>';
         return;
     }
 
@@ -455,14 +600,26 @@ function renderChatForEmail(email) {
     email.chatItems.forEach((item, idx) => {
         html += `
             <div class="chat-row" data-row="${idx}">
-                <div class="material-name">${escapeHtml(item.material)}</div>
-                <input type="text" class="answer-input" style="width: 500px;" value="${escapeHtml(item.answer)}" placeholder="Введите ответ...">
-                <label class="blacklist-label">
-                    <input type="checkbox" class="blacklist-checkbox" ${item.blacklist ? 'checked' : ''}> Черный список
-                </label>
+                <div class="chat-row-top">
+                    <div class="material-name">${escapeHtml(item.material)}</div>
+                    <label class="blacklist-label">
+                        <input type="checkbox" class="blacklist-checkbox" ${item.blacklist ? 'checked' : ''}>
+                        Черный список
+                    </label>
+                </div>
+
+                <div class="chat-row-bottom">
+                    <input
+                        type="text"
+                        class="answer-input"
+                        value="${escapeHtml(item.answer)}"
+                        placeholder="Введите ответ..."
+                    >
+                </div>
             </div>
         `;
     });
+
     container.innerHTML = html;
 
     email.chatItems.forEach((item, idx) => {
@@ -486,30 +643,6 @@ function renderChatForEmail(email) {
             });
         }
     });
-
-    if (email.status === 'completed') {
-        const resultBlock = document.createElement('div');
-        resultBlock.className = 'chat-result-block';
-        resultBlock.innerHTML = `
-            <div class="email-attachments" style="margin-top: 20px;">
-                <strong>Результаты обработки:</strong>
-                <ul>
-                    <li>Файл результата 1.pdf</li>
-                    <li>Файл результата 2.pdf</li>
-                </ul>
-                <button class="save-all-results-btn" data-email-id="${email.id}">Скачать</button>
-            </div>
-        `;
-        container.appendChild(resultBlock);
-
-        const saveResultsBtn = resultBlock.querySelector('.save-all-results-btn');
-        if (saveResultsBtn) {
-            saveResultsBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                alert(`Функция сохранения файлов результатов для письма "${email.subject}" будет реализована позже.`);
-            });
-        }
-    }
 }
 
 async function sendChatData() {
@@ -519,21 +652,77 @@ async function sendChatData() {
         return;
     }
 
+    if (!email.task?.id) {
+        alert("У письма нет связанной задачи");
+        return;
+    }
+
+    if ((email.task_status || '').toLowerCase() !== 'materials_review') {
+        alert("Ручной ввод доступен только для задач со статусом materials_review");
+        return;
+    }
+
     if (!email.chatItems || email.chatItems.length === 0) {
         alert("Нет материалов для этого письма");
         return;
     }
 
-    const data = email.chatItems.map(item => ({
-        material: item.material,
-        answer: item.answer,
-        blacklist: item.blacklist
-    }));
+    const hasEmpty = email.chatItems.some(item => !String(item.answer || '').trim());
+    if (hasEmpty) {
+        alert("Заполните все поля перед сохранением");
+        return;
+    }
 
-    console.log("Отправка для письма", email.id, data);
-    alert(`Отправлено для письма "${email.subject}"\n${JSON.stringify(data, null, 2)}`);
+    const manualDecision = {};
+    email.chatItems.forEach(item => {
+        manualDecision[item.material] = [
+            String(item.answer || "").trim(),
+            Boolean(item.blacklist)
+        ];
+    });
+
+    try {
+        const resp = await fetch(`/api/queue/${email.task.id}/manual-decision`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                manual_decision: manualDecision
+            })
+        });
+
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+            throw new Error(data.detail || "Ошибка сохранения");
+        }
+
+        const savedEmailId = email.id;
+
+        chatStorage.delete(email.id);
+
+        await loadEmailsFromApi(false);
+        renderEmailList();
+
+        const freshEmail = emails.find(e => e.id === savedEmailId);
+
+        if (freshEmail) {
+            selectedEmailId = freshEmail.id;
+            highlightSelectedEmail(freshEmail.id);
+
+            const chatTab = document.getElementById('tab-chat');
+            if (chatTab && chatTab.classList.contains('active')) {
+                renderChatForEmail(freshEmail);
+            } else {
+                renderEmailCard(freshEmail);
+            }
+        }
+
+        alert("Данные сохранены");
+    } catch (e) {
+        console.error(e);
+        alert(e.message || "Ошибка");
+    }
 }
-
 
 // ========== ВКЛАДКИ ==========
 function initTabs() {

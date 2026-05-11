@@ -169,7 +169,7 @@ func (r *DBRepo) SaveOrder(userID int64, order any) (err error) {
         for i, f := range email.Files {
             name := f.Name
             // Ключ в MinIO: userID/uid/index_name
-            objectKey := fmt.Sprintf("%s/%d/%d_%s", userID, emailUID, i+1, name)
+            objectKey := fmt.Sprintf("%d/%d/%d_%s", userID, emailUID, i+1, name)
 
             if upErr := r.store.Upload(ctx, objectKey, f.Data); upErr != nil {
                 err = fmt.Errorf("upload attachment %s (key=%s): %w", name, objectKey, upErr)

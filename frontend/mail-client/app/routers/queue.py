@@ -15,6 +15,9 @@ class DecisionUpdate(BaseModel):
     predicted_class: int | None = None
     model_decision: str | None = None
 
+class MaterialsManualDecisionUpdate(BaseModel):
+    manual_decision: dict[str, list]
+
 
 @router.get("/queue")
 async def get_queue(
@@ -103,7 +106,7 @@ async def update_queue_decision(
                 raise HTTPException(status_code=404, detail="Задача не найдена")
 
             current_status = task_row["status"]
-            if current_status != "ml_low_confidence":
+            if current_status != "ml_review":
                 raise HTTPException(
                     status_code=400,
                     detail=f"Ручное решение нельзя применить для статуса {current_status}",
@@ -146,7 +149,7 @@ async def update_queue_decision(
                 UPDATE tasks
                 SET
                     output_data = COALESCE(output_data, '{}'::jsonb) || $1::jsonb,
-                    status = 'manual_review_done'::task_status,
+                    status = 'ml_classified'::task_status,
                     assigned_to = $2,
                     completed_at = NOW()
                 WHERE id = $3
@@ -183,6 +186,139 @@ async def update_queue_decision(
             "email_id": updated_task["email_id"],
             "status": updated_task["status"],
             "assigned_to": updated_task["assigned_to"],
+            "output_data": updated_task["output_data"] or {},
+            "completed_at": updated_task["completed_at"].isoformat() if updated_task["completed_at"] else None,
+        },
+        "email": {
+            "id": task_row["email_id"],
+            "email_uid": task_row["email_uid"],
+        },
+    }
+
+@router.post("/queue/{task_id}/manual-decision")
+async def update_materials_manual_decision(
+    task_id: int,
+    payload: MaterialsManualDecisionUpdate,
+    request: Request,
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not payload.manual_decision:
+        raise HTTPException(status_code=400, detail="manual_decision пустой")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if user.get("role") == "admin":
+                task_row = await conn.fetchrow(
+                    """
+                    SELECT
+                        t.id,
+                        t.email_id,
+                        t.status,
+                        t.assigned_to,
+                        t.output_data,
+                        e.mailbox,
+                        e.email_uid
+                    FROM tasks t
+                    JOIN emails e ON e.id = t.email_id
+                    WHERE t.id = $1
+                    """,
+                    task_id,
+                )
+            else:
+                task_row = await conn.fetchrow(
+                    """
+                    SELECT
+                        t.id,
+                        t.email_id,
+                        t.status,
+                        t.assigned_to,
+                        t.output_data,
+                        e.mailbox,
+                        e.email_uid
+                    FROM tasks t
+                    JOIN emails e ON e.id = t.email_id
+                    WHERE t.id = $1
+                      AND e.mailbox = $2
+                    """,
+                    task_id,
+                    user["email"],
+                )
+
+            if not task_row:
+                raise HTTPException(status_code=404, detail="Задача не найдена")
+
+            current_status = task_row["status"]
+            if current_status != "materials_review":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"manual_decision можно сохранить только для статуса materials_review, сейчас: {current_status}",
+                )
+
+            normalized_manual_decision = {}
+
+            for material, value in payload.manual_decision.items():
+                if not isinstance(material, str) or not material.strip():
+                    raise HTTPException(status_code=400, detail="Некорректный ключ материала")
+
+                if not isinstance(value, list) or len(value) != 2:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"manual_decision['{material}'] должен быть массивом [answer, blacklist]"
+                    )
+
+                user_value = str(value[0] or "").strip()
+                blacklist_value = bool(value[1])
+
+                if not user_value:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Для материала '{material}' не заполнено значение"
+                    )
+
+                normalized_manual_decision[material] = [user_value, blacklist_value]
+
+            output_patch = {
+                "manual_decision": normalized_manual_decision,
+                "manual_updated_by": user["id"],
+                "manual_review": True,
+            }
+
+            updated_task = await conn.fetchrow(
+                """
+                UPDATE tasks
+                SET
+                    manual_decision = $1::jsonb,
+                    status = 'manual_review_done'::task_status,
+                    assigned_to = $2,
+                    completed_at = NOW()
+                WHERE id = $3
+                RETURNING
+                    id,
+                    email_id,
+                    status,
+                    assigned_to,
+                    manual_decision,
+                    output_data,
+                    completed_at
+                """,
+                json.dumps(normalized_manual_decision, ensure_ascii=False),
+                user["id"],
+                task_id,
+            )
+
+    return {
+        "ok": True,
+        "task": {
+            "id": updated_task["id"],
+            "email_id": updated_task["email_id"],
+            "status": updated_task["status"],
+            "assigned_to": updated_task["assigned_to"],
+            "manual_decision": updated_task["manual_decision"] or {},
             "output_data": updated_task["output_data"] or {},
             "completed_at": updated_task["completed_at"].isoformat() if updated_task["completed_at"] else None,
         },

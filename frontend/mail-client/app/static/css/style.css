@@ -769,24 +769,36 @@ body {
 
 .chat-row {
     display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.chat-row-top {
+    display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 16px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
+}
+
+.chat-row-bottom {
+    width: 100%;
 }
 
 .material-name {
-    min-width: 100px;
     font-weight: 600;
     color: #1e293b;
+    font-size: 14px;
+    word-break: break-word;
 }
 
 .answer-input {
-    width: 500px;
+    width: 100%;
     padding: 10px 12px;
     border: 1px solid #cbd5e1;
     border-radius: 12px;
     font-size: 14px;
+    box-sizing: border-box;
 }
 
 .blacklist-label {
