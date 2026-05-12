@@ -100,41 +100,59 @@ async function downloadEmailAttachments(email) {
 }
 
 
-async function downloadChatResultDocument(email) {
+async function downloadChatResultDocuments(email) {
     if (!email?.task?.id) {
         alert("У письма нет связанной задачи");
         return;
     }
 
-    const output = email?.task?.output_data || {};
-    const documentId =
-        email?.task?.document_id ??
-        output?.document_id ??
-        output?.result_document_id ??
-        output?.result_doc_id;
+    const docs = (email?.documents || []).filter(doc => doc && doc.id);
 
-    if (!documentId) {
-        alert("У задачи нет document_id результирующего файла");
+    if (!docs.length) {
+        alert("У письма нет файлов");
         return;
     }
 
-    const doc = (email?.documents || []).find(d => String(d?.id) === String(documentId));
-    const filename =
-        doc?.document_name ||
-        output?.result_document_name ||
-        output?.filename ||
-        output?.result_filename ||
-        output?.document_name ||
-        `result-${documentId}`;
+    let downloadedCount = 0;
+    const skippedFiles = [];
 
-    try {
-        await downloadBlob(
-            `/api/documents/${documentId}/result-download`,
-            filename
-        );
-    } catch (e) {
-        console.error(e);
-        alert(e.message || "Ошибка скачивания результирующего файла");
+    for (const doc of docs) {
+        const filename =
+            doc?.document_name ||
+            doc?.filename ||
+            `result-${doc.id}`;
+
+        try {
+            await downloadBlob(
+                `/api/documents/${doc.id}/result-download`,
+                filename
+            );
+            downloadedCount += 1;
+        } catch (e) {
+            const message = String(e?.message || "");
+
+            if (
+                message.includes("Результирующий файл не найден") ||
+                message.includes("Файл не найден") ||
+                message.includes("404")
+            ) {
+                skippedFiles.push(filename);
+                continue;
+            }
+
+            console.error(e);
+            alert(e.message || "Ошибка скачивания результирующих файлов");
+            return;
+        }
+    }
+
+    if (!downloadedCount) {
+        alert("В result-бакете не найдено ни одного файла");
+        return;
+    }
+
+    if (skippedFiles.length) {
+        console.warn("Пропущены отсутствующие result-файлы:", skippedFiles);
     }
 }
 
@@ -655,32 +673,31 @@ function renderChatForEmail(email) {
     const taskStatus = (email.task_status || '').toLowerCase();
 
     if (taskStatus === 'completed') {
-        const output = email?.task?.output_data || {};
-        const documentId =
-            email?.task?.document_id ??
-            output?.document_id ??
-            output?.result_document_id ??
-            output?.result_doc_id;
+        const docs = (email?.documents || []).filter(doc => doc && doc.id);
 
-        const resultDoc = (email?.documents || []).find(
-            doc => String(doc?.id) === String(documentId)
-        );
+        if (!docs.length) {
+            container.innerHTML = '<div class="chat-placeholder">У письма нет файлов</div>';
+            return;
+        }
 
-        const resultFileName =
-            resultDoc?.document_name ||
-            output?.result_document_name ||
-            output?.filename ||
-            output?.result_filename ||
-            output?.document_name ||
-            `result-task-${email.task.id}`;
+        const filesHtml = docs.map(doc => {
+            const filename =
+                doc?.document_name ||
+                doc?.filename ||
+                `document-${doc.id}`;
+
+            return `<li>${escapeHtml(String(filename))}</li>`;
+        }).join('');
 
         container.innerHTML = `
             <div class="email-attachments">
-                <strong>Результирующий файл:</strong>
+                <strong>Файлы для скачивания:</strong>
                 <ul>
-                    <li>${escapeHtml(String(resultFileName))}</li>
+                    ${filesHtml}
                 </ul>
-                <button class="save-all-attachments-btn" data-email-id="${email.id}">Скачать</button>
+                <button class="save-all-attachments-btn" data-email-id="${email.id}">
+                    Скачать
+                </button>
             </div>
         `;
 
@@ -688,7 +705,7 @@ function renderChatForEmail(email) {
         if (downloadBtn) {
             downloadBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                await downloadChatResultDocument(email);
+                await downloadChatResultDocuments(email);
             });
         }
 

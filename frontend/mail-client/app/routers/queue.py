@@ -82,6 +82,7 @@ async def _download_document_by_id(
                     d.id,
                     d.filename,
                     d.minio_object_key,
+                    d.email_id,
                     e.mailbox
                 FROM documents d
                 JOIN emails e ON e.id = d.email_id
@@ -96,6 +97,7 @@ async def _download_document_by_id(
                     d.id,
                     d.filename,
                     d.minio_object_key,
+                    d.email_id,
                     e.mailbox
                 FROM documents d
                 JOIN emails e ON e.id = d.email_id
@@ -117,7 +119,11 @@ async def _download_document_by_id(
 
     try:
         file_bytes = await _load_document_bytes_from_storage(bucket_name, object_key)
+
     except Exception as e:
+        error_text = str(e)
+        if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+            raise HTTPException(status_code=404, detail=not_found_detail)
         raise HTTPException(status_code=500, detail=f"Ошибка чтения файла: {e}")
 
     return StreamingResponse(
@@ -127,6 +133,7 @@ async def _download_document_by_id(
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"
         },
     )
+
 
 @router.get("/documents/{document_id}/download")
 async def download_source_document(document_id: int, request: Request):
