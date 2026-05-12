@@ -79,6 +79,10 @@ services:
             dockerfile: Dockerfile
         container_name: mail
         environment:
+            - YANDEX_REDIRECT_URI=${YANDEX_REDIRECT_URI}
+            - YANDEX_CLIENT_ID=${YANDEX_CLIENT_ID}
+            - YANDEX_CLIENT_SECRET=${YANDEX_CLIENT_SECRET}
+            - YANDEX_TOKEN_URL=${YANDEX_TOKEN_URL}
             - POSTGRES_USER=${POSTGRES_USER}
             - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
             - POSTGRES_DB=${POSTGRES_DB}
