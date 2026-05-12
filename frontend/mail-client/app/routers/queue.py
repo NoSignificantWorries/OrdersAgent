@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.db import get_db_pool
 from app.routers import auth
 from app.services.queue import list_queue_for_user
-from processors.cloud.minio import MinIOClient
+from app.cloud.minio import MinIOClient
 
 
 router = APIRouter(prefix="/api", tags=["queue"])

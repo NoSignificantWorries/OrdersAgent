@@ -33,6 +33,7 @@ RUN apk --no-cache add ca-certificates tzdata
 
 # Копируем бинарник из этапа сборки
 COPY --from=builder /app/service /app/service
+COPY ./internal/config/config.json ./internal/config/config.json
 
 # Копируем конфиги если нужны
 # COPY --chown=appuser:appgroup ./configs /app/configs
