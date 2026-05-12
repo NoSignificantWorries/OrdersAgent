@@ -1,6 +1,6 @@
+import json
 import logging
 import time
-from cgitb import handler
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List
@@ -66,20 +66,24 @@ def process_classified_excel(
     documents = doc_repo.get_by_email_id(task.email_id)
     docnames = [doc.filename for doc in documents]
     logger.info(f"Task {task.id}: Processing documents: {', '.join(docnames)}")
+    unique_materials_dict = {}
+    unique_parts = set()
+    questions = set()
+    at_leat_one_file_saved = False
     for doc in documents:
         filename = doc.minio_object_key
         file_data = get_bytes_object(cloud, ATTACHMENTS_BUCKET, filename)
         if file_data is None:
             logger.error(f"Task {task.id}: Can't open file {filename}")
-            return
+            continue
 
         # opening table
         worker = TableWorker(file_data, Path(filename))
         worker.open_and_clean()
         if worker.tables is None or not bool(worker.tables):
             logger.error(f"Task {task.id}: Unexpected errors with the file {filename}")
-            task_repo.update_status(task.id, "error")
-            return
+            # task_repo.update_status(task.id, "error")
+            continue
 
         # parsing simple strategy
         res = worker.simple_parser()
@@ -94,30 +98,33 @@ def process_classified_excel(
 
         # parsing materials (finding unique parts)
         parser = ParserV2(DELIMETERS)
-        unique_materials_dict = {}
-        unique_parts = set()
         for material in unique_materials:
             parse_results = parser.parse(material)
             unique_materials_dict[material] = parse_results
             unique_parts |= set(parse_results.parts)
-        unique_parts = list(unique_parts)
+        # unique_parts = list(unique_parts)
 
         # searching materials
-        matches = material_repo.batch_find(unique_parts)
-        questions = []
+        if task.manual_decision is not None:
+            matches = {p: (m, False) for p, (m, bl) in task.manual_decision.items()}
+        else:
+            matches = material_repo.batch_find(unique_parts)
+        local_questions = set()
         for part, mat_match in matches.items():
             if mat_match is None:
-                questions.append({part: False})
+                local_questions.add((part, False))
                 continue
             _, bl = mat_match
             if bl:
-                questions.append({part: True})
-                continue
+                local_questions.add((part, True))
 
-        if questions:
-            task_repo.update_status(task.id, "materials_review", output_data=questions)
-            logger.info(f"Task {task.id}: Needs manual matching for material parts")
-            return
+        if bool(local_questions):
+            # task_repo.update_status(task.id, "materials_review", output_data=questions)
+            logger.info(
+                f"Task {task.id}: Needs manual matching for material parts for file {filename}"
+            )
+            questions |= local_questions
+            continue
 
         for material, material_obj in unique_materials_dict.items():
             for part in material_obj.parts:
@@ -126,9 +133,9 @@ def process_classified_excel(
         wb = make_xlsx(res, unique_materials_dict)
 
         if wb is None:
-            task_repo.update_status(task.id, "error")
+            # task_repo.update_status(task.id, "error")
             logger.warning(f"Task {task.id}: Empty output file")
-            return
+            continue
 
         data = BytesIO()
         wb.save(data)
@@ -143,9 +150,22 @@ def process_classified_excel(
         )
         if err:
             logger.error(f"Task {task.id}: Can't save file, retrying...")
+            continue
+        at_leat_one_file_saved = True
 
-    task_repo.update_status(task.id, "completed")
-    logger.info(f"Task {task.id}: Succesfully parsed files")
+    if questions:
+        questions = [{p: bl} for p, bl in questions]
+        task_repo.update_status(task.id, "materials_review", output_data=questions)
+        logger.info(
+            f"Task {task.id}: Needs manual matching for material parts: f{questions}"
+        )
+        return
+    if at_leat_one_file_saved:
+        task_repo.update_status(task.id, "completed")
+        logger.info(f"Task {task.id}: Succesfully parsed files")
+    else:
+        task_repo.update_status(task.id, "error")
+        logger.info(f"Task {task.id}: No saved files")
 
 
 def process_manual_matching(
@@ -253,7 +273,8 @@ def development() -> None:
     cloud = MinIOClient.get_client()
 
     # testfile = Path("../private/tables/1108A.xls")
-    filename = "033/1108A.xls"
+    # filename = "033/1108A.xls"
+    filename = "1/90/1_05.03_Заявка_(Триплекс).xlsx"
 
     file_data = get_bytes_object(cloud, ATTACHMENTS_BUCKET, filename)
     print(file_data)

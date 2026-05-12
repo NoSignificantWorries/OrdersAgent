@@ -33,6 +33,9 @@ RUN apk --no-cache add ca-certificates tzdata
 
 # Копируем бинарник из этапа сборки
 COPY --from=builder /app/service /app/service
+
+WORKDIR /app
+
 COPY ./internal/config/config.json ./internal/config/config.json
 
 # Копируем конфиги если нужны
@@ -42,7 +45,6 @@ COPY ./internal/config/config.json ./internal/config/config.json
 # USER appuser
 
 # Рабочая директория
-WORKDIR /app
 
 # Запускаем сервис
-ENTRYPOINT ["/app/service"]
+ENTRYPOINT ["./service"]

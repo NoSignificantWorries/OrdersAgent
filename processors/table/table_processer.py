@@ -8,7 +8,6 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 import openpyxl
 import xlrd
-from openpyxl import cell
 from rapidfuzz import fuzz
 
 from materials import ParseResults
@@ -89,7 +88,7 @@ class Cell:
         dropempty: bool = False,
         autoclassify: bool = False,
     ):
-        if dropempty and len(str(value).strip()) == 0:
+        if (dropempty and len(str(value).strip()) == 0) or value is None:
             return None
         instance = super().__new__(cls)
         return instance
