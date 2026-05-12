@@ -77,7 +77,6 @@ async function downloadBlob(url, filename) {
     setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
-
 async function downloadEmailAttachments(email) {
     const docs = getDisplayDocuments(email).filter(doc => doc && doc.id);
 
@@ -99,62 +98,98 @@ async function downloadEmailAttachments(email) {
     }
 }
 
+async function loadAvailableResultDocuments(taskId) {
+    const resp = await fetch(`/api/tasks/${taskId}/result-documents`, {
+        method: 'GET',
+        credentials: 'same-origin'
+    });
 
-async function downloadChatResultDocuments(email) {
-    if (!email?.task?.id) {
-        alert("У письма нет связанной задачи");
-        return;
-    }
-
-    const docs = (email?.documents || []).filter(doc => doc && doc.id);
-
-    if (!docs.length) {
-        alert("У письма нет файлов");
-        return;
-    }
-
-    let downloadedCount = 0;
-    const skippedFiles = [];
-
-    for (const doc of docs) {
-        const filename =
-            doc?.document_name ||
-            doc?.filename ||
-            `result-${doc.id}`;
+    if (!resp.ok) {
+        let message = 'Не удалось получить список результирующих файлов';
 
         try {
-            await downloadBlob(
-                `/api/documents/${doc.id}/result-download`,
-                filename
-            );
-            downloadedCount += 1;
-        } catch (e) {
-            const message = String(e?.message || "");
-
-            if (
-                message.includes("Результирующий файл не найден") ||
-                message.includes("Файл не найден") ||
-                message.includes("404")
-            ) {
-                skippedFiles.push(filename);
-                continue;
+            const data = await resp.json();
+            if (data && data.detail) {
+                message = data.detail;
             }
+        } catch (_) {}
 
-            console.error(e);
-            alert(e.message || "Ошибка скачивания результирующих файлов");
-            return;
-        }
+        throw new Error(message);
     }
 
-    if (!downloadedCount) {
-        alert("В result-бакете не найдено ни одного файла");
+    const data = await resp.json();
+    return data.documents || [];
+}
+
+async function downloadAvailableResultDocuments(docs) {
+    if (!docs.length) {
+        alert("Нет готовых файлов для скачивания");
         return;
     }
 
-    if (skippedFiles.length) {
-        console.warn("Пропущены отсутствующие result-файлы:", skippedFiles);
+    for (const doc of docs) {
+        await downloadBlob(
+            `/api/documents/${doc.id}/result-download`,
+            doc.filename || `result-${doc.id}`
+        );
     }
 }
+
+// async function downloadChatResultDocuments(email) {
+//     if (!email?.task?.id) {
+//         alert("У письма нет связанной задачи");
+//         return;
+//     }
+
+//     const docs = (email?.documents || []).filter(doc => doc && doc.id);
+
+//     if (!docs.length) {
+//         alert("У письма нет файлов");
+//         return;
+//     }
+
+//     let downloadedCount = 0;
+//     const skippedFiles = [];
+
+//     for (const doc of docs) {
+//         const filename =
+//             doc?.document_name ||
+//             doc?.filename ||
+//             `result-${doc.id}`;
+
+//         try {
+//             await downloadBlob(
+//                 `/api/documents/${doc.id}/result-download`,
+//                 filename
+//             );
+//             downloadedCount += 1;
+//         } catch (e) {
+//             const message = String(e?.message || "");
+
+//             if (
+//                 message.includes("Результирующий файл не найден") ||
+//                 message.includes("Файл не найден") ||
+//                 message.includes("404")
+//             ) {
+//                 skippedFiles.push(filename);
+//                 continue;
+//             }
+
+//             console.error(e);
+//             alert(e.message || "Ошибка скачивания результирующих файлов");
+//             return;
+//         }
+//     }
+
+//     if (!downloadedCount) {
+//         alert("В result-бакете не найдено ни одного файла");
+//         return;
+//     }
+
+//     if (skippedFiles.length) {
+//         console.warn("Пропущены отсутствующие result-файлы:", skippedFiles);
+//     }
+// }
 
 function mapTaskStatusToUiStatus(taskStatus) {
     switch ((taskStatus || "").toLowerCase()) {
@@ -673,41 +708,55 @@ function renderChatForEmail(email) {
     const taskStatus = (email.task_status || '').toLowerCase();
 
     if (taskStatus === 'completed') {
-        const docs = (email?.documents || []).filter(doc => doc && doc.id);
-
-        if (!docs.length) {
-            container.innerHTML = '<div class="chat-placeholder">У письма нет файлов</div>';
+        if (!email?.task?.id) {
+            container.innerHTML = '<div class="chat-placeholder">У письма нет связанной задачи</div>';
             return;
         }
 
-        const filesHtml = docs.map(doc => {
-            const filename =
-                doc?.document_name ||
-                doc?.filename ||
-                `document-${doc.id}`;
+        container.innerHTML = '<div class="chat-placeholder">Загрузка готовых файлов...</div>';
 
-            return `<li>${escapeHtml(String(filename))}</li>`;
-        }).join('');
+        loadAvailableResultDocuments(email.task.id)
+            .then((docs) => {
+                if (!docs.length) {
+                    container.innerHTML = '<div class="chat-placeholder">Готовые файлы не найдены</div>';
+                    return;
+                }
 
-        container.innerHTML = `
-            <div class="email-attachments">
-                <strong>Файлы для скачивания:</strong>
-                <ul>
-                    ${filesHtml}
-                </ul>
-                <button class="save-all-attachments-btn" data-email-id="${email.id}">
-                    Скачать
-                </button>
-            </div>
-        `;
+                const filesHtml = docs.map(doc => {
+                    const filename = doc?.filename || `document-${doc.id}`;
+                    return `<li>${escapeHtml(String(filename))}</li>`;
+                }).join('');
 
-        const downloadBtn = container.querySelector('.save-all-attachments-btn');
-        if (downloadBtn) {
-            downloadBtn.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                await downloadChatResultDocuments(email);
+                container.innerHTML = `
+                    <div class="email-attachments">
+                        <strong>Готовые файлы:</strong>
+                        <ul>
+                            ${filesHtml}
+                        </ul>
+                        <button class="save-all-attachments-btn" data-email-id="${email.id}">
+                            Скачать
+                        </button>
+                    </div>
+                `;
+
+                const downloadBtn = container.querySelector('.save-all-attachments-btn');
+                if (downloadBtn) {
+                    downloadBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+
+                        try {
+                            await downloadAvailableResultDocuments(docs);
+                        } catch (err) {
+                            console.error(err);
+                            alert(err.message || 'Ошибка скачивания результирующих файлов');
+                        }
+                    });
+                }
+            })
+            .catch((err) => {
+                console.error(err);
+                container.innerHTML = `<div class="chat-placeholder">${escapeHtml(err.message || 'Ошибка загрузки файлов')}</div>`;
             });
-        }
 
         return;
     }

@@ -33,6 +33,90 @@ async def _load_document_bytes_from_storage(bucket_name: str, object_key: str) -
         response.close()
         response.release_conn()
 
+@router.get("/tasks/{task_id}/result-documents")
+async def get_result_documents(task_id: int, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            task = await conn.fetchrow(
+                """
+                SELECT
+                    t.id,
+                    t.email_id,
+                    e.mailbox
+                FROM tasks t
+                JOIN emails e ON e.id = t.email_id
+                WHERE t.id = $1
+                """,
+                task_id,
+            )
+        else:
+            task = await conn.fetchrow(
+                """
+                SELECT
+                    t.id,
+                    t.email_id,
+                    e.mailbox
+                FROM tasks t
+                JOIN emails e ON e.id = t.email_id
+                WHERE t.id = $1
+                  AND e.mailbox = $2
+                """,
+                task_id,
+                user["email"],
+            )
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Задача не найдена")
+
+        docs = await conn.fetch(
+            """
+            SELECT
+                d.id,
+                d.filename,
+                d.minio_object_key
+            FROM documents d
+            WHERE d.email_id = $1
+            ORDER BY d.id
+            """,
+            task["email_id"],
+        )
+
+    client = MinIOClient.get_client()
+    result_docs = []
+
+    for doc in docs:
+        object_key = doc["minio_object_key"]
+        if not object_key:
+            continue
+
+        try:
+            client.stat_object(RESULTS_BUCKET, object_key)
+            result_docs.append({
+                "id": doc["id"],
+                "filename": doc["filename"] or f"document-{doc['id']}",
+            })
+
+        # Предпочтительно ловить конкретный тип ошибки MinIO SDK.
+        # Например:
+        # except S3Error as e:
+        #     if e.code in ("NoSuchKey", "NoSuchObject"):
+        #         continue
+        #     raise HTTPException(status_code=500, detail=f"Ошибка проверки файла: {e}")
+
+        except Exception as e:
+            error_text = str(e)
+            if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+                continue
+            raise HTTPException(status_code=500, detail=f"Ошибка проверки файла: {e}")
+
+    return {"documents": result_docs}
+
 
 @router.get("/queue")
 async def get_queue(
