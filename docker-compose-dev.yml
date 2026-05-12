@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
     postgres:
         image: postgres:18-alpine
@@ -72,6 +70,80 @@ services:
             mc version enable myminio/results;
             echo 'MinIO initialized successfully!';
             "
+        networks:
+            - app_network
+
+    mail:
+        build:
+            context: ./mail
+            dockerfile: Dockerfile
+        container_name: mail
+        environment:
+            - POSTGRES_USER=${POSTGRES_USER}
+            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            - POSTGRES_DB=${POSTGRES_DB}
+            - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+            - MINIO_ENDPOINT=minio:9000
+            - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+            - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+        depends_on:
+            postgres:
+                condition: service_healthy
+            minio:
+                condition: service_healthy
+        restart: unless-stopped
+        networks:
+            - app_network
+
+    processors:
+        build:
+            context: ./processors
+            dockerfile: Dockerfile
+        container_name: processors
+        environment:
+            - POSTGRES_USER=${POSTGRES_USER}
+            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            - POSTGRES_DB=${POSTGRES_DB}
+            - POSTGRES_HOST=postgres
+            - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+            - MINIO_ENDPOINT=minio:9000
+            - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+            - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+        depends_on:
+            postgres:
+                condition: service_healthy
+            minio:
+                condition: service_healthy
+        restart: unless-stopped
+        networks:
+            - app_network
+
+    frontend:
+        build:
+            context: ./frontend
+            dockerfile: Dockerfile
+        container_name: frontend
+        ports:
+            - "8000:8000"
+        environment:
+            - YANDEX_REDIRECT_URI=${YANDEX_REDIRECT_URI}
+            - YANDEX_CLIENT_ID=${YANDEX_CLIENT_ID}
+            - YANDEX_CLIENT_SECRET=${YANDEX_CLIENT_SECRET}
+            - YANDEX_TOKEN_URL=${YANDEX_TOKEN_URL}
+            - POSTGRES_USER=${POSTGRES_USER}
+            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            - POSTGRES_DB=${POSTGRES_DB}
+            - POSTGRES_HOST=postgres
+            - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+            - MINIO_ENDPOINT=minio:9000
+            - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+            - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+        depends_on:
+            postgres:
+                condition: service_healthy
+            minio:
+                condition: service_healthy
+        restart: unless-stopped
         networks:
             - app_network
 

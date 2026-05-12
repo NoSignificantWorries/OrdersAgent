@@ -13,7 +13,7 @@ class MinIOClient:
     def get_client(cls) -> Minio:
         if cls._instance is None:
             cls._instance = Minio(
-                "localhost:9000",
+                os.getenv("MINIO_ENDPOINT", "localhost:9000"),
                 access_key=os.getenv("MINIO_ROOT_USER", "minioadmin"),
                 secret_key=os.getenv("MINIO_ROOT_PASSWORD", "minioadmin"),
                 secure=False,

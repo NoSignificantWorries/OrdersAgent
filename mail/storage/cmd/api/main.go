@@ -10,8 +10,8 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"OrdersAgent/storage/api"
-	"OrdersAgent/storage/configdb"
+	"mail/storage/api"
+	"mail/storage/configdb"
 )
 
 func main() {
