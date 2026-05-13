@@ -10,6 +10,8 @@ attachments/
 **.env
 **.**.env
 **.log
+**.crt
+**.key
 .venv
 __pycache__/
 

@@ -153,6 +153,20 @@ services:
         networks:
             - app_network
 
+    nginx:
+        build:
+            context: ./nginx
+            dockerfile: Dockerfile
+        ports:
+            - "80:80"
+            - "443:443"
+        volumes:
+            - ./nginx/certs:/etc/nginx/certs:ro
+        depends_on:
+            - frontend
+        networks:
+            - app_network
+
 networks:
     app_network:
         driver: bridge
