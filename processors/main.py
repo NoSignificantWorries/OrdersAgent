@@ -64,6 +64,9 @@ def process_classified_excel(
     task, email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
 ):
     documents = doc_repo.get_by_email_id(task.email_id)
+    if not bool(documents):
+        task_repo.update_status(task.id, "error")
+        logger.info(f"Task {task.id}: No attachments")
     docnames = [doc.filename for doc in documents]
     logger.info(f"Task {task.id}: Processing documents: {', '.join(docnames)}")
     unique_materials_dict = {}
@@ -78,15 +81,27 @@ def process_classified_excel(
             continue
 
         # opening table
-        worker = TableWorker(file_data, Path(filename))
-        worker.open_and_clean()
+        try:
+            worker = TableWorker(file_data, Path(filename))
+            worker.open_and_clean()
+        except Exception as err:
+            logger.exception(
+                f"Task {task.id}: File '{filename}' not opened succesfully: {err}"
+            )
+            continue
         if worker.tables is None or not bool(worker.tables):
             logger.error(f"Task {task.id}: Unexpected errors with the file {filename}")
             # task_repo.update_status(task.id, "error")
             continue
 
         # parsing simple strategy
-        res = worker.simple_parser()
+        try:
+            res = worker.simple_parser()
+        except Exception:
+            logger.exception(
+                f"Task {task.id}: Can't apply simple parser for file '{filename}'"
+            )
+            continue
 
         # finding unique materials
         unique_materials = set()
@@ -130,7 +145,13 @@ def process_classified_excel(
             for part in material_obj.parts:
                 material_obj.matches.append(matches[part][0])
 
-        wb = make_xlsx(res, unique_materials_dict)
+        try:
+            wb = make_xlsx(res, unique_materials_dict)
+        except Exception as err:
+            logger.exception(
+                f"Task {task.id}: Unexpected errors while saving file '{filename}' in workbook: {err}"
+            )
+            continue
 
         if wb is None:
             # task_repo.update_status(task.id, "error")
@@ -177,7 +198,13 @@ def process_manual_matching(
         logger.info(f"Task {task.id}: Empty answers")
         return
     answers_flat = [(part, data[0], data[1]) for part, data in answers.items()]
-    material_repo.batch_add(answers_flat)
+    try:
+        material_repo.batch_add(answers_flat)
+    except Exception as err:
+        logger.exception(
+            f"Task {task.id}: Error while adding materials in the base: {err}"
+        )
+        return
 
     task_repo.update_status(task.id, "ml_classified")
 

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from .base import DatabaseManager
@@ -74,10 +75,24 @@ class MappingRepository:
 
     def batch_add(self, items: List[Tuple[str, str, bool]]) -> None:
         with DatabaseManager.session_scope() as session:
-            for source, target, black_list in items:
-                session.add(
-                    Mapping(source=source, target=target, black_list=black_list)
-                )
+            stmt = pg_insert(Mapping).values(
+                [{"source": s, "target": t, "black_list": bl} for s, t, bl in items]
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["source"],
+                set_=dict(
+                    target=stmt.excluded.target, black_list=stmt.excluded.black_list
+                ),
+            )
+            session.execute(stmt)
+            session.commit()
+
+    # def batch_add(self, items: List[Tuple[str, str, bool]]) -> None:
+    #     with DatabaseManager.session_scope() as session:
+    #         for source, target, black_list in items:
+    #             session.add(
+    #                 Mapping(source=source, target=target, black_list=black_list)
+    #             )
 
     def update(
         self,

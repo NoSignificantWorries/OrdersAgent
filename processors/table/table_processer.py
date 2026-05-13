@@ -441,17 +441,22 @@ class TableWorker:
             for idx, row in table.iter_rows():
                 if idx <= h_idx:
                     continue
-                tmp_res = results.copy()
+                values_row = {header: None for header in match_variant}
                 for col, htype in zip(cols, match_variant):
                     cell = table.get(idx, col)
-                    if cell is None:
+                    values_row[htype] = cell
+                correct_row = True
+                for header, match in values_row.items():
+                    if match is None:
+                        correct_row = False
                         break
-                    if cell.type == columnrules1[htype]:
-                        tmp_res[htype].append(cell)
-                    else:
+                    if columnrules1[header] != match.type:
+                        correct_row = False
                         break
-                else:
-                    results = tmp_res.copy()
+
+                if correct_row:
+                    for header, match in values_row.items():
+                        results[header].append(match)
 
             # print(results)
             res = TableParseResults()
