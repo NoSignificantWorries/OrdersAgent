@@ -26,6 +26,20 @@ const decisionOptions = [
 
 
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+function isEditingMaterialInput() {
+    const active = document.activeElement;
+    return !!(
+        active &&
+        active.classList &&
+        active.classList.contains('answer-input')
+    );
+}
+
+function isChatTabActive() {
+    const chatTab = document.getElementById('tab-chat');
+    return !!(chatTab && chatTab.classList.contains('active'));
+}
+
 function formatDate(dateString) {
     const date = new Date(dateString);
     if (isNaN(date)) return "";
@@ -873,6 +887,8 @@ function initTabs() {
 // ========== АВТООБНОВЛЕНИЕ ==========
 async function refreshEmailsSilently() {
     const prevId = selectedEmailId;
+    const skipChatRerender = isChatTabActive() && isEditingMaterialInput();
+
     await loadEmailsFromApi(false);
     renderEmailList();
 
@@ -880,15 +896,15 @@ async function refreshEmailsSilently() {
         const currentEmail = emails.find(e => e.id === prevId);
         highlightSelectedEmail(prevId);
 
-        const chatTab = document.getElementById('tab-chat');
-        if (chatTab && chatTab.classList.contains('active')) {
-            renderChatForEmail(currentEmail);
+        if (isChatTabActive()) {
+            if (!skipChatRerender) {
+                renderChatForEmail(currentEmail);
+            }
         } else {
             renderEmailCard(currentEmail);
         }
     } else {
-        const chatTab = document.getElementById('tab-chat');
-        if (chatTab && chatTab.classList.contains('active')) {
+        if (isChatTabActive() && !skipChatRerender) {
             renderChatForEmail(null);
         }
     }
