@@ -1,8 +1,13 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"log"
+	"net"
 	"os"
+	"strings"
+	"syscall"
 	"time"
 
 	"mail/internal/client"
@@ -26,65 +31,108 @@ func runUserWorker(
 	log.Printf("user worker started | user_id=%d", userID)
 	defer onExit(userID)
 
-	mailAuth, err := storage.GetUserMailAuth(db, userID)
-	if err != nil {
-		log.Printf("get user mail auth | user_id=%d err=%v", userID, err)
-		return
-	}
-
-	if mailAuth.AccessToken == "" {
-		log.Printf("empty mail access token | user_id=%d", userID)
-		return
-	}
-
-	// Обновляем access_token, если он скоро истечёт
-	if time.Now().After(mailAuth.AccessExpiresAt.Add(-1 * time.Minute)) {
-		log.Printf("access token expired or about to expire, refreshing | user_id=%d", userID)
-
-		newToken, err := client.RefreshYandexToken(
-			os.Getenv("YANDEX_TOKEN_URL"),
-			os.Getenv("YANDEX_CLIENT_ID"),
-			os.Getenv("YANDEX_CLIENT_SECRET"),
-			mailAuth.RefreshToken,
-		)
-		if err != nil {
-			log.Printf("refresh token | user_id=%d err=%v", userID, err)
-			return
-		}
-
-		mailAuth.AccessToken = newToken.AccessToken
-		mailAuth.RefreshToken = newToken.RefreshToken
-		mailAuth.AccessExpiresAt = newToken.AccessExpiresAt
-
-		if err := storage.UpdateUserMailTokens(db, userID, mailAuth); err != nil {
-			log.Printf("update mail tokens | user_id=%d err=%v", userID, err)
-			return
-		}
-
-		log.Printf("access token refreshed | user_id=%d", userID)
-	}
-
-	// IMAP‑клиент по OAuth/XOAUTH2
-	imapClient, err := client.NewOAuth(cfg, mailAuth.Email, mailAuth.AccessToken)
-	if err != nil {
-		log.Printf("IMAP client | user_id=%d err=%v", userID, err)
-		return
-	}
-	defer imapClient.Close()
-
 	processor := orders.New(repo, userID)
 
-	// Периодический обход писем
+	var imapClient *client.Client
+	defer func() {
+		if imapClient != nil {
+			imapClient.Close()
+		}
+	}()
+
+	getConnectedClient := func() (*client.Client, error) {
+		if imapClient != nil {
+			return imapClient, nil
+		}
+
+		mailAuth, err := storage.GetUserMailAuth(db, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		if mailAuth.AccessToken == "" {
+			return nil, errors.New("empty mail access token")
+		}
+
+		if time.Now().After(mailAuth.AccessExpiresAt.Add(-1 * time.Minute)) {
+			log.Printf("access token expired or about to expire, refreshing | user_id=%d", userID)
+
+			newToken, err := client.RefreshYandexToken(
+				os.Getenv("YANDEX_TOKEN_URL"),
+				os.Getenv("YANDEX_CLIENT_ID"),
+				os.Getenv("YANDEX_CLIENT_SECRET"),
+				mailAuth.RefreshToken,
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			mailAuth.AccessToken = newToken.AccessToken
+			mailAuth.RefreshToken = newToken.RefreshToken
+			mailAuth.AccessExpiresAt = newToken.AccessExpiresAt
+
+			if err := storage.UpdateUserMailTokens(db, userID, mailAuth); err != nil {
+				return nil, err
+			}
+
+			log.Printf("access token refreshed | user_id=%d", userID)
+		}
+
+		c, err := client.NewOAuth(cfg, mailAuth.Email, mailAuth.AccessToken)
+		if err != nil {
+			return nil, err
+		}
+
+		log.Printf("IMAP client connected | user_id=%d", userID)
+		imapClient = c
+		return imapClient, nil
+	}
+
+	resetClient := func(reason error) {
+		if reason != nil {
+			log.Printf("reset IMAP client | user_id=%d err=%v", userID, reason)
+		}
+		if imapClient != nil {
+			imapClient.Close()
+			imapClient = nil
+		}
+	}
+
+	processOnce := func() {
+		c, err := getConnectedClient()
+		if err != nil {
+			log.Printf("get IMAP client | user_id=%d err=%v", userID, err)
+			return
+		}
+
+		err = ProcessEmails(c, stopChan, processor)
+		if err == nil {
+			return
+		}
+
+		log.Printf("process emails | user_id=%d err=%v", userID, err)
+
+		if isReconnectableError(err) {
+			resetClient(err)
+
+			select {
+			case <-stopChan:
+				return
+			case <-time.After(5 * time.Second):
+			}
+			return
+		}
+	}
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	// Первый проход сразу
-	ProcessEmails(imapClient, stopChan, processor)
+	processOnce()
 
 	for {
 		select {
 		case <-ticker.C:
-			ProcessEmails(imapClient, stopChan, processor)
+			processOnce()
 		case <-stopChan:
 			log.Printf("user worker stopped | user_id=%d", userID)
 			return
@@ -92,16 +140,14 @@ func runUserWorker(
 	}
 }
 
-// Обработка всех непрочитанных писем.
-func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *orders.Processor) {
+func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *orders.Processor) error {
 	uids, err := imap.FetchUnread()
 	if err != nil {
-		log.Printf("fetch unread: %v", err)
-		return
+		return err
 	}
 
 	if len(uids) == 0 {
-		return
+		return nil
 	}
 
 	log.Printf("found %d unread emails", len(uids))
@@ -110,13 +156,16 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
 		select {
 		case <-stopChan:
 			log.Printf("interrupt while processing, stopping")
-			return
+			return nil
 		default:
 		}
 
 		fetchCmd, err := imap.FetchMessage(uid)
 		if err != nil {
 			log.Printf("fetch message uid=%d: %v", uid, err)
+			if isReconnectableError(err) {
+				return err
+			}
 			continue
 		}
 
@@ -135,6 +184,43 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
 
 		if err := imap.MarkRead(uid); err != nil {
 			log.Printf("mark read uid=%d: %v", uid, err)
+			if isReconnectableError(err) {
+				return err
+			}
 		}
 	}
+
+	return nil
+}
+
+func isReconnectableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+
+	if strings.Contains(msg, "use of closed network connection") ||
+		strings.Contains(msg, "connection reset by peer") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "unexpected eof") ||
+		strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "connection refused") {
+		return true
+	}
+
+	if errors.Is(err, io.EOF) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	return false
 }
