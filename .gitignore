@@ -9,6 +9,7 @@ attachments/
 
 **.env
 **.**.env
+**.log
 .venv
 __pycache__/
 
