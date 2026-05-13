@@ -135,62 +135,6 @@ async function downloadAvailableResultDocuments(docs) {
     }
 }
 
-// async function downloadChatResultDocuments(email) {
-//     if (!email?.task?.id) {
-//         alert("У письма нет связанной задачи");
-//         return;
-//     }
-
-//     const docs = (email?.documents || []).filter(doc => doc && doc.id);
-
-//     if (!docs.length) {
-//         alert("У письма нет файлов");
-//         return;
-//     }
-
-//     let downloadedCount = 0;
-//     const skippedFiles = [];
-
-//     for (const doc of docs) {
-//         const filename =
-//             doc?.document_name ||
-//             doc?.filename ||
-//             `result-${doc.id}`;
-
-//         try {
-//             await downloadBlob(
-//                 `/api/documents/${doc.id}/result-download`,
-//                 filename
-//             );
-//             downloadedCount += 1;
-//         } catch (e) {
-//             const message = String(e?.message || "");
-
-//             if (
-//                 message.includes("Результирующий файл не найден") ||
-//                 message.includes("Файл не найден") ||
-//                 message.includes("404")
-//             ) {
-//                 skippedFiles.push(filename);
-//                 continue;
-//             }
-
-//             console.error(e);
-//             alert(e.message || "Ошибка скачивания результирующих файлов");
-//             return;
-//         }
-//     }
-
-//     if (!downloadedCount) {
-//         alert("В result-бакете не найдено ни одного файла");
-//         return;
-//     }
-
-//     if (skippedFiles.length) {
-//         console.warn("Пропущены отсутствующие result-файлы:", skippedFiles);
-//     }
-// }
-
 function mapTaskStatusToUiStatus(taskStatus) {
     switch ((taskStatus || "").toLowerCase()) {
         case "new":
@@ -233,8 +177,6 @@ function canManualDecision(emailItem) {
     const status = (emailItem?.task_status || "").toLowerCase();
     const decision = (emailItem?.model_decision || "").toLowerCase();
 
-    // Разрешаем ручную установку класса,
-    // если модель сказала "review" или статус = ml_low_confidence
     return status === 'ml_review' || status === 'materials_review' || decision === 'review';
 }
 
@@ -283,12 +225,11 @@ function extractMaterialNames(value) {
 function extractMaterialsFromOutput(output) {
     if (!output || typeof output !== "object") return [];
 
-    // 1. Если output_data сам является массивом материалов
+    // Если output_data сам является массивом материалов
     if (Array.isArray(output)) {
         return extractMaterialNames(output);
     }
 
-    // 2. Самые вероятные ключи
     const candidates = [
         output.queries,
         output.requests,
@@ -305,7 +246,6 @@ function extractMaterialsFromOutput(output) {
         if (names.length > 0) return names;
     }
 
-    // 3. Запасной вариант:
     // если во всем output_data есть хоть одно поле-массив/объект с материалами
     for (const value of Object.values(output)) {
         const names = extractMaterialNames(value);
@@ -612,7 +552,6 @@ function renderEmailCard(email) {
 
                 <div class="email-meta">
                     <div><strong>От:</strong> ${escapeHtml(email.sender)}</div>
-                    <div><strong>UID:</strong> ${escapeHtml(String(email.uid ?? ""))}</div>
                     <div><strong>Дата:</strong> ${formatDateTime(email.date)}</div>
                 </div>
             </div>
