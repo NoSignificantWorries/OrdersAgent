@@ -7,8 +7,6 @@ services:
             POSTGRES_PASSWORD: $POSTGRES_PASSWORD
             POSTGRES_DB: $POSTGRES_DB
             PGDATA: /var/lib/postgresql/data/pgdata
-        ports:
-            - "5432:5432"
         volumes:
             - ./storage/init:/docker-entrypoint-initdb.d
             - postgres_data:/var/lib/postgresql/data
@@ -21,26 +19,9 @@ services:
         networks:
             - app_network
 
-    pgweb:
-        image: sosedoff/pgweb:latest
-        container_name: pgweb
-        environment:
-            PGWEB_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
-        ports:
-            - "8081:8081"
-        depends_on:
-            postgres:
-                condition: service_healthy
-        restart: unless-stopped
-        networks:
-            - app_network
-
     minio:
         image: minio/minio:latest
         container_name: minio
-        ports:
-            - "9000:9000"
-            - "9001:9001"
         environment:
             MINIO_ROOT_USER: $MINIO_ROOT_USER
             MINIO_ROOT_PASSWORD: $MINIO_ROOT_PASSWORD
