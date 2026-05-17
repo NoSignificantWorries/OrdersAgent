@@ -5,6 +5,9 @@
 secrets/
 attachments/
 
+logs/
+**.log
+
 !.gitkeep
 
 **.env
