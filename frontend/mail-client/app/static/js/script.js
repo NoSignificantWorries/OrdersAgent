@@ -3,27 +3,25 @@ let emails = [];
 let selectedEmailId = null;
 const chatStorage = new Map();
 
-let currentStatusFilter = 'all';
-let currentClassFilter = 'all';
+let currentStatusFilter = "all";
+let currentClassFilter = "all";
 let sortNewestFirst = true;
-let currentSearchTerm = '';
-
+let currentSearchTerm = "";
 
 // ========== КОНФИГУРАЦИЯ ==========
 const statusConfig = {
-    waiting:    { name: "Ожидание" },
+    waiting: { name: "Ожидание" },
     processing: { name: "Обработка" },
-    review:     { name: "Требуется проверка" },
-    completed:  { name: "Завершено" },
-    error:      { name: "Ошибка" }
+    review: { name: "Требуется проверка" },
+    completed: { name: "Завершено" },
+    error: { name: "Ошибка" },
 };
 
 const decisionOptions = [
-    { value: "",        label: "Выберите класс" },
-    { value: "auto_0",  label: "Заявка" },
-    { value: "auto_1",  label: "Расчёт" }
+    { value: "", label: "Выберите класс" },
+    { value: "auto_0", label: "Заявка" },
+    { value: "auto_1", label: "Расчёт" },
 ];
-
 
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 function isEditingMaterialInput() {
@@ -31,19 +29,32 @@ function isEditingMaterialInput() {
     return !!(
         active &&
         active.classList &&
-        active.classList.contains('answer-input')
+        active.classList.contains("answer-input")
     );
 }
 
 function isChatTabActive() {
-    const chatTab = document.getElementById('tab-chat');
-    return !!(chatTab && chatTab.classList.contains('active'));
+    const chatTab = document.getElementById("tab-chat");
+    return !!(chatTab && chatTab.classList.contains("active"));
 }
 
 function formatDate(dateString) {
     const date = new Date(dateString);
     if (isNaN(date)) return "";
-    const months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+    const months = [
+        "янв",
+        "фев",
+        "мар",
+        "апр",
+        "май",
+        "июн",
+        "июл",
+        "авг",
+        "сен",
+        "окт",
+        "ноя",
+        "дек",
+    ];
     return `${date.getDate()} ${months[date.getMonth()]}`;
 }
 
@@ -54,19 +65,25 @@ function formatDateTime(dateString) {
 }
 
 function escapeHtml(text) {
-    const div = document.createElement('div');
+    const div = document.createElement("div");
     div.textContent = text ?? "";
     return div.innerHTML;
 }
 
+function escapeAttr(text) {
+    return String(text ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;");
+}
+
 async function downloadBlob(url, filename) {
     const resp = await fetch(url, {
-        method: 'GET',
-        credentials: 'same-origin'
+        method: "GET",
+        credentials: "same-origin",
     });
 
     if (!resp.ok) {
-        let message = 'Ошибка скачивания файла';
+        let message = "Ошибка скачивания файла";
 
         try {
             const data = await resp.json();
@@ -81,9 +98,9 @@ async function downloadBlob(url, filename) {
     const blob = await resp.blob();
     const objectUrl = URL.createObjectURL(blob);
 
-    const link = document.createElement('a');
+    const link = document.createElement("a");
     link.href = objectUrl;
-    link.download = filename || 'file';
+    link.download = filename || "file";
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -92,7 +109,7 @@ async function downloadBlob(url, filename) {
 }
 
 async function downloadEmailAttachments(email) {
-    const docs = getDisplayDocuments(email).filter(doc => doc && doc.id);
+    const docs = getDisplayDocuments(email).filter((doc) => doc && doc.id);
 
     if (!docs.length) {
         alert("Нет файлов для скачивания");
@@ -103,7 +120,7 @@ async function downloadEmailAttachments(email) {
         for (const doc of docs) {
             await downloadBlob(
                 `/api/documents/${doc.id}/download`,
-                doc.document_name
+                doc.document_name,
             );
         }
     } catch (e) {
@@ -114,12 +131,12 @@ async function downloadEmailAttachments(email) {
 
 async function loadAvailableResultDocuments(taskId) {
     const resp = await fetch(`/api/tasks/${taskId}/result-documents`, {
-        method: 'GET',
-        credentials: 'same-origin'
+        method: "GET",
+        credentials: "same-origin",
     });
 
     if (!resp.ok) {
-        let message = 'Не удалось получить список результирующих файлов';
+        let message = "Не удалось получить список результирующих файлов";
 
         try {
             const data = await resp.json();
@@ -144,7 +161,7 @@ async function downloadAvailableResultDocuments(docs) {
     for (const doc of docs) {
         await downloadBlob(
             `/api/documents/${doc.id}/result-download`,
-            doc.filename || `result-${doc.id}`
+            doc.filename || `result-${doc.id}`,
         );
     }
 }
@@ -191,27 +208,33 @@ function canManualDecision(emailItem) {
     const status = (emailItem?.task_status || "").toLowerCase();
     const decision = (emailItem?.model_decision || "").toLowerCase();
 
-    return status === 'ml_review' || status === 'materials_review' || decision === 'review';
+    return (
+        status === "ml_review" ||
+        status === "materials_review" ||
+        decision === "review"
+    );
 }
 
 function showLoading() {
-    const emailView = document.getElementById('emailView');
+    const emailView = document.getElementById("emailView");
     if (emailView) {
         emailView.innerHTML = `<div class="email-loading-wrapper"><div class="loading"></div></div>`;
     }
 }
 
 function highlightSelectedEmail(id) {
-    document.querySelectorAll('.email-item').forEach(item => item.classList.remove('selected'));
+    document
+        .querySelectorAll(".email-item")
+        .forEach((item) => item.classList.remove("selected"));
     const selected = document.querySelector(`.email-item[data-id="${id}"]`);
-    if (selected) selected.classList.add('selected');
+    if (selected) selected.classList.add("selected");
 }
 
 function extractMaterialNames(value) {
     if (!value) return [];
 
     if (Array.isArray(value)) {
-        return value.flatMap(item => {
+        return value.flatMap((item) => {
             if (typeof item === "string") {
                 const s = item.trim();
                 return s ? [s] : [];
@@ -219,7 +242,7 @@ function extractMaterialNames(value) {
 
             if (item && typeof item === "object" && !Array.isArray(item)) {
                 return Object.keys(item)
-                    .map(k => String(k).trim())
+                    .map((k) => String(k).trim())
                     .filter(Boolean);
             }
 
@@ -229,7 +252,7 @@ function extractMaterialNames(value) {
 
     if (value && typeof value === "object") {
         return Object.keys(value)
-            .map(k => String(k).trim())
+            .map((k) => String(k).trim())
             .filter(Boolean);
     }
 
@@ -252,7 +275,7 @@ function extractMaterialsFromOutput(output) {
         output.output_data,
         output.data,
         output.items,
-        output.result
+        output.result,
     ];
 
     for (const value of candidates) {
@@ -273,7 +296,7 @@ function getDisplayDocuments(email) {
     const docs = Array.isArray(email?.documents) ? email.documents : [];
     const seenNames = new Set();
 
-    return docs.filter(doc => {
+    return docs.filter((doc) => {
         const documentName = String(doc?.document_name ?? "").trim();
         if (!documentName) return false;
 
@@ -302,16 +325,20 @@ function buildChatItemsFromOutput(output, emailId) {
         return {
             material,
             answer: Array.isArray(saved) ? String(saved[0] ?? "") : "",
-            blacklist: Array.isArray(saved) ? Boolean(saved[1]) : false
+            blacklist: Array.isArray(saved) ? Boolean(saved[1]) : false,
         };
     });
 
     const cached = chatStorage.get(emailId);
     if (Array.isArray(cached) && cached.length > 0) {
-        return chatItems.map(item => {
-            const fromCache = cached.find(x => x.material === item.material);
+        return chatItems.map((item) => {
+            const fromCache = cached.find((x) => x.material === item.material);
             return fromCache
-                ? { ...item, answer: fromCache.answer, blacklist: fromCache.blacklist }
+                ? {
+                      ...item,
+                      answer: fromCache.answer,
+                      blacklist: fromCache.blacklist,
+                  }
                 : item;
         });
     }
@@ -321,7 +348,10 @@ function buildChatItemsFromOutput(output, emailId) {
 
 // ========== НОРМАЛИЗАЦИЯ ДАННЫХ API ==========
 function normalizeApiItem(item, idx) {
-    const output = (item.outputdata && typeof item.outputdata === "object") ? item.outputdata : {};
+    const output =
+        item.outputdata && typeof item.outputdata === "object"
+            ? item.outputdata
+            : {};
     const documents = Array.isArray(item.documents) ? item.documents : [];
 
     const taskStatus = item.status || "";
@@ -357,7 +387,7 @@ function normalizeApiItem(item, idx) {
             max_attempts: item.maxattempts ?? 3,
             created_at: item.taskcreatedat || null,
             started_at: item.taskstartedat || null,
-            completed_at: item.taskcompletedat || null
+            completed_at: item.taskcompletedat || null,
         },
 
         task_status: taskStatus,
@@ -365,8 +395,8 @@ function normalizeApiItem(item, idx) {
 
         documents,
         document_names: documents
-            .map(doc => doc?.document_name)
-            .filter(name => name && String(name).trim() !== ""),
+            .map((doc) => doc?.document_name)
+            .filter((name) => name && String(name).trim() !== ""),
     };
 
     normalized.chatItems = buildChatItemsFromOutput(output, normalized.id);
@@ -374,7 +404,6 @@ function normalizeApiItem(item, idx) {
 
     return normalized;
 }
-
 
 // ========== ЗАГРУЗКА ПИСЕМ ИЗ API ==========
 async function loadEmailsFromApi(showLoadingState = true) {
@@ -392,21 +421,25 @@ async function loadEmailsFromApi(showLoadingState = true) {
 
         const resp = await fetch("/api/queue", {
             method: "GET",
-            headers: { "Accept": "application/json" },
-            credentials: "same-origin"
+            headers: { Accept: "application/json" },
+            credentials: "same-origin",
         });
 
         if (resp.status === 401) {
             if (countSpan) countSpan.textContent = "Не авторизован";
-            if (listEl) listEl.innerHTML = `<div class="email-placeholder" style="padding:20px;text-align:center;">Нужно войти заново</div>`;
-            if (viewEl) viewEl.innerHTML = `<div class="email-placeholder">Нужно войти заново</div>`;
+            if (listEl)
+                listEl.innerHTML = `<div class="email-placeholder" style="padding:20px;text-align:center;">Нужно войти заново</div>`;
+            if (viewEl)
+                viewEl.innerHTML = `<div class="email-placeholder">Нужно войти заново</div>`;
             return false;
         }
 
         if (!resp.ok) {
             if (countSpan) countSpan.textContent = "Ошибка";
-            if (listEl) listEl.innerHTML = `<div class="email-placeholder" style="padding:20px;text-align:center;">Ошибка загрузки писем</div>`;
-            if (viewEl) viewEl.innerHTML = `<div class="email-placeholder">Ошибка загрузки писем</div>`;
+            if (listEl)
+                listEl.innerHTML = `<div class="email-placeholder" style="padding:20px;text-align:center;">Ошибка загрузки писем</div>`;
+            if (viewEl)
+                viewEl.innerHTML = `<div class="email-placeholder">Ошибка загрузки писем</div>`;
             return false;
         }
 
@@ -420,36 +453,42 @@ async function loadEmailsFromApi(showLoadingState = true) {
     } catch (e) {
         console.error("Ошибка загрузки писем:", e);
         if (countSpan) countSpan.textContent = "Ошибка";
-        if (listEl) listEl.innerHTML = `<div class="email-placeholder" style="padding:20px;text-align:center;">Ошибка загрузки писем</div>`;
-        if (viewEl) viewEl.innerHTML = `<div class="email-placeholder">Ошибка загрузки писем</div>`;
+        if (listEl)
+            listEl.innerHTML = `<div class="email-placeholder" style="padding:20px;text-align:center;">Ошибка загрузки писем</div>`;
+        if (viewEl)
+            viewEl.innerHTML = `<div class="email-placeholder">Ошибка загрузки писем</div>`;
         return false;
     }
 }
-
 
 // ========== ОТРИСОВКА СПИСКА ==========
 function renderEmailList() {
     let filtered = [...emails];
 
-    if (currentSearchTerm.trim() !== '') {
+    if (currentSearchTerm.trim() !== "") {
         const term = currentSearchTerm.toLowerCase();
-        filtered = filtered.filter(email =>
-            email.subject.toLowerCase().includes(term) ||
-            email.sender.toLowerCase().includes(term) ||
-            email.mailbox.toLowerCase().includes(term) ||
-            (email.content && email.content.toLowerCase().includes(term))
+        filtered = filtered.filter(
+            (email) =>
+                email.subject.toLowerCase().includes(term) ||
+                email.sender.toLowerCase().includes(term) ||
+                email.mailbox.toLowerCase().includes(term) ||
+                (email.content && email.content.toLowerCase().includes(term)),
         );
     }
 
-    if (currentStatusFilter !== 'all') {
-        filtered = filtered.filter(e => e.status === currentStatusFilter);
+    if (currentStatusFilter !== "all") {
+        filtered = filtered.filter((e) => e.status === currentStatusFilter);
     }
 
-    if (currentClassFilter !== 'all') {
-        if (currentClassFilter === '') {
-            filtered = filtered.filter(e => !e.model_decision || e.model_decision === '');
+    if (currentClassFilter !== "all") {
+        if (currentClassFilter === "") {
+            filtered = filtered.filter(
+                (e) => !e.model_decision || e.model_decision === "",
+            );
         } else {
-            filtered = filtered.filter(e => e.model_decision === currentClassFilter);
+            filtered = filtered.filter(
+                (e) => e.model_decision === currentClassFilter,
+            );
         }
     }
 
@@ -459,8 +498,8 @@ function renderEmailList() {
         return sortNewestFirst ? dateB - dateA : dateA - dateB;
     });
 
-    const container = document.getElementById('emailsContainer');
-    const countSpan = document.getElementById('email-count-display');
+    const container = document.getElementById("emailsContainer");
+    const countSpan = document.getElementById("email-count-display");
     if (!container) return;
 
     if (filtered.length === 0) {
@@ -469,7 +508,9 @@ function renderEmailList() {
         return;
     }
 
-    container.innerHTML = filtered.map(email => `
+    container.innerHTML = filtered
+        .map(
+            (email) => `
         <div class="email-item" data-id="${email.id}">
             <div class="subject">${escapeHtml(email.subject)}</div>
             <div class="email-item-header">
@@ -478,67 +519,84 @@ function renderEmailList() {
             </div>
             <div class="date">${formatDate(email.date)}</div>
         </div>
-    `).join('');
+    `,
+        )
+        .join("");
 
-    document.querySelectorAll('.email-item').forEach(el => {
-        el.addEventListener('click', () => selectEmail(el.dataset.id));
+    document.querySelectorAll(".email-item").forEach((el) => {
+        el.addEventListener("click", () => selectEmail(el.dataset.id));
     });
 
     if (countSpan) countSpan.textContent = `${filtered.length} писем`;
 }
 
-
 // ========== ВЫБОР ПИСЬМА ==========
 function selectEmail(id) {
     selectedEmailId = parseInt(id, 10);
-    const email = emails.find(e => e.id === selectedEmailId);
+    const email = emails.find((e) => e.id === selectedEmailId);
     if (!email) return;
 
     showLoading();
     setTimeout(() => {
         highlightSelectedEmail(id);
         renderEmailCard(email);
-        const chatTab = document.getElementById('tab-chat');
-        if (chatTab && chatTab.classList.contains('active')) {
+        const chatTab = document.getElementById("tab-chat");
+        if (chatTab && chatTab.classList.contains("active")) {
             renderChatForEmail(email);
         }
     }, 300);
 }
 
-
 // ========== КАРТОЧКА ПИСЬМА ==========
 function renderEmailCard(email) {
-    const formattedContent = (email.content || "").split('\n').map(line => {
-        if (line.trim() === '') return '<br>';
-        if (line.includes('•')) return `<p style="margin-left:20px;">${escapeHtml(line)}</p>`;
-        return `<p>${escapeHtml(line)}</p>`;
-    }).join('') || '<p>...</p>';
+    const formattedContent =
+        (email.content || "")
+            .split("\n")
+            .map((line) => {
+                if (line.trim() === "") return "<br>";
+                if (line.includes("•"))
+                    return `<p style="margin-left:20px;">${escapeHtml(line)}</p>`;
+                return `<p>${escapeHtml(line)}</p>`;
+            })
+            .join("") || "<p>...</p>";
 
     const docsWithName = getDisplayDocuments(email);
 
-    const attachmentBlock = docsWithName.length ? `
+    const attachmentBlock = docsWithName.length
+        ? `
         <div class="email-attachments">
             <strong>Вложения:</strong>
             <ul>
-                ${docsWithName.map(doc => `
+                ${docsWithName
+                    .map(
+                        (doc) => `
                     <li>${escapeHtml(doc.document_name)}</li>
-                `).join('')}
+                `,
+                    )
+                    .join("")}
             </ul>
             <button class="save-all-attachments-btn" data-email-id="${email.id}">Скачать</button>
         </div>
-    ` : '';
+    `
+        : "";
 
     const decisionValue = email.model_decision || "";
-    const decisionHtml = decisionOptions.map(opt => `
+    const decisionHtml = decisionOptions
+        .map(
+            (opt) => `
         <option value="${escapeHtml(opt.value)}" ${opt.value === decisionValue ? "selected" : ""}>
             ${escapeHtml(opt.label)}
         </option>
-    `).join('');
+    `,
+        )
+        .join("");
 
     const manualAllowed = canManualDecision(email);
     const taskStatusName = getStatusName(email.status);
 
-    const decisionBlock = manualAllowed && email.task ? `
+    const decisionBlock =
+        manualAllowed && email.task
+            ? `
         <div class="decision-block">
             <label for="decision-select" class="decision-label">Класс письма</label>
             <select id="decision-select" class="decision-select">
@@ -546,9 +604,10 @@ function renderEmailCard(email) {
             </select>
             <button id="decision-save-btn" class="decision-save-btn">Сохранить</button>
         </div>
-    ` : '';
+    `
+            : "";
 
-    const emailView = document.getElementById('emailView');
+    const emailView = document.getElementById("emailView");
     if (!emailView) return;
 
     emailView.innerHTML = `
@@ -579,8 +638,8 @@ function renderEmailCard(email) {
         </div>
     `;
 
-    const saveBtn = document.getElementById('decision-save-btn');
-    const sel = document.getElementById('decision-select');
+    const saveBtn = document.getElementById("decision-save-btn");
+    const sel = document.getElementById("decision-select");
 
     if (saveBtn && sel && manualAllowed && email.task?.id) {
         saveBtn.onclick = async () => {
@@ -592,14 +651,17 @@ function renderEmailCard(email) {
             }
 
             try {
-                const resp = await fetch(`/api/queue/${email.task.id}/decision`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({
-                        model_decision: newVal
-                    })
-                });
+                const resp = await fetch(
+                    `/api/queue/${email.task.id}/decision`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        credentials: "same-origin",
+                        body: JSON.stringify({
+                            model_decision: newVal,
+                        }),
+                    },
+                );
 
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok) {
@@ -609,15 +671,22 @@ function renderEmailCard(email) {
                 const task = data.task || {};
                 const output = task.output_data || {};
 
-                email.model_decision = output.model_decision || email.model_decision || newVal || "";
-                email.predicted_class = output.predicted_class ?? email.predicted_class;
+                email.model_decision =
+                    output.model_decision ||
+                    email.model_decision ||
+                    newVal ||
+                    "";
+                email.predicted_class =
+                    output.predicted_class ?? email.predicted_class;
                 email.prob_1 = output.prob_1 ?? email.prob_1;
 
                 if (email.task) {
                     email.task.status = task.status || email.task.status;
-                    email.task.assigned_to = task.assigned_to ?? email.task.assigned_to;
+                    email.task.assigned_to =
+                        task.assigned_to ?? email.task.assigned_to;
                     email.task.output_data = output;
-                    email.task.completed_at = task.completed_at || email.task.completed_at;
+                    email.task.completed_at =
+                        task.completed_at || email.task.completed_at;
 
                     email.task_status = email.task.status;
                     email.status = mapTaskStatusToUiStatus(email.task.status);
@@ -635,50 +704,57 @@ function renderEmailCard(email) {
         };
     }
 
-    const saveAttachmentsBtn = document.querySelector('.save-all-attachments-btn');
+    const saveAttachmentsBtn = document.querySelector(
+        ".save-all-attachments-btn",
+    );
     if (saveAttachmentsBtn) {
-        saveAttachmentsBtn.addEventListener('click', async (e) => {
+        saveAttachmentsBtn.addEventListener("click", async (e) => {
             e.stopPropagation();
             await downloadEmailAttachments(email);
         });
     }
 }
 
-
 // ========== ЧАТ ==========
 function renderChatForEmail(email) {
-    const container = document.getElementById('chat-rows-container');
-    const submitContainer = document.querySelector('.chat-submit');
+    const container = document.getElementById("chat-rows-container");
+    const submitContainer = document.querySelector(".chat-submit");
     if (!container) return;
 
-    if (submitContainer) submitContainer.style.display = 'none';
+    if (submitContainer) submitContainer.style.display = "none";
 
     if (!email) {
-        container.innerHTML = '<div class="chat-placeholder">Выберите письмо</div>';
+        container.innerHTML =
+            '<div class="chat-placeholder">Выберите письмо</div>';
         return;
     }
 
-    const taskStatus = (email.task_status || '').toLowerCase();
+    const taskStatus = (email.task_status || "").toLowerCase();
 
-    if (taskStatus === 'completed') {
+    if (taskStatus === "completed") {
         if (!email?.task?.id) {
-            container.innerHTML = '<div class="chat-placeholder">У письма нет связанной задачи</div>';
+            container.innerHTML =
+                '<div class="chat-placeholder">У письма нет связанной задачи</div>';
             return;
         }
 
-        container.innerHTML = '<div class="chat-placeholder">Загрузка готовых файлов...</div>';
+        container.innerHTML =
+            '<div class="chat-placeholder">Загрузка готовых файлов...</div>';
 
         loadAvailableResultDocuments(email.task.id)
             .then((docs) => {
                 if (!docs.length) {
-                    container.innerHTML = '<div class="chat-placeholder">Готовые файлы не найдены</div>';
+                    container.innerHTML =
+                        '<div class="chat-placeholder">Готовые файлы не найдены</div>';
                     return;
                 }
 
-                const filesHtml = docs.map(doc => {
-                    const filename = doc?.filename || `document-${doc.id}`;
-                    return `<li>${escapeHtml(String(filename))}</li>`;
-                }).join('');
+                const filesHtml = docs
+                    .map((doc) => {
+                        const filename = doc?.filename || `document-${doc.id}`;
+                        return `<li>${escapeHtml(String(filename))}</li>`;
+                    })
+                    .join("");
 
                 container.innerHTML = `
                     <div class="email-attachments">
@@ -692,48 +768,55 @@ function renderChatForEmail(email) {
                     </div>
                 `;
 
-                const downloadBtn = container.querySelector('.save-all-attachments-btn');
+                const downloadBtn = container.querySelector(
+                    ".save-all-attachments-btn",
+                );
                 if (downloadBtn) {
-                    downloadBtn.addEventListener('click', async (e) => {
+                    downloadBtn.addEventListener("click", async (e) => {
                         e.stopPropagation();
 
                         try {
                             await downloadAvailableResultDocuments(docs);
                         } catch (err) {
                             console.error(err);
-                            alert(err.message || 'Ошибка скачивания результирующих файлов');
+                            alert(
+                                err.message ||
+                                    "Ошибка скачивания результирующих файлов",
+                            );
                         }
                     });
                 }
             })
             .catch((err) => {
                 console.error(err);
-                container.innerHTML = `<div class="chat-placeholder">${escapeHtml(err.message || 'Ошибка загрузки файлов')}</div>`;
+                container.innerHTML = `<div class="chat-placeholder">${escapeHtml(err.message || "Ошибка загрузки файлов")}</div>`;
             });
 
         return;
     }
 
-    if (taskStatus !== 'materials_review') {
-        container.innerHTML = '<div class="chat-placeholder">Для этого письма ручной выбор материалов не требуется</div>';
+    if (taskStatus !== "materials_review") {
+        container.innerHTML =
+            '<div class="chat-placeholder">Для этого письма ручной выбор материалов не требуется</div>';
         return;
     }
 
     if (!email.chatItems || email.chatItems.length === 0) {
-        container.innerHTML = '<div class="chat-placeholder">В output_data нет материалов для ручного выбора</div>';
+        container.innerHTML =
+            '<div class="chat-placeholder">В output_data нет материалов для ручного выбора</div>';
         return;
     }
 
-    if (submitContainer) submitContainer.style.display = 'block';
+    if (submitContainer) submitContainer.style.display = "block";
 
-    let html = '';
+    let html = "";
     email.chatItems.forEach((item, idx) => {
         html += `
             <div class="chat-row" data-row="${idx}">
                 <div class="chat-row-top">
                     <div class="material-name">${escapeHtml(item.material)}</div>
                     <label class="blacklist-label">
-                        <input type="checkbox" class="blacklist-checkbox" ${item.blacklist ? 'checked' : ''}>
+                        <input type="checkbox" class="blacklist-checkbox" ${item.blacklist ? "checked" : ""}>
                         Черный список
                     </label>
                 </div>
@@ -756,18 +839,18 @@ function renderChatForEmail(email) {
         const row = container.querySelector(`.chat-row[data-row="${idx}"]`);
         if (!row) return;
 
-        const input = row.querySelector('.answer-input');
-        const chk = row.querySelector('.blacklist-checkbox');
+        const input = row.querySelector(".answer-input");
+        const chk = row.querySelector(".blacklist-checkbox");
 
         if (input) {
-            input.addEventListener('input', (e) => {
+            input.addEventListener("input", (e) => {
                 item.answer = e.target.value;
                 chatStorage.set(email.id, email.chatItems);
             });
         }
 
         if (chk) {
-            chk.addEventListener('change', (e) => {
+            chk.addEventListener("change", (e) => {
                 item.blacklist = e.target.checked;
                 chatStorage.set(email.id, email.chatItems);
             });
@@ -776,7 +859,7 @@ function renderChatForEmail(email) {
 }
 
 async function sendChatData() {
-    const email = emails.find(e => e.id === selectedEmailId);
+    const email = emails.find((e) => e.id === selectedEmailId);
     if (!email) {
         alert("Выберите письмо");
         return;
@@ -787,8 +870,10 @@ async function sendChatData() {
         return;
     }
 
-    if ((email.task_status || '').toLowerCase() !== 'materials_review') {
-        alert("Ручной ввод доступен только для задач со статусом materials_review");
+    if ((email.task_status || "").toLowerCase() !== "materials_review") {
+        alert(
+            "Ручной ввод доступен только для задач со статусом materials_review",
+        );
         return;
     }
 
@@ -797,29 +882,34 @@ async function sendChatData() {
         return;
     }
 
-    const hasEmpty = email.chatItems.some(item => !String(item.answer || '').trim());
+    const hasEmpty = email.chatItems.some(
+        (item) => !String(item.answer || "").trim(),
+    );
     if (hasEmpty) {
         alert("Заполните все поля перед сохранением");
         return;
     }
 
     const manualDecision = {};
-    email.chatItems.forEach(item => {
+    email.chatItems.forEach((item) => {
         manualDecision[item.material] = [
             String(item.answer || "").trim(),
-            Boolean(item.blacklist)
+            Boolean(item.blacklist),
         ];
     });
 
     try {
-        const resp = await fetch(`/api/queue/${email.task.id}/manual-decision`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({
-                manual_decision: manualDecision
-            })
-        });
+        const resp = await fetch(
+            `/api/queue/${email.task.id}/manual-decision`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                body: JSON.stringify({
+                    manual_decision: manualDecision,
+                }),
+            },
+        );
 
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) {
@@ -833,14 +923,14 @@ async function sendChatData() {
         await loadEmailsFromApi(false);
         renderEmailList();
 
-        const freshEmail = emails.find(e => e.id === savedEmailId);
+        const freshEmail = emails.find((e) => e.id === savedEmailId);
 
         if (freshEmail) {
             selectedEmailId = freshEmail.id;
             highlightSelectedEmail(freshEmail.id);
 
-            const chatTab = document.getElementById('tab-chat');
-            if (chatTab && chatTab.classList.contains('active')) {
+            const chatTab = document.getElementById("tab-chat");
+            if (chatTab && chatTab.classList.contains("active")) {
                 renderChatForEmail(freshEmail);
             } else {
                 renderEmailCard(freshEmail);
@@ -856,33 +946,34 @@ async function sendChatData() {
 
 // ========== ВКЛАДКИ ==========
 function initTabs() {
-    const btns = document.querySelectorAll('.tab-button');
-    const panes = document.querySelectorAll('.tab-pane');
+    const btns = document.querySelectorAll(".tab-button");
+    const panes = document.querySelectorAll(".tab-pane");
 
     function switchTab(tabId) {
-        btns.forEach(btn => {
-            btn.classList.remove('active');
-            if (btn.dataset.tab === tabId) btn.classList.add('active');
+        btns.forEach((btn) => {
+            btn.classList.remove("active");
+            if (btn.dataset.tab === tabId) btn.classList.add("active");
         });
 
-        panes.forEach(pane => {
-            pane.classList.remove('active');
-            if (pane.id === `tab-${tabId}`) pane.classList.add('active');
+        panes.forEach((pane) => {
+            pane.classList.remove("active");
+            if (pane.id === `tab-${tabId}`) pane.classList.add("active");
         });
 
-        if (tabId === 'chat') {
-            const email = emails.find(e => e.id === selectedEmailId);
+        if (tabId === "chat") {
+            const email = emails.find((e) => e.id === selectedEmailId);
             renderChatForEmail(email);
-        } else if (tabId === 'emails') {
+        } else if (tabId === "emails") {
             if (selectedEmailId) {
-                renderEmailCard(emails.find(e => e.id === selectedEmailId));
+                renderEmailCard(emails.find((e) => e.id === selectedEmailId));
             }
         }
     }
 
-    btns.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+    btns.forEach((btn) =>
+        btn.addEventListener("click", () => switchTab(btn.dataset.tab)),
+    );
 }
-
 
 // ========== АВТООБНОВЛЕНИЕ ==========
 async function refreshEmailsSilently() {
@@ -892,8 +983,8 @@ async function refreshEmailsSilently() {
     await loadEmailsFromApi(false);
     renderEmailList();
 
-    if (prevId && emails.find(e => e.id === prevId)) {
-        const currentEmail = emails.find(e => e.id === prevId);
+    if (prevId && emails.find((e) => e.id === prevId)) {
+        const currentEmail = emails.find((e) => e.id === prevId);
         highlightSelectedEmail(prevId);
 
         if (isChatTabActive()) {
@@ -910,14 +1001,13 @@ async function refreshEmailsSilently() {
     }
 
     if (emails.length === 0) {
-        const submitContainer = document.querySelector('.chat-submit');
-        if (submitContainer) submitContainer.style.display = 'none';
+        const submitContainer = document.querySelector(".chat-submit");
+        if (submitContainer) submitContainer.style.display = "none";
     }
 }
 
-
 // ========== ИНИЦИАЛИЗАЦИЯ ==========
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener("DOMContentLoaded", async () => {
     await loadEmailsFromApi();
     renderEmailList();
 
@@ -928,78 +1018,87 @@ document.addEventListener('DOMContentLoaded', async () => {
     setInterval(refreshEmailsSilently, 5000);
     initTabs();
 
-    const chatSendBtn = document.getElementById('chat-send-btn');
+    const chatSendBtn = document.getElementById("chat-send-btn");
     if (chatSendBtn) {
-        chatSendBtn.addEventListener('click', sendChatData);
+        chatSendBtn.addEventListener("click", sendChatData);
     }
 
-    const searchInput = document.getElementById('search-input');
+    const searchInput = document.getElementById("search-input");
     if (searchInput) {
-        searchInput.addEventListener('input', (e) => {
+        searchInput.addEventListener("input", (e) => {
             currentSearchTerm = e.target.value;
             renderEmailList();
         });
     }
 
-    const filterToggle = document.getElementById('filter-toggle-btn');
-    const filterPanel = document.getElementById('filter-panel');
-    const applyBtn = document.getElementById('apply-filters-btn');
-    const closeFilter = document.getElementById('close-filter-panel');
-    const statusSelect = document.getElementById('status-filter-select');
-    const classSelect = document.getElementById('class-filter-select');
-    const sortNewestBtn = document.getElementById('sort-newest-btn');
-    const sortOldestBtn = document.getElementById('sort-oldest-btn');
+    const filterToggle = document.getElementById("filter-toggle-btn");
+    const filterPanel = document.getElementById("filter-panel");
+    const applyBtn = document.getElementById("apply-filters-btn");
+    const closeFilter = document.getElementById("close-filter-panel");
+    const statusSelect = document.getElementById("status-filter-select");
+    const classSelect = document.getElementById("class-filter-select");
+    const sortNewestBtn = document.getElementById("sort-newest-btn");
+    const sortOldestBtn = document.getElementById("sort-oldest-btn");
 
     function openFilterPanel() {
         if (!filterPanel) return;
-        filterPanel.style.display = 'block';
+        filterPanel.style.display = "block";
         if (statusSelect) statusSelect.value = currentStatusFilter;
         if (classSelect) classSelect.value = currentClassFilter;
 
         if (sortNewestBtn && sortOldestBtn) {
             if (sortNewestFirst) {
-                sortNewestBtn.classList.add('active');
-                sortOldestBtn.classList.remove('active');
+                sortNewestBtn.classList.add("active");
+                sortOldestBtn.classList.remove("active");
             } else {
-                sortOldestBtn.classList.add('active');
-                sortNewestBtn.classList.remove('active');
+                sortOldestBtn.classList.add("active");
+                sortNewestBtn.classList.remove("active");
             }
         }
     }
 
     function closeFilterPanel() {
-        if (filterPanel) filterPanel.style.display = 'none';
+        if (filterPanel) filterPanel.style.display = "none";
     }
 
     function applyFilters() {
         if (statusSelect) currentStatusFilter = statusSelect.value;
         if (classSelect) currentClassFilter = classSelect.value;
-        if (sortNewestBtn) sortNewestFirst = sortNewestBtn.classList.contains('active');
+        if (sortNewestBtn)
+            sortNewestFirst = sortNewestBtn.classList.contains("active");
         renderEmailList();
         closeFilterPanel();
     }
 
-    if (filterToggle) filterToggle.addEventListener('click', openFilterPanel);
-    if (applyBtn) applyBtn.addEventListener('click', applyFilters);
-    if (closeFilter) closeFilter.addEventListener('click', closeFilterPanel);
+    if (filterToggle) filterToggle.addEventListener("click", openFilterPanel);
+    if (applyBtn) applyBtn.addEventListener("click", applyFilters);
+    if (closeFilter) closeFilter.addEventListener("click", closeFilterPanel);
 
-    document.addEventListener('click', (e) => {
-        if (filterPanel && filterPanel.style.display === 'block' && filterToggle) {
-            if (!filterPanel.contains(e.target) && e.target !== filterToggle && !filterToggle.contains(e.target)) {
+    document.addEventListener("click", (e) => {
+        if (
+            filterPanel &&
+            filterPanel.style.display === "block" &&
+            filterToggle
+        ) {
+            if (
+                !filterPanel.contains(e.target) &&
+                e.target !== filterToggle &&
+                !filterToggle.contains(e.target)
+            ) {
                 closeFilterPanel();
             }
         }
     });
 
     if (sortNewestBtn && sortOldestBtn) {
-        sortNewestBtn.addEventListener('click', () => {
-            sortNewestBtn.classList.add('active');
-            sortOldestBtn.classList.remove('active');
+        sortNewestBtn.addEventListener("click", () => {
+            sortNewestBtn.classList.add("active");
+            sortOldestBtn.classList.remove("active");
         });
 
-        sortOldestBtn.addEventListener('click', () => {
-            sortOldestBtn.classList.add('active');
-            sortNewestBtn.classList.remove('active');
+        sortOldestBtn.addEventListener("click", () => {
+            sortOldestBtn.classList.add("active");
+            sortNewestBtn.classList.remove("active");
         });
     }
 });
