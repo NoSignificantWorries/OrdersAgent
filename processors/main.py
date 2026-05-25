@@ -77,17 +77,24 @@ def process_classified_excel(
     if not bool(documents):
         task_repo.update_status(task.id, "error")
         logger.info(f"Task {task.id}: No attachments")
+        task_repo.mark_error(
+            task.id,
+            "Нет вложений для анализа",
+        )
+        return
     docnames = [doc.filename for doc in documents]
     logger.info(f"Task {task.id}: Processing documents: {', '.join(docnames)}")
     unique_materials_dict = {}
     unique_parts = set()
     questions = set()
     at_leat_one_file_saved = False
+    file_errors = {}
     for doc in documents:
         filename = doc.minio_object_key
         file_data = get_bytes_object(cloud, ATTACHMENTS_BUCKET, filename)
         if file_data is None:
             logger.error(f"Task {task.id}: Can't open file {filename}")
+            file_errors[filename] = "Ошибка доступа к файлу"
             continue
 
         # opening table
@@ -98,9 +105,13 @@ def process_classified_excel(
             logger.exception(
                 f"Task {task.id}: File '{filename}' not opened succesfully: {err}"
             )
+            file_errors[filename] = (
+                "Ошибка при открытии файла (формат не xls/xlsx или файл повреждён)"
+            )
             continue
         if worker.tables is None or not bool(worker.tables):
             logger.error(f"Task {task.id}: Unexpected errors with the file {filename}")
+            file_errors[filename] = "Ошибка чтения файла (файл повреждён или пустой)"
             # task_repo.update_status(task.id, "error")
             continue
 
@@ -111,6 +122,7 @@ def process_classified_excel(
             logger.exception(
                 f"Task {task.id}: Can't apply simple parser for file '{filename}'"
             )
+            file_errors[filename] = "Невозможно применить парсер."
             continue
 
         # finding unique materials
@@ -161,11 +173,15 @@ def process_classified_excel(
             logger.exception(
                 f"Task {task.id}: Unexpected errors while saving file '{filename}' in workbook: {err}"
             )
+            file_errors[filename] = (
+                "Внутренняя ошибка при сохранении файла. Пожалуйста, сообщите разработчикам."
+            )
             continue
 
         if wb is None:
             # task_repo.update_status(task.id, "error")
             logger.warning(f"Task {task.id}: Empty output file")
+            file_errors[filename] = "Пустой выходной файл."
             continue
 
         data = BytesIO()
@@ -197,6 +213,11 @@ def process_classified_excel(
     else:
         task_repo.update_status(task.id, "error")
         logger.info(f"Task {task.id}: No saved files")
+        errors = [f"- {fn}: {err}" for fn, err in file_errors.items()]
+        task_repo.mark_error(
+            task.id,
+            "Парсинг всех доступных фалов завершился с ошибкой.\n" + "\n".join(errors),
+        )
 
 
 def process_manual_matching(
@@ -206,6 +227,10 @@ def process_manual_matching(
     if answers is None:
         task_repo.update_status(task.id, "error")
         logger.info(f"Task {task.id}: Empty answers")
+        task_repo.mark_error(
+            task.id,
+            "Не обнаружено ввода от пользователя.",
+        )
         return
     answers_flat = [(part, data[0], data[1]) for part, data in answers.items()]
     try:
@@ -235,7 +260,9 @@ def process_single_task(task, **deps) -> None:
         handler(task, **deps)
     except Exception as err:
         logger.exception(f"Task {task.id} failed: {err}")
-        deps["task_repo"].mark_error(task.id, str(err))
+        deps["task_repo"].mark_error(
+            task.id, "Внутренняя ошибка сервера. Пожалуйста, сообщите разработчикам."
+        )
 
 
 def main_loop(
@@ -265,6 +292,10 @@ def main_loop(
                     except Exception as err:
                         task_repo.update_status(task.id, "error")
                         logger.exception(f"Task {task.id}: Error on task: {err}")
+                        task_repo.mark_error(
+                            task.id,
+                            "Внутренняя ошибка сервера. Пожалуйста, сообщите разработчикам.",
+                        )
 
             if task_repo.has_manual():
                 interval = BUSY_INTERVAL
