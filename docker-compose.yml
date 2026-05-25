@@ -194,3 +194,4 @@ networks:
 volumes:
     minio_data:
     postgres_data:
+
