@@ -11,6 +11,7 @@ BEGIN
             'files_saved',
             'ml_processing',
             'ml_classified',
+            'question',
             'ml_review',
             'materials_review',
             'manual_review_done',
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS mappings (
     source VARCHAR(255) PRIMARY KEY,
     target VARCHAR(255),
+    article VARCHAR(255),
     black_list BOOLEAN NOT NULL DEFAULT FALSE
 );
 

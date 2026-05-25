@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.functions import coalesce
 
 from .base import DatabaseManager
 from .models import Document, Email, Mapping, Task, TaskStatus, User
@@ -49,11 +50,11 @@ class UserRepository:
 
 
 class MappingRepository:
-    def find(self, source: str) -> Optional[Tuple[str, bool]]:
+    def find(self, source: str) -> Optional[Tuple[str, str, bool]]:
         with DatabaseManager.session_scope() as session:
             mapping = session.get(Mapping, source)
             if mapping:
-                return mapping.target, mapping.black_list
+                return mapping.target, mapping.article, mapping.black_list
             return None
 
     def batch_find(self, sources: List[str]) -> Dict[str, Optional[Tuple[str, bool]]]:
@@ -62,30 +63,64 @@ class MappingRepository:
         with DatabaseManager.session_scope() as session:
             query = select(Mapping).where(Mapping.source.in_(sources))
             mappings = session.execute(query).scalars().all()
-            result = {m.source: (m.target, m.black_list) for m in mappings}
+            result = {m.source: (m.target, m.article, m.black_list) for m in mappings}
             for s in sources:
                 if s not in result:
                     result[s] = None
             return result
 
-    def add(self, source: str, target: str, black_list: bool = False) -> None:
+    def add(
+        self,
+        source: str,
+        target: Optional[str],
+        article: Optional[str],
+        black_list: bool = False,
+    ) -> None:
         with DatabaseManager.session_scope() as session:
-            mapping = Mapping(source=source, target=target, black_list=black_list)
+            mapping = Mapping(
+                source=source, target=target, article=article, black_list=black_list
+            )
             session.add(mapping)
 
-    def batch_add(self, items: List[Tuple[str, str, bool]]) -> None:
+    def batch_add(
+        self, items: List[Tuple[str, Optional[str], Optional[str], bool]]
+    ) -> None:
         with DatabaseManager.session_scope() as session:
             stmt = pg_insert(Mapping).values(
-                [{"source": s, "target": t, "black_list": bl} for s, t, bl in items]
+                [
+                    {"source": s, "target": t, "article": a, "black_list": bl}
+                    for s, t, a, bl in items
+                ]
             )
             stmt = stmt.on_conflict_do_update(
                 index_elements=["source"],
                 set_=dict(
-                    target=stmt.excluded.target, black_list=stmt.excluded.black_list
+                    target=coalesce(stmt.excluded.target, Mapping.target),
+                    article=coalesce(stmt.excluded.article, Mapping.article),
+                    black_list=stmt.excluded.black_list,
                 ),
             )
             session.execute(stmt)
             session.commit()
+
+    # def batch_add(
+    #     self, items: List[Tuple[str, Optional[str], Optional[str], bool]]
+    # ) -> None:
+    #     with DatabaseManager.session_scope() as session:
+    #         stmt = pg_insert(Mapping).values(
+    #             [
+    #                 {"source": s, "target": t, "article": a, "black_list": bl}
+    #                 for s, t, a, bl in items
+    #             ]
+    #         )
+    #         stmt = stmt.on_conflict_do_update(
+    #             index_elements=["source"],
+    #             set_=dict(
+    #                 target=stmt.excluded.target, black_list=stmt.excluded.black_list
+    #             ),
+    #         )
+    #         session.execute(stmt)
+    #         session.commit()
 
     # def batch_add(self, items: List[Tuple[str, str, bool]]) -> None:
     #     with DatabaseManager.session_scope() as session:
@@ -98,6 +133,7 @@ class MappingRepository:
         self,
         source: str,
         target: Optional[str] = None,
+        article: Optional[str] = None,
         black_list: Optional[bool] = None,
     ) -> bool:
         with DatabaseManager.session_scope() as session:
@@ -106,6 +142,8 @@ class MappingRepository:
                 return False
             if target is not None:
                 mapping.target = target
+            if article is not None:
+                mapping.article = article
             if black_list is not None:
                 mapping.black_list = black_list
             return True
