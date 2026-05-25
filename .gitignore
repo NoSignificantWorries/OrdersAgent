@@ -8,6 +8,7 @@ attachments/
 logs/
 **.log
 
+
 !.gitkeep
 
 **.env
@@ -17,6 +18,7 @@ logs/
 **.key
 .venv
 __pycache__/
+__marimo__/
 
 dataset_emails/
 dataset/

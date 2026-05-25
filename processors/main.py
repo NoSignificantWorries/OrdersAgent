@@ -5,6 +5,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Dict, List
 
+# from  import LLM, decide_by_thresholds
+from classify import FeaturesExtractor, RFModel, decide_by_thresholds
 from cloud import MinIOClient, get_bytes_object, put_bytes_object
 from database import (
     DatabaseManager,
@@ -15,7 +17,6 @@ from database import (
     init_database,
 )
 from database.models import TaskStatus
-from llm import LLM, decide_by_thresholds
 from materials import DELIMETERS, ParseResults, ParserV2
 from table import TableParseResults, TableWorker, make_xlsx
 
@@ -23,7 +24,8 @@ POLL_INTERVAL = 30
 BUSY_INTERVAL = 5
 IDLE_INTERVAL = 120
 BATCH_SIZE = 10
-MODEL_PATH = Path("model_out/final_lora")
+MODEL_PATH = "classify/model.joblib"
+# MODEL_PATH = Path("model_out/final_lora")
 ATTACHMENTS_BUCKET = "orders-attachments"
 RESULTS_BUCKET = "results"
 
@@ -31,7 +33,7 @@ logger = logging.getLogger("mail_processor")
 
 
 def process_new(
-    task, email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
+    task, email_repo, task_repo, doc_repo, material_repo, cloud, classify_worker
 ) -> None:
     email = email_repo.get_by_id(task.email_id)
     if email is None:
@@ -45,13 +47,20 @@ def process_new(
     parts = [email.email_subject or "", email.raw_email or "", files or ""]
     text = "\n\n".join(part for part in parts if part).strip()
 
-    prob_1 = llm_worker.predict_prob_1(text)
-    model_decision, predicted_class, new_status = decide_by_thresholds(prob_1)
+    features = FeaturesExtractor.extract_text_features(text)
+    files_features = FeaturesExtractor.extract_files_features(file_names)
+    features.update(files_features)
+
+    # prob_1 = llm_worker.predict_prob_1(text)
+    pred_labels, pred_indexes, pred_proba = classify_worker.predict(features)
+    model_decision, predicted_class, new_status, proba = decide_by_thresholds(
+        pred_labels, pred_indexes, pred_proba
+    )[0]
     logger.info(
-        f"Task {task.id}: prob={prob_1:.3f} decision={model_decision} class={predicted_class} status={new_status}"
+        f"Task {task.id}: prob={proba:.3f} decision={model_decision} class={predicted_class} status={new_status}"
     )
 
-    email_repo.set_ml_result(email.id, prob_1, predicted_class, model_decision)
+    email_repo.set_ml_result(email.id, proba, predicted_class, model_decision)
 
     if predicted_class is None:
         task_status = "ml_review"
@@ -61,7 +70,7 @@ def process_new(
 
 
 def process_classified_excel(
-    task, email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
+    task, email_repo, task_repo, doc_repo, material_repo, cloud, classify_worker
 ):
     documents = doc_repo.get_by_email_id(task.email_id)
     if not bool(documents):
@@ -190,7 +199,7 @@ def process_classified_excel(
 
 
 def process_manual_matching(
-    task, email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
+    task, email_repo, task_repo, doc_repo, material_repo, cloud, classify_worker
 ):
     answers = task.manual_decision
     if answers is None:
@@ -229,7 +238,7 @@ def process_single_task(task, **deps) -> None:
 
 
 def main_loop(
-    email_repo, task_repo, doc_repo, material_repo, cloud, llm_worker
+    email_repo, task_repo, doc_repo, material_repo, cloud, classify_worker
 ) -> None:
     logging.info("Starting main loop")
 
@@ -250,7 +259,7 @@ def main_loop(
                             doc_repo=doc_repo,
                             material_repo=material_repo,
                             cloud=cloud,
-                            llm_worker=llm_worker,
+                            classify_worker=classify_worker,
                         )
                     except Exception as err:
                         task_repo.update_status(task.id, "error")
@@ -280,7 +289,9 @@ def main() -> None:
     doc_repo = DocumentRepository()
     material_repo = MappingRepository()
     cloud = MinIOClient.get_client()
-    llm_worker = LLM(MODEL_PATH)
+    # llm_worker = LLM(MODEL_PATH)
+    classify_worker = RFModel()
+    classify_worker.load(MODEL_PATH)
 
     try:
         main_loop(
@@ -289,7 +300,7 @@ def main() -> None:
             doc_repo=doc_repo,
             material_repo=material_repo,
             cloud=cloud,
-            llm_worker=llm_worker,
+            classify_worker=classify_worker,
         )
     finally:
         DatabaseManager.close()
@@ -391,8 +402,10 @@ def development() -> None:
 def dev_llm():
     model_path = Path("model_out/final_lora")
 
-    llm_worker = LLM(model_path)
-    print("LLM loaded:", llm_worker)
+    # llm_worker = LLM(model_path)
+    classify_worker = RFModel()
+    classify_worker.load(MODEL_PATH)
+    print("Model loaded:", classify_worker)
 
     examples = [
         "Добрый день. Просим сделать расчет.",
