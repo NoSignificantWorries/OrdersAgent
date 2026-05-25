@@ -13,7 +13,8 @@ let currentSearchTerm = '';
 const statusConfig = {
     waiting:    { name: "Ожидание" },
     processing: { name: "Обработка" },
-    review:     { name: "Требуется проверка" },
+    ml_review:     { name: "Выберите класс" },
+    materials_review: { name: "Требуются материалы" },
     completed:  { name: "Завершено" },
     error:      { name: "Ошибка" }
 };
@@ -161,10 +162,10 @@ function mapTaskStatusToUiStatus(taskStatus) {
             return "waiting";
 
         case "ml_review":
-            return "review";
+            return "ml_review";
 
         case "materials_review":
-            return "review";
+            return "materials_review";
 
         case "ml_classified":
             return "processing";

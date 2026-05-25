@@ -733,7 +733,13 @@ body {
     border-color: #3b82f6;
 }
 
-.status-review {
+.status-materials_review {
+    color: #a855f7;
+    background: #f3e8ff;
+    border-color: #c084fc;
+}
+
+.status-ml_review {
     color: #a855f7;
     background: #f3e8ff;
     border-color: #c084fc;
