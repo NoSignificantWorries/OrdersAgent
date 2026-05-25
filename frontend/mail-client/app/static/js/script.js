@@ -548,6 +548,20 @@ function renderEmailCard(email) {
         </div>
     ` : '';
 
+    let errorIconHtml = '';
+    if (email.status === 'error') {
+        console.log('Email object:', email);
+        console.log('Task object:', email.task);
+        console.log('Error message:', email.task?.error_message);
+        const errorText = email.task?.error_message || "Ошибка неизвестна";
+        
+        errorIconHtml = `
+            <div class="error-tooltip-container">
+                <div class="error-question-mark" data-tooltip="${escapeHtml(errorText)}">?</div>
+            </div>
+        `;
+    }
+
     const emailView = document.getElementById('emailView');
     if (!emailView) return;
 
@@ -560,6 +574,7 @@ function renderEmailCard(email) {
                         <div class="status-info">
                             <span class="status-label">Состояние:</span>
                             <div class="status-display status-${escapeHtml(email.status)}">${escapeHtml(taskStatusName)}</div>
+                            ${errorIconHtml}
                         </div>
                     </div>
                 </div>

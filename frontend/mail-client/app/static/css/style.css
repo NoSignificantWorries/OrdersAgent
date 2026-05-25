@@ -527,6 +527,7 @@ body {
     justify-content: space-between;
     align-items: flex-start;
     gap: 20px;
+    z-index: 10;
 }
 
 .email-subject {
@@ -545,6 +546,8 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    position: relative;
+    min-height: 40px;
 }
 
 .status-label {
@@ -571,6 +574,7 @@ body {
     font-size: 14px;
     line-height: 1.8;
     border: 1px solid #e2e8f0;
+    z-index: 1;
 }
 
 .email-meta div {
@@ -756,6 +760,65 @@ body {
     white-space: nowrap;
     flex-shrink: 0;
     border: 1px solid transparent;
+}
+
+/* Контейнер для значка ошибки */
+.error-tooltip-container {
+    display: inline-block;
+    margin-left: 8px;
+}
+
+/* Сам значок "?" */
+.error-question-mark {
+    overflow: visible;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    background-color: #dc2626;
+    color: white;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: help;
+    transition: all 0.2s ease;
+    position: relative;
+    z-index: 999999;
+}
+
+/* Эффект при наведении на значок */
+.error-question-mark:hover {
+    background-color: #b91c1c;
+    transform: scale(1.05);
+}
+
+/* Всплывающая подсказка (текст) */
+.error-question-mark:hover::before {
+    overflow: visible;
+    content: attr(data-tooltip);
+    position: absolute;
+    top: 100%;
+    bottom: auto;
+    right: 50%;
+    margin-bottom: 15px;
+    white-space: normal;
+    max-width: 300px;
+    min-width: 150px;
+    width: max-content;
+    word-wrap: break-word;
+    word-break: break-word;
+    text-align: center;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #334155;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: normal;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    z-index: 999999;
 }
 
 
