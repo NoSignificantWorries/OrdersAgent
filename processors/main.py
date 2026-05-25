@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+from email.policy import default
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List
@@ -71,6 +72,44 @@ def process_new(
 
 
 def process_classified_excel(
+    task, email_repo, task_repo, doc_repo, material_repo, cloud, classify_worker
+):
+    email = email_repo.get_by_id(task.email_id)
+    if email.model_decision is None:
+        logger.error(f"Task {task.id}: Not classified yet")
+        task_repo.update_status(task.id, "new")
+        return
+
+    match email.model_decision:
+        case "request":
+            process_request_excel(
+                task=task,
+                email_repo=email_repo,
+                task_repo=task_repo,
+                doc_repo=doc_repo,
+                material_repo=material_repo,
+                cloud=cloud,
+                classify_worker=classify_worker,
+            )
+        case "calculation":
+            process_calculation_excel(
+                task=task,
+                email_repo=email_repo,
+                task_repo=task_repo,
+                doc_repo=doc_repo,
+                material_repo=material_repo,
+                cloud=cloud,
+                classify_worker=classify_worker,
+            )
+        case "question":
+            task_repo.update_status(task.id, "question")
+        case _:
+            logger.error(f"Task {task.id}: Unsupported class")
+            task_repo.mark_error(task.id, "Неподдерживаемый класс письма.")
+            task_repo.update_status(task.id, "error")
+
+
+def process_request_excel(
     task, email_repo, task_repo, doc_repo, material_repo, cloud, classify_worker
 ):
     documents = doc_repo.get_by_email_id(task.email_id)
@@ -151,7 +190,10 @@ def process_classified_excel(
             if mat_match is None:
                 local_questions.add((part, False))
                 continue
-            _, bl = mat_match
+            if len(mat_match) == 2:
+                _, bl = mat_match
+            else:
+                _, _, bl = mat_match
             if bl:
                 local_questions.add((part, True))
 
@@ -220,6 +262,163 @@ def process_classified_excel(
         )
 
 
+def process_calculation_excel(
+    task, email_repo, task_repo, doc_repo, material_repo, cloud, classify_worker
+):
+    documents = doc_repo.get_by_email_id(task.email_id)
+    if not bool(documents):
+        task_repo.update_status(task.id, "error")
+        logger.info(f"Task {task.id}: No attachments")
+        task_repo.mark_error(
+            task.id,
+            "Нет вложений для анализа",
+        )
+        return
+    docnames = [doc.filename for doc in documents]
+    logger.info(f"Task {task.id}: Processing documents: {', '.join(docnames)}")
+    unique_materials_dict = {}
+    unique_parts = set()
+    questions = set()
+    at_leat_one_file_saved = False
+    file_errors = {}
+    for doc in documents:
+        filename = doc.minio_object_key
+        file_data = get_bytes_object(cloud, ATTACHMENTS_BUCKET, filename)
+        if file_data is None:
+            logger.error(f"Task {task.id}: Can't open file {filename}")
+            file_errors[filename] = "Ошибка доступа к файлу"
+            continue
+
+        # opening table
+        try:
+            worker = TableWorker(file_data, Path(filename))
+            worker.open_and_clean()
+        except Exception as err:
+            logger.exception(
+                f"Task {task.id}: File '{filename}' not opened succesfully: {err}"
+            )
+            file_errors[filename] = (
+                "Ошибка при открытии файла (формат не xls/xlsx или файл повреждён)"
+            )
+            continue
+        if worker.tables is None or not bool(worker.tables):
+            logger.error(f"Task {task.id}: Unexpected errors with the file {filename}")
+            file_errors[filename] = "Ошибка чтения файла (файл повреждён или пустой)"
+            # task_repo.update_status(task.id, "error")
+            continue
+
+        # parsing simple strategy
+        try:
+            res = worker.simple_parser()
+        except Exception:
+            logger.exception(
+                f"Task {task.id}: Can't apply simple parser for file '{filename}'"
+            )
+            file_errors[filename] = "Невозможно применить парсер."
+            continue
+
+        # finding unique materials
+        unique_materials = set()
+        for table in res:
+            if table.empty:
+                continue
+            unique_materials |= set(table.material)
+        unique_materials = list(unique_materials)
+
+        # parsing materials (finding unique parts)
+        parser = ParserV2(DELIMETERS)
+        for material in unique_materials:
+            parse_results = parser.parse(material)
+            unique_materials_dict[material] = parse_results
+            unique_parts |= set(parse_results.parts)
+        # unique_parts = list(unique_parts)
+
+        # searching materials
+        if task.manual_decision is not None:
+            matches = {p: (m, False) for p, (m, bl) in task.manual_decision.items()}
+        else:
+            matches = material_repo.batch_find(unique_parts)
+        local_questions = set()
+        for part, mat_match in matches.items():
+            if mat_match is None:
+                local_questions.add((part, False))
+                continue
+            if len(mat_match) == 2:
+                _, bl = mat_match
+            else:
+                _, _, bl = mat_match
+            if bl:
+                local_questions.add((part, True))
+
+        if bool(local_questions):
+            # task_repo.update_status(task.id, "materials_review", output_data=questions)
+            logger.info(
+                f"Task {task.id}: Needs manual matching for material parts for file {filename}"
+            )
+            questions |= local_questions
+            continue
+
+        for material, material_obj in unique_materials_dict.items():
+            for part in material_obj.parts:
+                ms = matches[part]
+                if len(ms) == 2:
+                    material_obj.matches.append(matches[part][0])
+                else:
+                    material_obj.matches.append(matches[part][1])
+
+        try:
+            wb = make_xlsx(res, unique_materials_dict)
+        except Exception as err:
+            logger.exception(
+                f"Task {task.id}: Unexpected errors while saving file '{filename}' in workbook: {err}"
+            )
+            file_errors[filename] = (
+                "Внутренняя ошибка при сохранении файла. Пожалуйста, сообщите разработчикам."
+            )
+            continue
+
+        if wb is None:
+            # task_repo.update_status(task.id, "error")
+            logger.warning(f"Task {task.id}: Empty output file")
+            file_errors[filename] = "Пустой выходной файл."
+            continue
+
+        data = BytesIO()
+        wb.save(data)
+        data.seek(0)
+
+        err = put_bytes_object(
+            cloud,
+            RESULTS_BUCKET,
+            filename,
+            data,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        if err:
+            logger.error(f"Task {task.id}: Can't save file, retrying...")
+            continue
+        at_leat_one_file_saved = True
+
+    if questions:
+        questions = [{p: bl} for p, bl in questions]
+        task_repo.update_status(task.id, "materials_review", output_data=questions)
+        logger.info(
+            f"Task {task.id}: Needs manual matching for material parts: f{questions}"
+        )
+        return
+    if at_leat_one_file_saved:
+        task_repo.update_status(task.id, "completed")
+        logger.info(f"Task {task.id}: Succesfully parsed files")
+    else:
+        task_repo.update_status(task.id, "error")
+        logger.info(f"Task {task.id}: No saved files")
+        errors = [f"- {fn}: {err}" for fn, err in file_errors.items()]
+        task_repo.mark_error(
+            task.id,
+            "Парсинг всех доступных фалов завершился с ошибкой.\n" + "\n".join(errors),
+        )
+
+
 def process_manual_matching(
     task, email_repo, task_repo, doc_repo, material_repo, cloud, classify_worker
 ):
@@ -232,7 +431,27 @@ def process_manual_matching(
             "Не обнаружено ввода от пользователя.",
         )
         return
-    answers_flat = [(part, data[0], data[1]) for part, data in answers.items()]
+    email = email_repo.get_by_id(task.email_id)
+    if email.model_decision is None:
+        logger.error(f"Task {task.id}: Not classified yet")
+        task_repo.update_status(task.id, "new")
+        return
+    match email.model_decision:
+        case "request":
+            answers_flat = [
+                (part, data[0], None, data[1]) for part, data in answers.items()
+            ]
+        case "calculation":
+            answers_flat = [
+                (part, None, data[0], data[1]) for part, data in answers.items()
+            ]
+        case _:
+            logger.error(f"Task {task.id}: Unsupported class")
+            task_repo.mark_error(
+                task.id, "Неподдерживаемый класс письма для ввода данных."
+            )
+            task_repo.update_status(task.id, "error")
+            return
     try:
         material_repo.batch_add(answers_flat)
     except Exception as err:
