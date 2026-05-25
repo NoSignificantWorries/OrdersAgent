@@ -771,7 +771,7 @@ body {
 /* Контейнер для значка ошибки */
 .error-tooltip-container {
     display: inline-block;
-    margin-left: 8px;
+    margin-left: 4px;
 }
 
 /* Сам значок "?" */
@@ -808,13 +808,13 @@ body {
     bottom: auto;
     right: 50%;
     margin-bottom: 15px;
-    white-space: normal;
+    white-space: pre-line;
     max-width: 300px;
     min-width: 150px;
     width: max-content;
     word-wrap: break-word;
     word-break: break-word;
-    text-align: center;
+    text-align: left;
     border: 1px solid #cbd5e1;
     background: #ffffff;
     color: #334155;

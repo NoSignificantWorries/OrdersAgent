@@ -551,10 +551,7 @@ function renderEmailCard(email) {
 
     let errorIconHtml = '';
     if (email.status === 'error') {
-        console.log('Email object:', email);
-        console.log('Task object:', email.task);
-        console.log('Error message:', email.task?.error_message);
-        const errorText = email.task?.error_message || "Ошибка неизвестна";
+        let errorText = email.task?.error_message || "Ошибка неизвестна";
         
         errorIconHtml = `
             <div class="error-tooltip-container">
@@ -821,6 +818,13 @@ async function sendChatData() {
 
     const manualDecision = {};
     email.chatItems.forEach(item => {
+        const row = document.querySelector(`.chat-row[data-material="${item.material}"]`);
+        if (row) {
+            const input = row.querySelector('.answer-input');
+            if (input && input.value !== item.answer) {
+                item.answer = input.value;
+            }
+        }
         manualDecision[item.material] = [
             String(item.answer || "").trim(),
             Boolean(item.blacklist)
