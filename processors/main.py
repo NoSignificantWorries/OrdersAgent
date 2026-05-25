@@ -22,7 +22,8 @@ from table import TableParseResults, TableWorker, make_xlsx
 
 POLL_INTERVAL = 30
 BUSY_INTERVAL = 5
-IDLE_INTERVAL = 120
+# IDLE_INTERVAL = 120
+IDLE_INTERVAL = 30
 BATCH_SIZE = 10
 MODEL_PATH = "classify/model.joblib"
 # MODEL_PATH = Path("model_out/final_lora")
@@ -52,7 +53,7 @@ def process_new(
     features.update(files_features)
 
     # prob_1 = llm_worker.predict_prob_1(text)
-    pred_labels, pred_indexes, pred_proba = classify_worker.predict(features)
+    pred_labels, pred_indexes, pred_proba = classify_worker.predict([features])
     model_decision, predicted_class, new_status, proba = decide_by_thresholds(
         pred_labels, pred_indexes, pred_proba
     )[0]

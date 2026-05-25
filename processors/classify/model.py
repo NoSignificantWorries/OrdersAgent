@@ -3,9 +3,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import pandas as pd
-from features import FeaturesExtractor
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
+
+from .features import FeaturesExtractor
 
 
 class RFModel:
@@ -84,7 +85,7 @@ class RFModel:
         y_pred = self._label_encoder.inverse_transform(y_pred_encoded)
 
         y_proba = self._model.predict_proba(X)
-        class_indexes = self._label_encoder.transform(y_pred)
+        class_indexes = list(map(int, self._label_encoder.transform(y_pred)))
         y_proba = [float(proba[idx]) for proba, idx in zip(y_proba, class_indexes)]
         return y_pred, class_indexes, y_proba
 
@@ -95,9 +96,9 @@ def decide_by_thresholds(
     res = []
     for cls, idx, prob in zip(classes, indexes, proba):
         if prob >= threshold:
-            res.append((cls, idx, "classified", proba))
+            res.append((cls, idx, "classified", prob))
         else:
-            res.append(("review", None, "review", proba))
+            res.append(("review", None, "review", prob))
     return res
 
 
