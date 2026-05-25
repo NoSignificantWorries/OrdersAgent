@@ -8,6 +8,9 @@ let currentClassFilter = 'all';
 let sortNewestFirst = true;
 let currentSearchTerm = '';
 
+let isMaterialInputComposing = false;
+let pendingSilentRefresh = false;
+let refreshSeq = 0;
 
 // ========== КОНФИГУРАЦИЯ ==========
 const statusConfig = {
@@ -15,14 +18,16 @@ const statusConfig = {
     processing: { name: "Обработка" },
     ml_review:     { name: "Выберите класс" },
     materials_review: { name: "Требуются материалы" },
+    question: {name: "Вопрос"},
     completed:  { name: "Завершено" },
     error:      { name: "Ошибка" }
 };
 
 const decisionOptions = [
     { value: "",        label: "Выберите класс" },
-    { value: "auto_0",  label: "Заявка" },
-    { value: "auto_1",  label: "Расчёт" }
+    { value: "request",  label: "Заявка" },
+    { value: "calculation",  label: "Расчёт" },
+    { value: "question", label: "Вопрос" }
 ];
 
 
@@ -39,6 +44,53 @@ function isEditingMaterialInput() {
 function isChatTabActive() {
     const chatTab = document.getElementById('tab-chat');
     return !!(chatTab && chatTab.classList.contains('active'));
+}
+
+function isMaterialInputProtected() {
+    return isChatTabActive() && (isEditingMaterialInput() || isMaterialInputComposing);
+}
+
+function bindMaterialInputEvents(input, item, email) {
+    if (!input) return;
+
+    input.addEventListener('compositionstart', () => {
+        isMaterialInputComposing = true;
+    });
+
+    input.addEventListener('compositionend', (e) => {
+        isMaterialInputComposing = false;
+        item.answer = e.target.value;
+        chatStorage.set(email.id, email.chatItems);
+
+        if (pendingSilentRefresh && !isEditingMaterialInput()) {
+            pendingSilentRefresh = false;
+            refreshEmailsSilently();
+        }
+    });
+
+    input.addEventListener('blur', (e) => {
+        isMaterialInputComposing = false;
+        item.answer = e.target.value;
+        chatStorage.set(email.id, email.chatItems);
+
+        setTimeout(() => {
+            if (!isEditingMaterialInput() && pendingSilentRefresh) {
+                pendingSilentRefresh = false;
+                refreshEmailsSilently();
+            }
+        }, 0);
+    });
+
+    input.addEventListener('input', (e) => {
+        console.log(`INPUT: "${e.target.value}" (${e.target.value.length} символов)`);
+
+        item.answer = e.target.value;
+        chatStorage.set(email.id, email.chatItems);
+
+        if (e.isComposing) {
+            isMaterialInputComposing = true;
+        }
+    });
 }
 
 function formatDate(dateString) {
@@ -172,6 +224,9 @@ function mapTaskStatusToUiStatus(taskStatus) {
 
         case "manual_review_done":
             return "processing";
+
+        case "question":
+            return "question";
 
         case "completed":
             return "completed";
@@ -599,8 +654,8 @@ function renderEmailCard(email) {
         saveBtn.onclick = async () => {
             const newVal = sel.value || null;
 
-            if (newVal !== "auto_0" && newVal !== "auto_1") {
-                alert("Выберите итоговый класс: «Заявка» или «Расчёт».");
+            if (newVal !== "request" && newVal !== "calculation" && newVal !== "question") {
+                alert("Выберите итоговый класс: «Заявка», «Расчёт» или «Вопрос».");
                 return;
             }
 
@@ -773,10 +828,7 @@ function renderChatForEmail(email) {
         const chk = row.querySelector('.blacklist-checkbox');
 
         if (input) {
-            input.addEventListener('input', (e) => {
-                item.answer = e.target.value;
-                chatStorage.set(email.id, email.chatItems);
-            });
+            bindMaterialInputEvents(input, item, email);
         }
 
         if (chk) {
@@ -818,13 +870,6 @@ async function sendChatData() {
 
     const manualDecision = {};
     email.chatItems.forEach(item => {
-        const row = document.querySelector(`.chat-row[data-material="${item.material}"]`);
-        if (row) {
-            const input = row.querySelector('.answer-input');
-            if (input && input.value !== item.answer) {
-                item.answer = input.value;
-            }
-        }
         manualDecision[item.material] = [
             String(item.answer || "").trim(),
             Boolean(item.blacklist)
@@ -906,32 +951,50 @@ function initTabs() {
 
 // ========== АВТООБНОВЛЕНИЕ ==========
 async function refreshEmailsSilently() {
+    const mySeq = ++refreshSeq;
     const prevId = selectedEmailId;
-    const skipChatRerender = isChatTabActive() && isEditingMaterialInput();
+    const inChat = isChatTabActive();
+
+    if (isMaterialInputProtected()) {
+        pendingSilentRefresh = true;
+        return;
+    }
 
     await loadEmailsFromApi(false);
+
+    if (mySeq !== refreshSeq) {
+        return;
+    }
+
     renderEmailList();
 
-    if (prevId && emails.find(e => e.id === prevId)) {
-        const currentEmail = emails.find(e => e.id === prevId);
+    const currentEmail = prevId ? emails.find(e => e.id === prevId) : null;
+
+    if (currentEmail) {
         highlightSelectedEmail(prevId);
 
-        if (isChatTabActive()) {
-            if (!skipChatRerender) {
+        if (inChat) {
+            if (isMaterialInputProtected()) {
+                pendingSilentRefresh = true;
+            } else {
                 renderChatForEmail(currentEmail);
             }
         } else {
             renderEmailCard(currentEmail);
         }
     } else {
-        if (isChatTabActive() && !skipChatRerender) {
-            renderChatForEmail(null);
+        if (inChat) {
+            if (isMaterialInputProtected()) {
+                pendingSilentRefresh = true;
+            } else {
+                renderChatForEmail(null);
+            }
         }
     }
 
-    if (emails.length === 0) {
-        const submitContainer = document.querySelector('.chat-submit');
-        if (submitContainer) submitContainer.style.display = 'none';
+    const submitContainer = document.querySelector('.chat-submit');
+    if (submitContainer) {
+        submitContainer.style.display = emails.length === 0 ? 'none' : '';
     }
 }
 

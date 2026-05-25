@@ -745,6 +745,12 @@ body {
     border-color: #c084fc;
 }
 
+.status-question {
+    color: #007575;
+    background: #d4fafa;
+    border-color: #009e9e;
+}
+
 .status-completed {
     color: #16a34a;
     background: #dcfce7;

@@ -306,23 +306,25 @@ async def update_queue_decision(
             predicted_class = payload.predicted_class
 
             if predicted_class is None:
-                if model_decision == "auto_0":
-                    predicted_class = 0
-                elif model_decision == "auto_1":
+                if model_decision == "request":
+                    predicted_class = 2
+                elif model_decision == "question":
                     predicted_class = 1
+                elif model_decision == "calculation":
+                    predicted_class = 0
                 elif model_decision == "review":
                     predicted_class = None
 
-            if model_decision not in {"auto_0", "auto_1"}:
+            if model_decision not in {"request", "calculation", "question"}:
                 raise HTTPException(
                     status_code=400,
-                    detail="Нужно выбрать итоговый класс: 'Заявка' или 'Расчёт'"
+                    detail="Нужно выбрать итоговый класс: 'Заявка', 'Расчёт' или 'Вопрос'"
                 )
 
-            if predicted_class not in {0, 1}:
+            if predicted_class not in {0, 1, 2}:
                 raise HTTPException(
                     status_code=400,
-                    detail="Итоговый класс должен быть 0 или 1"
+                    detail="Итоговый класс должен быть 0, 1 или 2"
                 )
 
             output_patch = {
