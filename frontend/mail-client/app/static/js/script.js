@@ -725,13 +725,16 @@ function renderEmailCard(email) {
                 return;
             }
 
+            const nextStatus = newVal === "question" ? "question" : "ml_classified";
+            
             try {
                 const resp = await fetch(`/api/queue/${email.task.id}/decision`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
                     body: JSON.stringify({
-                        model_decision: newVal
+                        model_decision: newVal,
+                        status: nextStatus
                     })
                 });
 

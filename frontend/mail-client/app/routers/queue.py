@@ -19,6 +19,7 @@ RESULTS_BUCKET = "results"
 class DecisionUpdate(BaseModel):
     predicted_class: int | None = None
     model_decision: str | None = None
+    status: str | None = None
 
 class MaterialsManualDecisionUpdate(BaseModel):
     manual_decision: dict[str, list]
@@ -295,15 +296,16 @@ async def update_queue_decision(
             if not task_row:
                 raise HTTPException(status_code=404, detail="Задача не найдена")
 
-            current_status = task_row["status"]
-            if current_status != "ml_review":
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Ручное решение нельзя применить для статуса {current_status}",
-                )
 
             model_decision = payload.model_decision
             predicted_class = payload.predicted_class
+
+            if payload.status is not None:
+                next_status = payload.status
+            elif model_decision == "question":
+                next_status = "question"
+            else:
+                next_status = "ml_classified"
 
             if predicted_class is None:
                 if model_decision == "request":
@@ -341,10 +343,10 @@ async def update_queue_decision(
                 UPDATE tasks
                 SET
                     output_data = COALESCE(output_data, '{}'::jsonb) || $1::jsonb,
-                    status = 'ml_classified'::task_status,
-                    assigned_to = $2,
+                    status = $2::task_status,
+                    assigned_to = $3,
                     completed_at = NOW()
-                WHERE id = $3
+                WHERE id = $4
                 RETURNING
                     id,
                     email_id,
@@ -354,6 +356,7 @@ async def update_queue_decision(
                     completed_at
                 """,
                 json.dumps(output_patch),
+                next_status,
                 user["id"],
                 task_id,
             )
