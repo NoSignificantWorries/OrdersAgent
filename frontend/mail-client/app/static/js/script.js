@@ -243,12 +243,12 @@ function getStatusName(uiStatus) {
     return (statusConfig[uiStatus] || { name: "Неизвестно" }).name;
 }
 
-function canManualDecision(emailItem) {
-    const status = (emailItem?.task_status || "").toLowerCase();
-    const decision = (emailItem?.model_decision || "").toLowerCase();
+// function canManualDecision(emailItem) {
+//     const status = (emailItem?.task_status || "").toLowerCase();
+//     const decision = (emailItem?.model_decision || "").toLowerCase();
 
-    return status === 'ml_review' || status === 'materials_review' || decision === 'review';
-}
+//     return status === 'ml_review' || status === 'materials_review' || decision === 'review';
+// }
 
 function showLoading() {
     const emailView = document.getElementById('emailView');
@@ -591,10 +591,9 @@ function renderEmailCard(email) {
         </option>
     `).join('');
 
-    const manualAllowed = canManualDecision(email);
     const taskStatusName = getStatusName(email.status);
 
-    const decisionBlock = manualAllowed && email.task ? `
+    const decisionBlock = email.task ? `
         <div class="decision-block">
             <label for="decision-select" class="decision-label">Класс письма</label>
             <select id="decision-select" class="decision-select">
@@ -650,7 +649,7 @@ function renderEmailCard(email) {
     const saveBtn = document.getElementById('decision-save-btn');
     const sel = document.getElementById('decision-select');
 
-    if (saveBtn && sel && manualAllowed && email.task?.id) {
+    if (saveBtn && sel && email.task?.id) {
         saveBtn.onclick = async () => {
             const newVal = sel.value || null;
 
