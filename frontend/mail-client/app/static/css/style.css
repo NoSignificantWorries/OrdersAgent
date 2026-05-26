@@ -1042,3 +1042,46 @@ body {
     transform: translateY(0);
     background: #cbd5e1;
 }
+
+/* Кнопка удаления письма*/
+
+.danger-zone {
+  margin-top: 20px;
+  padding: 16px 20px;
+  background: #fff5f5;
+  border: 1px solid #fecaca;
+  border-radius: 16px;
+}
+
+.close-task-btn {
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: none;
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25);
+}
+
+.close-task-btn:hover {
+  background: #b91c1c;
+  transform: translateY(-1px);
+}
+
+.close-task-btn:active {
+  transform: translateY(0);
+}
+
+.close-task-btn:disabled {
+  background: #cbd5e1;
+  color: #64748b;
+  cursor: not-allowed;
+  box-shadow: none;
+}

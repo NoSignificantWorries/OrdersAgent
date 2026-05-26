@@ -243,13 +243,6 @@ function getStatusName(uiStatus) {
     return (statusConfig[uiStatus] || { name: "Неизвестно" }).name;
 }
 
-// function canManualDecision(emailItem) {
-//     const status = (emailItem?.task_status || "").toLowerCase();
-//     const decision = (emailItem?.model_decision || "").toLowerCase();
-
-//     return status === 'ml_review' || status === 'materials_review' || decision === 'review';
-// }
-
 function showLoading() {
     const emailView = document.getElementById('emailView');
     if (emailView) {
@@ -373,6 +366,14 @@ function buildChatItemsFromOutput(output, emailId) {
     }
 
     return chatItems;
+}
+
+function canCloseTask(email) {
+  const status = String(
+    email?.task_status || email?.task?.status || email?.status || ''
+  ).toLowerCase();
+
+  return ['question', 'error', 'completed'].includes(status);
 }
 
 // ========== НОРМАЛИЗАЦИЯ ДАННЫХ API ==========
@@ -603,6 +604,14 @@ function renderEmailCard(email) {
         </div>
     ` : '';
 
+    const closeTaskBlock = canCloseTask(email) && email.task?.id ? `
+        <div class="danger-zone">
+        <button id="close-task-btn" class="close-task-btn">
+            Завершить задачу
+        </button>
+        </div>
+    ` : '';
+
     let errorIconHtml = '';
     if (email.status === 'error') {
         let errorText = email.task?.error_message || "Ошибка неизвестна";
@@ -639,12 +648,62 @@ function renderEmailCard(email) {
 
             ${attachmentBlock}
             ${decisionBlock}
+            ${closeTaskBlock}
 
             <div class="email-body">
                 ${formattedContent}
             </div>
         </div>
     `;
+
+    console.log('canCloseTask=', canCloseTask(email), 'status=', email.task_status, email.task?.status, email.status);
+    const closeTaskBtn = document.getElementById('close-task-btn');
+    if (closeTaskBtn) {
+    closeTaskBtn.addEventListener('click', async () => {
+        const confirmed = window.confirm(
+        'Письмо и связанные файлы будут удалены без возможности восстановления. Продолжить?'
+        );
+
+        if (!confirmed) return;
+
+        closeTaskBtn.disabled = true;
+
+        try {
+        const realEmailId = email.email_id || email.id;
+
+        const resp = await fetch(`/api/emails/${realEmailId}`, {
+            method: 'DELETE',
+            credentials: 'same-origin',
+        });
+
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+            throw new Error(data.detail || 'Не удалось удалить письмо');
+        }
+
+        emails = emails.filter(item => (item.email_id || item.id) !== realEmailId);
+        chatStorage.delete(email.id);
+        selectedEmailId = null;
+
+        renderEmailList();
+
+        if (emails.length > 0) {
+            selectEmail(emails[0].id);
+        } else {
+            const emailView = document.getElementById('emailView');
+            if (emailView) {
+                emailView.innerHTML = '<div class="email-placeholder">Письма отсутствуют</div>';
+            }
+        }
+
+        alert('Задача завершена, письмо и файлы удалены');
+    } catch (e) {
+        console.error(e);
+        alert(e.message || 'Ошибка удаления');
+        closeTaskBtn.disabled = false;
+    }
+    });
+    }
 
     const saveBtn = document.getElementById('decision-save-btn');
     const sel = document.getElementById('decision-select');
