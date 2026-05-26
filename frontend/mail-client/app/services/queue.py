@@ -97,6 +97,7 @@ async def list_queue_for_user(
                 e.email_subject,
                 e.raw_email,
                 e.email_date,
+                e.model_decision AS email_model_decision,
                 e.created_at AS email_created_at,
 
                 t.id AS task_id,
@@ -227,13 +228,13 @@ async def list_queue_for_user(
                 task_output = {}
 
             predicted_class = None
-            model_decision = None
             prob_1 = None
 
             if isinstance(task_output, dict):
                 predicted_class = task_output.get("predicted_class")
-                model_decision = task_output.get("model_decision")
                 prob_1 = task_output.get("prob_1")
+
+            model_decision = row["email_model_decision"]
 
             documents = _normalize_documents(row["documents"])
 

@@ -82,8 +82,6 @@ function bindMaterialInputEvents(input, item, email) {
     });
 
     input.addEventListener('input', (e) => {
-        console.log(`INPUT: "${e.target.value}" (${e.target.value.length} символов)`);
-
         item.answer = e.target.value;
         chatStorage.set(email.id, email.chatItems);
 
@@ -499,15 +497,26 @@ function renderEmailList() {
     }
 
     if (currentStatusFilter !== 'all') {
-        filtered = filtered.filter(e => e.status === currentStatusFilter);
+        filtered = filtered.filter(e => {
+            if (currentStatusFilter === 'manual_review') {
+                return e.status === 'materials_review' || e.status === 'ml_review';
+            }
+
+            return e.status === currentStatusFilter;
+        });
     }
 
     if (currentClassFilter !== 'all') {
-        if (currentClassFilter === '') {
-            filtered = filtered.filter(e => !e.model_decision || e.model_decision === '');
-        } else {
-            filtered = filtered.filter(e => e.model_decision === currentClassFilter);
-        }
+        filtered = filtered.filter(e => {
+            const decision = String(e.model_decision ?? '').trim().toLowerCase();
+            const isUndefinedClass = decision === '' || decision === 'review';
+
+            if (currentClassFilter === 'undefined_only') {
+                return isUndefinedClass;
+            }
+
+            return decision === currentClassFilter || isUndefinedClass;
+        });
     }
 
     filtered.sort((a, b) => {
@@ -656,7 +665,6 @@ function renderEmailCard(email) {
         </div>
     `;
 
-    console.log('canCloseTask=', canCloseTask(email), 'status=', email.task_status, email.task?.status, email.status);
     const closeTaskBtn = document.getElementById('close-task-btn');
     if (closeTaskBtn) {
     closeTaskBtn.addEventListener('click', async () => {
