@@ -24,16 +24,16 @@ logger.setLevel(logging.DEBUG)
 class DatabaseConfig:
     host: str = "localhost"
     port: int = 5432
-    database: str = "materials_db"
-    user: str = "user"
+    database: str = "mails_data"
+    user: str = "dmitry"
     password: str = "pass"
 
     @classmethod
     def from_env(cls) -> "DatabaseConfig":
         return cls(
             host=os.getenv("POSTGRES_HOST", "localhost"),
-            database=os.getenv("POSTGRES_DB", "materials_db"),
-            user=os.getenv("POSTGRES_USER", "user"),
+            database=os.getenv("POSTGRES_DB", "mails_data"),
+            user=os.getenv("POSTGRES_USER", "dmitry"),
             password=os.getenv("POSTGRES_PASSWORD", "pass"),
         )
 
@@ -101,10 +101,12 @@ class DatabaseManager:
                 if existing_tables:
                     logger.info(f"Tables already exists: {existing_tables}")
 
-        async with cls._engine.connect() as conn:
-            await conn.run_sync(
-                Base.metadata.create_all(cls._engine, checkfirst=checkfirst)
-            )
+        # async with cls._engine.connect() as conn:
+        #     await conn.run_sync(
+        #         Base.metadata.create_all(cls._engine, checkfirst=checkfirst)
+        #     )
+        async with cls._engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     @classmethod
     async def health_check(cls) -> bool:
@@ -170,7 +172,8 @@ async def init_database(
     checkfirst: bool = True,
 ):
     config = DatabaseConfig.from_env()
-    DatabaseManager.init(config.dsn, pool_size=pool_size, echo=echo)
+    print(config)
+    DatabaseManager.init(config.async_dsn, pool_size=pool_size, echo=echo)
     if create_tables:
         await DatabaseManager.create_tables(checkfirst=checkfirst)
         logger.info("Database tables created/verified")

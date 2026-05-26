@@ -19,6 +19,7 @@ from .base import Base
 
 
 class UserStatus(str, PyEnum):
+    STANDART = "standart"
     MANAGER = "manager"
     ADMIN = "admin"
 
@@ -49,13 +50,13 @@ class Users(Base):
     email = Column(String(255), nullable=False, unique=True, index=True)
     status = Column(
         Enum(UserStatus, name="user_status_enum"),
-        default=UserStatus.MANAGER,
+        default=UserStatus.STANDART,
         nullable=False,
-        server_default=text("'manager'"),
+        # server_default=text("'standart'::user_status_enum"),
     )
 
     __table_args__ = (
-        UniqueConstraint("email", "uq_user_email"),
+        UniqueConstraint("email", name="uq_user_email"),
         Index("idx_user_status", "status"),
         {"comment": "System users"},
     )

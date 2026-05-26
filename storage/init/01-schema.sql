@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
     login VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     pass_hash CHAR(60) NOT NULL,
-    role VARCHAR(20) NOT NULL DEFAULT 'default',
+    role VARCHAR(20) NOT NULL DEFAULT 'standart',
     mail_access_token TEXT,
     mail_refresh_token TEXT,
     mail_access_expires_at TIMESTAMPTZ,
