@@ -27,6 +27,7 @@ class TaskStatus(str, enum.Enum):
     FILES_SAVED = "files_saved"
     ML_PROCESSING = "ml_processing"
     ML_CLASSIFIED = "ml_classified"
+    QUESTION = "question"
     ML_REVIEW = "ml_review"
     MATERIALS_REVIEW = "materials_review"
     MANUAL_REVIEW_DONE = "manual_review_done"
@@ -50,6 +51,7 @@ class Mapping(Base):
 
     source = Column(String(255), primary_key=True)
     target = Column(String(255), nullable=True)
+    article = Column(String(255), nullable=True)
     black_list = Column(Boolean, nullable=False, default=False)
 
 

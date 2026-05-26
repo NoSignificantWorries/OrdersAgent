@@ -8,19 +8,26 @@ let currentClassFilter = "all";
 let sortNewestFirst = true;
 let currentSearchTerm = "";
 
+let isMaterialInputComposing = false;
+let pendingSilentRefresh = false;
+let refreshSeq = 0;
+
 // ========== КОНФИГУРАЦИЯ ==========
 const statusConfig = {
     waiting: { name: "Ожидание" },
     processing: { name: "Обработка" },
-    review: { name: "Требуется проверка" },
+    ml_review: { name: "Выберите класс" },
+    materials_review: { name: "Требуются материалы" },
+    question: { name: "Вопрос" },
     completed: { name: "Завершено" },
     error: { name: "Ошибка" },
 };
 
 const decisionOptions = [
     { value: "", label: "Выберите класс" },
-    { value: "auto_0", label: "Заявка" },
-    { value: "auto_1", label: "Расчёт" },
+    { value: "request", label: "Заявка" },
+    { value: "calculation", label: "Расчёт" },
+    { value: "question", label: "Вопрос" },
 ];
 
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
@@ -36,6 +43,54 @@ function isEditingMaterialInput() {
 function isChatTabActive() {
     const chatTab = document.getElementById("tab-chat");
     return !!(chatTab && chatTab.classList.contains("active"));
+}
+
+function isMaterialInputProtected() {
+    return (
+        isChatTabActive() &&
+        (isEditingMaterialInput() || isMaterialInputComposing)
+    );
+}
+
+function bindMaterialInputEvents(input, item, email) {
+    if (!input) return;
+
+    input.addEventListener("compositionstart", () => {
+        isMaterialInputComposing = true;
+    });
+
+    input.addEventListener("compositionend", (e) => {
+        isMaterialInputComposing = false;
+        item.answer = e.target.value;
+        chatStorage.set(email.id, email.chatItems);
+
+        if (pendingSilentRefresh && !isEditingMaterialInput()) {
+            pendingSilentRefresh = false;
+            refreshEmailsSilently();
+        }
+    });
+
+    input.addEventListener("blur", (e) => {
+        isMaterialInputComposing = false;
+        item.answer = e.target.value;
+        chatStorage.set(email.id, email.chatItems);
+
+        setTimeout(() => {
+            if (!isEditingMaterialInput() && pendingSilentRefresh) {
+                pendingSilentRefresh = false;
+                refreshEmailsSilently();
+            }
+        }, 0);
+    });
+
+    input.addEventListener("input", (e) => {
+        item.answer = e.target.value;
+        chatStorage.set(email.id, email.chatItems);
+
+        if (e.isComposing) {
+            isMaterialInputComposing = true;
+        }
+    });
 }
 
 function formatDate(dateString) {
@@ -178,16 +233,19 @@ function mapTaskStatusToUiStatus(taskStatus) {
             return "waiting";
 
         case "ml_review":
-            return "review";
+            return "ml_review";
 
         case "materials_review":
-            return "review";
+            return "materials_review";
 
         case "ml_classified":
             return "processing";
 
         case "manual_review_done":
             return "processing";
+
+        case "question":
+            return "question";
 
         case "completed":
             return "completed";
@@ -202,17 +260,6 @@ function mapTaskStatusToUiStatus(taskStatus) {
 
 function getStatusName(uiStatus) {
     return (statusConfig[uiStatus] || { name: "Неизвестно" }).name;
-}
-
-function canManualDecision(emailItem) {
-    const status = (emailItem?.task_status || "").toLowerCase();
-    const decision = (emailItem?.model_decision || "").toLowerCase();
-
-    return (
-        status === "ml_review" ||
-        status === "materials_review" ||
-        decision === "review"
-    );
 }
 
 function showLoading() {
@@ -346,6 +393,14 @@ function buildChatItemsFromOutput(output, emailId) {
     return chatItems;
 }
 
+function canCloseTask(email) {
+    const status = String(
+        email?.task_status || email?.task?.status || email?.status || "",
+    ).toLowerCase();
+
+    return ["question", "error", "completed"].includes(status);
+}
+
 // ========== НОРМАЛИЗАЦИЯ ДАННЫХ API ==========
 function normalizeApiItem(item, idx) {
     const output =
@@ -477,19 +532,30 @@ function renderEmailList() {
     }
 
     if (currentStatusFilter !== "all") {
-        filtered = filtered.filter((e) => e.status === currentStatusFilter);
+        filtered = filtered.filter((e) => {
+            if (currentStatusFilter === "manual_review") {
+                return (
+                    e.status === "materials_review" || e.status === "ml_review"
+                );
+            }
+
+            return e.status === currentStatusFilter;
+        });
     }
 
     if (currentClassFilter !== "all") {
-        if (currentClassFilter === "") {
-            filtered = filtered.filter(
-                (e) => !e.model_decision || e.model_decision === "",
-            );
-        } else {
-            filtered = filtered.filter(
-                (e) => e.model_decision === currentClassFilter,
-            );
-        }
+        filtered = filtered.filter((e) => {
+            const decision = String(e.model_decision ?? "")
+                .trim()
+                .toLowerCase();
+            const isUndefinedClass = decision === "" || decision === "review";
+
+            if (currentClassFilter === "undefined_only") {
+                return isUndefinedClass;
+            }
+
+            return decision === currentClassFilter || isUndefinedClass;
+        });
     }
 
     filtered.sort((a, b) => {
@@ -591,12 +657,10 @@ function renderEmailCard(email) {
         )
         .join("");
 
-    const manualAllowed = canManualDecision(email);
     const taskStatusName = getStatusName(email.status);
 
-    const decisionBlock =
-        manualAllowed && email.task
-            ? `
+    const decisionBlock = email.task
+        ? `
         <div class="decision-block">
             <label for="decision-select" class="decision-label">Класс письма</label>
             <select id="decision-select" class="decision-select">
@@ -605,7 +669,29 @@ function renderEmailCard(email) {
             <button id="decision-save-btn" class="decision-save-btn">Сохранить</button>
         </div>
     `
+        : "";
+
+    const closeTaskBlock =
+        canCloseTask(email) && email.task?.id
+            ? `
+        <div class="danger-zone">
+        <button id="close-task-btn" class="close-task-btn">
+            Завершить задачу
+        </button>
+        </div>
+    `
             : "";
+
+    let errorIconHtml = "";
+    if (email.status === "error") {
+        let errorText = email.task?.error_message || "Ошибка неизвестна";
+
+        errorIconHtml = `
+            <div class="error-tooltip-container">
+                <div class="error-question-mark" data-tooltip="${escapeHtml(errorText)}">?</div>
+            </div>
+        `;
+    }
 
     const emailView = document.getElementById("emailView");
     if (!emailView) return;
@@ -619,6 +705,7 @@ function renderEmailCard(email) {
                         <div class="status-info">
                             <span class="status-label">Состояние:</span>
                             <div class="status-display status-${escapeHtml(email.status)}">${escapeHtml(taskStatusName)}</div>
+                            ${errorIconHtml}
                         </div>
                     </div>
                 </div>
@@ -631,6 +718,7 @@ function renderEmailCard(email) {
 
             ${attachmentBlock}
             ${decisionBlock}
+            ${closeTaskBlock}
 
             <div class="email-body">
                 ${formattedContent}
@@ -638,17 +726,77 @@ function renderEmailCard(email) {
         </div>
     `;
 
+    const closeTaskBtn = document.getElementById("close-task-btn");
+    if (closeTaskBtn) {
+        closeTaskBtn.addEventListener("click", async () => {
+            const confirmed = window.confirm(
+                "Письмо и связанные файлы будут удалены без возможности восстановления. Продолжить?",
+            );
+
+            if (!confirmed) return;
+
+            closeTaskBtn.disabled = true;
+
+            try {
+                const realEmailId = email.email_id || email.id;
+
+                const resp = await fetch(`/api/emails/${realEmailId}`, {
+                    method: "DELETE",
+                    credentials: "same-origin",
+                });
+
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    throw new Error(data.detail || "Не удалось удалить письмо");
+                }
+
+                emails = emails.filter(
+                    (item) => (item.email_id || item.id) !== realEmailId,
+                );
+                chatStorage.delete(email.id);
+                selectedEmailId = null;
+
+                renderEmailList();
+
+                if (emails.length > 0) {
+                    selectEmail(emails[0].id);
+                } else {
+                    const emailView = document.getElementById("emailView");
+                    if (emailView) {
+                        emailView.innerHTML =
+                            '<div class="email-placeholder">Письма отсутствуют</div>';
+                    }
+                }
+
+                alert("Задача завершена, письмо и файлы удалены");
+            } catch (e) {
+                console.error(e);
+                alert(e.message || "Ошибка удаления");
+                closeTaskBtn.disabled = false;
+            }
+        });
+    }
+
     const saveBtn = document.getElementById("decision-save-btn");
     const sel = document.getElementById("decision-select");
 
-    if (saveBtn && sel && manualAllowed && email.task?.id) {
+    if (saveBtn && sel && email.task?.id) {
         saveBtn.onclick = async () => {
             const newVal = sel.value || null;
 
-            if (newVal !== "auto_0" && newVal !== "auto_1") {
-                alert("Выберите итоговый класс: «Заявка» или «Расчёт».");
+            if (
+                newVal !== "request" &&
+                newVal !== "calculation" &&
+                newVal !== "question"
+            ) {
+                alert(
+                    "Выберите итоговый класс: «Заявка», «Расчёт» или «Вопрос».",
+                );
                 return;
             }
+
+            const nextStatus =
+                newVal === "question" ? "question" : "ml_classified";
 
             try {
                 const resp = await fetch(
@@ -659,6 +807,7 @@ function renderEmailCard(email) {
                         credentials: "same-origin",
                         body: JSON.stringify({
                             model_decision: newVal,
+                            status: nextStatus,
                         }),
                     },
                 );
@@ -843,10 +992,7 @@ function renderChatForEmail(email) {
         const chk = row.querySelector(".blacklist-checkbox");
 
         if (input) {
-            input.addEventListener("input", (e) => {
-                item.answer = e.target.value;
-                chatStorage.set(email.id, email.chatItems);
-            });
+            bindMaterialInputEvents(input, item, email);
         }
 
         if (chk) {
@@ -977,32 +1123,50 @@ function initTabs() {
 
 // ========== АВТООБНОВЛЕНИЕ ==========
 async function refreshEmailsSilently() {
+    const mySeq = ++refreshSeq;
     const prevId = selectedEmailId;
-    const skipChatRerender = isChatTabActive() && isEditingMaterialInput();
+    const inChat = isChatTabActive();
+
+    if (isMaterialInputProtected()) {
+        pendingSilentRefresh = true;
+        return;
+    }
 
     await loadEmailsFromApi(false);
+
+    if (mySeq !== refreshSeq) {
+        return;
+    }
+
     renderEmailList();
 
-    if (prevId && emails.find((e) => e.id === prevId)) {
-        const currentEmail = emails.find((e) => e.id === prevId);
+    const currentEmail = prevId ? emails.find((e) => e.id === prevId) : null;
+
+    if (currentEmail) {
         highlightSelectedEmail(prevId);
 
-        if (isChatTabActive()) {
-            if (!skipChatRerender) {
+        if (inChat) {
+            if (isMaterialInputProtected()) {
+                pendingSilentRefresh = true;
+            } else {
                 renderChatForEmail(currentEmail);
             }
         } else {
             renderEmailCard(currentEmail);
         }
     } else {
-        if (isChatTabActive() && !skipChatRerender) {
-            renderChatForEmail(null);
+        if (inChat) {
+            if (isMaterialInputProtected()) {
+                pendingSilentRefresh = true;
+            } else {
+                renderChatForEmail(null);
+            }
         }
     }
 
-    if (emails.length === 0) {
-        const submitContainer = document.querySelector(".chat-submit");
-        if (submitContainer) submitContainer.style.display = "none";
+    const submitContainer = document.querySelector(".chat-submit");
+    if (submitContainer) {
+        submitContainer.style.display = emails.length === 0 ? "none" : "";
     }
 }
 

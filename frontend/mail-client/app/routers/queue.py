@@ -19,6 +19,7 @@ RESULTS_BUCKET = "results"
 class DecisionUpdate(BaseModel):
     predicted_class: int | None = None
     model_decision: str | None = None
+    status: str | None = None
 
 class MaterialsManualDecisionUpdate(BaseModel):
     manual_decision: dict[str, list]
@@ -295,34 +296,37 @@ async def update_queue_decision(
             if not task_row:
                 raise HTTPException(status_code=404, detail="Задача не найдена")
 
-            current_status = task_row["status"]
-            if current_status != "ml_review":
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Ручное решение нельзя применить для статуса {current_status}",
-                )
 
             model_decision = payload.model_decision
             predicted_class = payload.predicted_class
 
+            if payload.status is not None:
+                next_status = payload.status
+            elif model_decision == "question":
+                next_status = "question"
+            else:
+                next_status = "ml_classified"
+
             if predicted_class is None:
-                if model_decision == "auto_0":
-                    predicted_class = 0
-                elif model_decision == "auto_1":
+                if model_decision == "request":
+                    predicted_class = 2
+                elif model_decision == "question":
                     predicted_class = 1
+                elif model_decision == "calculation":
+                    predicted_class = 0
                 elif model_decision == "review":
                     predicted_class = None
 
-            if model_decision not in {"auto_0", "auto_1"}:
+            if model_decision not in {"request", "calculation", "question"}:
                 raise HTTPException(
                     status_code=400,
-                    detail="Нужно выбрать итоговый класс: 'Заявка' или 'Расчёт'"
+                    detail="Нужно выбрать итоговый класс: 'Заявка', 'Расчёт' или 'Вопрос'"
                 )
 
-            if predicted_class not in {0, 1}:
+            if predicted_class not in {0, 1, 2}:
                 raise HTTPException(
                     status_code=400,
-                    detail="Итоговый класс должен быть 0 или 1"
+                    detail="Итоговый класс должен быть 0, 1 или 2"
                 )
 
             output_patch = {
@@ -339,10 +343,10 @@ async def update_queue_decision(
                 UPDATE tasks
                 SET
                     output_data = COALESCE(output_data, '{}'::jsonb) || $1::jsonb,
-                    status = 'ml_classified'::task_status,
-                    assigned_to = $2,
+                    status = $2::task_status,
+                    assigned_to = $3,
                     completed_at = NOW()
-                WHERE id = $3
+                WHERE id = $4
                 RETURNING
                     id,
                     email_id,
@@ -352,6 +356,7 @@ async def update_queue_decision(
                     completed_at
                 """,
                 json.dumps(output_patch),
+                next_status,
                 user["id"],
                 task_id,
             )
@@ -511,3 +516,89 @@ async def update_materials_manual_decision(
             "email_uid": task_row["email_uid"],
         },
     }
+
+@router.delete("/emails/{email_id}")
+async def delete_email(email_id: int, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+    file_keys: list[str] = []
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                SELECT e.id, e.mailbox, t.id AS task_id, t.status
+                FROM emails e
+                LEFT JOIN tasks t ON t.email_id = e.id
+                WHERE e.id = $1
+                ORDER BY t.created_at DESC NULLS LAST
+                LIMIT 1
+                """,
+                email_id,
+            )
+
+            if not row:
+                raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+            if row["status"] is None:
+                raise HTTPException(status_code=400, detail="У письма нет связанной задачи")
+
+            allowed_statuses = {"question", "error", "completed"}
+            current_status = row["status"]
+
+            if current_status not in allowed_statuses:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Удаление доступно только для статусов question, error, completed. Текущий статус: {current_status}"
+                )
+
+            docs = await conn.fetch(
+                """
+                SELECT minio_object_key
+                FROM documents
+                WHERE email_id = $1
+                  AND minio_object_key IS NOT NULL
+                """,
+                email_id,
+            )
+
+            file_keys = [doc["minio_object_key"] for doc in docs if doc["minio_object_key"]]
+
+            await conn.execute(
+                """
+                DELETE FROM emails
+                WHERE id = $1
+                """,
+                email_id,
+            )
+
+    client = MinIOClient.get_client()
+    storage_errors = []
+
+    for object_key in file_keys:
+        for bucket_name in (SOURCE_ATTACHMENTS_BUCKET, RESULTS_BUCKET):
+            try:
+                client.remove_object(bucket_name, object_key)
+            except Exception as e:
+                error_text = str(e)
+                if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+                    continue
+                storage_errors.append({
+                    "bucket": bucket_name,
+                    "object_key": object_key,
+                    "error": error_text,
+                })
+
+    if storage_errors:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "Письмо удалено из БД, но часть файлов не удалена из MinIO",
+                "storage_errors": storage_errors,
+            },
+        )
+
+    return {"ok": True, "email_id": email_id}
