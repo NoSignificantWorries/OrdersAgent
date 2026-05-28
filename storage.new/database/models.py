@@ -173,6 +173,7 @@ class Materials(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     source = Column(String(255), nullable=False, unique=True, index=True)
     target = Column(String(255), nullable=True)
+    article = Column(String(255), nullable=True)
     black_list = Column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )

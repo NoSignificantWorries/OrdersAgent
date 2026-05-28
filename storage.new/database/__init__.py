@@ -1,4 +1,5 @@
-from .base import get_db_session, init_database
+from .base import DatabaseManager, get_db_session, init_database
+from .models import UserStatus
 from .repositories import (
     EmailsQueueRepository,
     EmailsRepository,
@@ -11,6 +12,8 @@ from .repositories import (
 __all__ = [
     "get_db_session",
     "init_database",
+    "DatabaseManager",
+    "UserStatus",
     "MaterialsRepository",
     "UsersRepository",
     "EmailsQueueRepository",

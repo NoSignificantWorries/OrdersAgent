@@ -1,5 +1,4 @@
 from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
-from uuid import UUID
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,9 +15,10 @@ class BaseRepository(Generic[ModelType]):
         instance = self.model(**kwargs)
         self.session.add(instance)
         await self.session.flush()
+        await self.session.commit()
         return instance
 
-    async def get_by_id(self, id: UUID | int) -> Optional[ModelType]:
+    async def get_by_id(self, id: int) -> Optional[ModelType]:
         return await self.session.get(self.model, id)
 
     async def get_all(
@@ -40,7 +40,7 @@ class BaseRepository(Generic[ModelType]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def update(self, id: UUID | int, **values) -> Optional[ModelType]:
+    async def update(self, id: int, **values) -> Optional[ModelType]:
         query = (
             update(self.model)
             .where(self.model.id == id)
@@ -51,7 +51,7 @@ class BaseRepository(Generic[ModelType]):
         await self.session.flush()
         return result.scalars().all()
 
-    async def delete(self, id: UUID | int) -> bool:
+    async def delete(self, id: int) -> bool:
         query = delete(self.model).where(self.model.id == id)
         result = await self.session.execute(query)
         await self.session.flush()
@@ -63,7 +63,7 @@ class BaseRepository(Generic[ModelType]):
         await self.session.flush()
         return instances
 
-    async def bulk_update(self, updates: Dict[UUID | int, Dict[str, Any]]) -> int:
+    async def bulk_update(self, updates: Dict[int, Dict[str, Any]]) -> int:
         count = 0
         for id, values in updates.items():
             result = await self.update(id, **values)
