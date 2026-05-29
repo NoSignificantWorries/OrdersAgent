@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS emails (
     prob_1 DOUBLE PRECISION,
     predicted_class SMALLINT,
     model_decision TEXT,
+    archived BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(mailbox, email_uid)
 );
