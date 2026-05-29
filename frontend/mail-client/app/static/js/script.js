@@ -394,6 +394,8 @@ function buildChatItemsFromOutput(output, emailId) {
 }
 
 function canCloseTask(email) {
+    if (email?.archived === true) return false;
+
     const status = String(
         email?.task_status || email?.task?.status || email?.status || "",
     ).toLowerCase();
@@ -423,6 +425,8 @@ function normalizeApiItem(item, idx) {
         date: item.emaildate || item.createdat || new Date().toISOString(),
         content: emailContent,
         preview: emailContent.replace(/\s+/g, " ").trim().slice(0, 140),
+
+        archived: item.archived === true,
 
         prob_1: output.prob_1 ?? item.prob1 ?? null,
         predicted_class: output.predicted_class ?? item.predictedclass ?? null,
@@ -730,7 +734,7 @@ function renderEmailCard(email) {
     if (closeTaskBtn) {
         closeTaskBtn.addEventListener("click", async () => {
             const confirmed = window.confirm(
-                "Письмо и связанные файлы будут удалены без возможности восстановления. Продолжить?",
+                "Письмо будет помечено как отработанное и перемещено во вкладку «Отработанные». Продолжить?",
             );
 
             if (!confirmed) return;
@@ -740,14 +744,14 @@ function renderEmailCard(email) {
             try {
                 const realEmailId = email.email_id || email.id;
 
-                const resp = await fetch(`/api/emails/${realEmailId}`, {
-                    method: "DELETE",
+                const resp = await fetch(`/api/emails/${realEmailId}/archive`, {
+                    method: "POST",
                     credentials: "same-origin",
                 });
 
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok) {
-                    throw new Error(data.detail || "Не удалось удалить письмо");
+                    throw new Error(data.detail || "Не удалось архивировать письмо");
                 }
 
                 emails = emails.filter(
@@ -768,10 +772,10 @@ function renderEmailCard(email) {
                     }
                 }
 
-                alert("Задача завершена, письмо и файлы удалены");
+                alert("Задача завершена, письмо перенесено в отработанные");
             } catch (e) {
                 console.error(e);
-                alert(e.message || "Ошибка удаления");
+                alert(e.message || "Ошибка архивирования");
                 closeTaskBtn.disabled = false;
             }
         });

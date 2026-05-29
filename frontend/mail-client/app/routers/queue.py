@@ -517,20 +517,19 @@ async def update_materials_manual_decision(
         },
     }
 
-@router.delete("/emails/{email_id}")
-async def delete_email(email_id: int, request: Request):
+@router.post("/emails/{email_id}/archive")
+async def archive_email(email_id: int, request: Request):
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     pool = await get_db_pool()
-    file_keys: list[str] = []
 
     async with pool.acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                SELECT e.id, e.mailbox, t.id AS task_id, t.status
+                SELECT e.id, e.archived, t.id AS task_id, t.status
                 FROM emails e
                 LEFT JOIN tasks t ON t.email_id = e.id
                 WHERE e.id = $1
@@ -552,53 +551,23 @@ async def delete_email(email_id: int, request: Request):
             if current_status not in allowed_statuses:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Удаление доступно только для статусов question, error, completed. Текущий статус: {current_status}"
+                    detail=(
+                        "Архивация доступна только для статусов "
+                        "question, error, completed. "
+                        f"Текущий статус: {current_status}"
+                    ),
                 )
 
-            docs = await conn.fetch(
-                """
-                SELECT minio_object_key
-                FROM documents
-                WHERE email_id = $1
-                  AND minio_object_key IS NOT NULL
-                """,
-                email_id,
-            )
-
-            file_keys = [doc["minio_object_key"] for doc in docs if doc["minio_object_key"]]
+            if row["archived"]:
+                return {"ok": True, "email_id": email_id, "archived": True}
 
             await conn.execute(
                 """
-                DELETE FROM emails
+                UPDATE emails
+                SET archived = TRUE
                 WHERE id = $1
                 """,
                 email_id,
             )
 
-    client = MinIOClient.get_client()
-    storage_errors = []
-
-    for object_key in file_keys:
-        for bucket_name in (SOURCE_ATTACHMENTS_BUCKET, RESULTS_BUCKET):
-            try:
-                client.remove_object(bucket_name, object_key)
-            except Exception as e:
-                error_text = str(e)
-                if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
-                    continue
-                storage_errors.append({
-                    "bucket": bucket_name,
-                    "object_key": object_key,
-                    "error": error_text,
-                })
-
-    if storage_errors:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "Письмо удалено из БД, но часть файлов не удалена из MinIO",
-                "storage_errors": storage_errors,
-            },
-        )
-
-    return {"ok": True, "email_id": email_id}
+    return {"ok": True, "email_id": email_id, "archived": True}
