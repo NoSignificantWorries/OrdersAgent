@@ -79,6 +79,7 @@ async def list_queue_for_user(
     user: dict,
     status: str = "",
     limit: int | None = None,
+    archived: bool | None = None,
 ) -> list[dict]:
     pool = await get_db_pool()
 
@@ -180,6 +181,11 @@ async def list_queue_for_user(
                 )
                 params.append(statuses)
                 param_idx += 1
+
+        if archived is not None:
+            where_clauses.append(f"e.archived = ${param_idx}")
+            params.append(archived)
+            param_idx += 1
 
         if where_clauses:
             sql += "\nWHERE " + "\n  AND ".join(where_clauses)

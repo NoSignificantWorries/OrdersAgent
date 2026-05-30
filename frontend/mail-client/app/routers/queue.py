@@ -124,6 +124,7 @@ async def get_queue(
     request: Request,
     status: str = "",
     limit: int | None = None,
+    archived: bool | None = None,
 ):
     user = auth.get_current_user(request)
     if not user:
@@ -135,7 +136,7 @@ async def get_queue(
         if limit > 200:
             limit = 200
 
-    items = await list_queue_for_user(user=user, status=status, limit=limit)
+    items = await list_queue_for_user(user=user, status=status, limit=limit, archived=archived)
 
     return {
         "user": {
