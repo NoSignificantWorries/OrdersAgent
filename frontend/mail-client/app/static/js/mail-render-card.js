@@ -162,6 +162,7 @@
 
                     <div class="email-meta">
                         <div><strong>От:</strong> ${escapeHtml(email.sender)}</div>
+                        <div><strong>Кому:</strong> ${escapeHtml(email.mailbox)}</div>
                         <div><strong>Дата:</strong> ${formatDateTime(email.date)}</div>
                     </div>
                 </div>

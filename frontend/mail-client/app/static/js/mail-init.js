@@ -176,12 +176,32 @@
             }
 
             const searchInput = document.getElementById("search-input");
+            const searchClearBtn = document.getElementById("search-clear-btn");
+
+            function updateSearchClearButton() {
+                if (!searchClearBtn || !searchInput) return;
+                searchClearBtn.hidden = searchInput.value.trim() === "";
+            }
+
             if (searchInput) {
                 searchInput.addEventListener("input", (e) => {
                     state.currentSearchTerm = e.target.value;
                     renderEmailList();
+                    updateSearchClearButton();
                 });
             }
+
+            if (searchClearBtn && searchInput) {
+                searchClearBtn.addEventListener("click", () => {
+                    searchInput.value = "";
+                    state.currentSearchTerm = "";
+                    renderEmailList();
+                    updateSearchClearButton();
+                    searchInput.focus();
+                });
+            }
+
+            updateSearchClearButton();
 
             const filterToggle = document.getElementById("filter-toggle-btn");
             const filterPanel = document.getElementById("filter-panel");

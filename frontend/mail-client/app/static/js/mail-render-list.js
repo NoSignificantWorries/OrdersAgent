@@ -93,11 +93,12 @@
                     <div class="email-item" data-id="${email.id}">
                         <div class="subject">${escapeHtml(email.subject)}</div>
                         <div class="email-item-header">
-                            <div class="sender">${escapeHtml(email.sender)}</div>
+                            <div class="sender">От: ${escapeHtml(email.sender)}</div>
                             <div class="status-badge status-${escapeHtml(email.status)}">
                                 ${escapeHtml(getStatusName(email.status))}
                             </div>
                         </div>
+                        <div class="recipient">Кому: ${escapeHtml(email.mailbox || "")}</div>
                         <div class="date">${formatDate(email.date)}</div>
                     </div>
                 `,

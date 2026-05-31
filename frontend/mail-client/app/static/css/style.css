@@ -327,6 +327,13 @@ body {
     margin-bottom: 0;
 }
 
+.email-item .recipient {
+    font-size: 13px;
+    font-weight: 500;
+    color: #475569;
+    margin-bottom: 0;
+}
+
 .email-item .date {
     font-size: 11px;
     color: #94a3b8;
@@ -472,7 +479,7 @@ body {
 
 #search-input {
     width: 100%;
-    padding: 10px 12px 10px 36px;
+    padding: 10px 40px 10px 36px;
     border-radius: 40px;
     border: 1px solid #cbd5e1;
     font-size: 14px;
@@ -484,6 +491,42 @@ body {
     box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
 }
 
+.search-clear-btn {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 50%;
+}
+
+.search-clear-btn:hover {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.search-clear-btn:focus {
+    outline: none;
+}
+
+.search-clear-btn:focus-visible {
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.25);
+}
+
+.search-clear-btn[hidden] {
+    display: none;
+}
 
 /* Вкладки */
 .tabs-container {
