@@ -35,7 +35,7 @@
                 const emailView = document.getElementById("emailView");
                 if (emailView) {
                     emailView.innerHTML =
-                        '<div class="email-placeholder">Выберите письмо</div>';
+                        '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
                 }
             }
         }
@@ -52,6 +52,7 @@
             isMaterialInputProtected,
             loadEmailsFromApi,
             renderEmailList,
+            updateUnreadCount,
             highlightSelectedEmail,
             renderChatForEmail,
             renderEmailCard,
@@ -71,6 +72,7 @@
         if (mySeq !== state.refreshSeq) return;
 
         renderEmailList();
+        updateUnreadCount();
 
         const currentEmail = prevId
             ? state.emails.find((e) => e.id === prevId)
@@ -100,7 +102,7 @@
                     const emailView = document.getElementById("emailView");
                     if (emailView) {
                         emailView.innerHTML =
-                            '<div class="email-placeholder">Выберите письмо</div>';
+                            '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
                     }
                 }
 
@@ -116,6 +118,7 @@
             state,
             loadEmailsFromApi,
             renderEmailList,
+            updateUnreadCount,
             selectEmail,
             initTabs,
             sendChatData,
@@ -138,11 +141,12 @@
             const emailView = document.getElementById("emailView");
             if (emailView) {
                 emailView.innerHTML =
-                    '<div class="email-placeholder">Выберите письмо</div>';
+                    '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
             }
 
             await loadEmailsFromApi();
             renderEmailList();
+            updateUnreadCount();
 
             state.selectedEmailId = null;
 
@@ -156,12 +160,11 @@
                 const emailView = document.getElementById("emailView");
                 if (emailView) {
                     emailView.innerHTML =
-                        '<div class="email-placeholder">Выберите письмо</div>';
+                        '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
                 }
             }
 
             setInterval(() => {
-                state.refreshSeq += 1;
                 refreshEmailsSilently({
                     ...deps,
                     state,

@@ -28,7 +28,6 @@
         } = deps;
 
         let filtered = [...state.emails];
-
         const pageType = window.MAILPAGECONFIG?.pageType || "inbox";
 
         if (pageType === "archived") {
@@ -76,21 +75,18 @@
         });
 
         const container = document.getElementById("emailsContainer");
-        const countSpan = document.getElementById("email-count-display");
-
         if (!container) return;
 
         if (filtered.length === 0) {
             container.innerHTML =
                 '<div class="email-placeholder" style="padding:20px;text-align:center;">Письма отсутствуют</div>';
-            if (countSpan) countSpan.textContent = "0";
             return;
         }
 
         container.innerHTML = filtered
             .map(
                 (email) => `
-                    <div class="email-item" data-id="${email.id}">
+                    <div class="email-item ${email.read ? "is-read" : "is-unread"}" data-id="${email.id}">
                         <div class="subject">${escapeHtml(email.subject)}</div>
                         <div class="email-item-header">
                             <div class="sender">От: ${escapeHtml(email.sender)}</div>
@@ -109,7 +105,112 @@
             el.addEventListener("click", () => selectEmail(el.dataset.id));
         });
 
-        if (countSpan) countSpan.textContent = String(filtered.length);
+        if (state.selectedEmailId != null) {
+            highlightSelectedEmail(state.selectedEmailId);
+        }
+    }
+
+    async function updateEmailReadStatus(emailId, isRead) {
+        const response = await fetch(`/api/emails/${emailId}/read`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            credentials: "same-origin",
+            body: JSON.stringify({ is_read: isRead }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Ошибка обновления is_read: ${response.status}`);
+        }
+
+        return response.json();
+    }
+
+    function closeOpenedEmail(deps) {
+        const { state } = deps;
+
+        state.selectedEmailId = null;
+
+        document.querySelectorAll(".email-item").forEach((item) => {
+            item.classList.remove("selected");
+        });
+
+        const emailView = document.getElementById("emailView");
+        if (emailView) {
+            emailView.innerHTML =
+                '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+        }
+    }
+
+    async function closeAndMarkUnread(deps) {
+        const {
+            state,
+            renderEmailList,
+            updateUnreadCount,
+        } = deps;
+
+        if (!state.selectedEmailId) {
+            closeOpenedEmail(deps);
+            return;
+        }
+
+        const email = state.emails.find((e) => e.id === state.selectedEmailId);
+        if (!email) {
+            closeOpenedEmail(deps);
+            return;
+        }
+
+        if (!email.read) {
+            closeOpenedEmail(deps);
+            return;
+        }
+
+        const realEmailId = email.email_id || email.id;
+
+        email.read = false;
+        state.unreadCount += 1;
+
+        if (typeof updateUnreadCount === "function") {
+            updateUnreadCount();
+        }
+
+        if (typeof renderEmailList === "function") {
+            renderEmailList();
+        }
+
+        try {
+            await updateEmailReadStatus(realEmailId, false);
+            closeOpenedEmail(deps);
+        } catch (error) {
+            console.error("Не удалось пометить письмо непрочитанным:", error);
+
+            email.read = true;
+            state.unreadCount = Math.max(0, state.unreadCount - 1);
+
+            if (typeof updateUnreadCount === "function") {
+                updateUnreadCount();
+            }
+
+            if (typeof renderEmailList === "function") {
+                renderEmailList();
+            }
+        }
+    }
+
+    function updateUnreadCount(deps) {
+        const { state, formatUnreadCount } = deps;
+
+        const countSpan = document.getElementById("email-count-display");
+        if (!countSpan) return;
+
+        const pageType = window.MAILPAGECONFIG?.pageType || "inbox";
+        if (pageType === "archived") {
+            countSpan.textContent = "";
+            return;
+        }
+
+        countSpan.textContent = formatUnreadCount(state.unreadCount);
     }
 
     function selectEmail(id, deps) {
@@ -119,12 +220,44 @@
             highlightSelectedEmail,
             renderEmailCard,
             renderChatForEmail,
+            renderEmailList,
+            updateUnreadCount,
         } = deps;
 
         state.selectedEmailId = parseInt(id, 10);
 
         const email = state.emails.find((e) => e.id === state.selectedEmailId);
         if (!email) return;
+
+        const realEmailId = email.email_id || email.id;
+
+        if (!email.read) {
+            email.read = true;
+            state.unreadCount = Math.max(0, state.unreadCount - 1);
+
+            if (typeof updateUnreadCount === "function") {
+                updateUnreadCount();
+            }
+
+            updateEmailReadStatus(realEmailId, true).catch((error) => {
+                console.error("Не удалось отметить письмо прочитанным:", error);
+
+                email.read = false;
+                state.unreadCount += 1;
+
+                if (typeof updateUnreadCount === "function") {
+                    updateUnreadCount();
+                }
+
+                if (typeof renderEmailList === "function") {
+                    renderEmailList();
+                }
+
+                if (typeof highlightSelectedEmail === "function") {
+                    highlightSelectedEmail(id);
+                }
+            });
+        }
 
         showLoading();
 
@@ -143,6 +276,9 @@
         showLoading,
         highlightSelectedEmail,
         renderEmailList,
+        updateUnreadCount,
         selectEmail,
+        closeOpenedEmail,
+        closeAndMarkUnread,
     };
 })();

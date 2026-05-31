@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS emails (
     model_decision TEXT,
     archived BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE(mailbox, email_uid)
 );
 

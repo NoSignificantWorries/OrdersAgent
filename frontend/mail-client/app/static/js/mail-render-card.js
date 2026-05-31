@@ -29,6 +29,10 @@
         return email?.archived === true;
     }
 
+    function canMarkUnread() {
+        return window.location.pathname === "/inbox";
+    }
+
     function renderEmailCard(email, deps) {
         const {
             state,
@@ -44,6 +48,8 @@
             renderEmailList,
             highlightSelectedEmail,
             selectEmail,
+            closeOpenedEmail,
+            closeAndMarkUnread,
         } = deps;
 
         const cfg = window.MAILPAGECONFIG || {};
@@ -149,14 +155,55 @@
                 <div class="email-header">
                     <div class="email-header-top">
                         <div class="email-subject">${escapeHtml(email.subject)}</div>
-                        <div class="status-block">
-                            <div class="status-info">
-                                <span class="status-label">Состояние:</span>
-                                <div class="status-display status-${escapeHtml(email.status)}">
-                                    ${escapeHtml(taskStatusName)}
+
+                        <div class="email-header-actions">
+                            <div class="status-block">
+                                <div class="status-info">
+                                    <span class="status-label">Состояние:</span>
+                                    <div class="status-display status-${escapeHtml(email.status)}">
+                                        ${escapeHtml(taskStatusName)}
+                                    </div>
+                                    ${errorIconHtml}
                                 </div>
-                                ${errorIconHtml}
                             </div>
+
+                            ${
+                                canMarkUnread(email)
+                                    ? `
+                                        <div class="email-actions-menu-wrap">
+                                            <button
+                                                type="button"
+                                                class="email-icon-btn"
+                                                id="email-actions-toggle-btn"
+                                                aria-label="Действия с письмом"
+                                                title="Действия"
+                                            >
+                                                <span aria-hidden="true">⋯</span>
+                                            </button>
+
+                                            <div class="email-actions-menu" id="email-actions-menu" hidden>
+                                                <button
+                                                    type="button"
+                                                    class="email-actions-menu-item"
+                                                    id="mark-unread-btn"
+                                                >
+                                                    Пометить непрочитанным
+                                                </button>
+                                            </div>
+                                        </div>
+                                    `
+                                    : ""
+                            }
+
+                            <button
+                                type="button"
+                                class="email-icon-btn"
+                                id="close-email-btn"
+                                aria-label="Закрыть письмо"
+                                title="Закрыть"
+                            >
+                                <span aria-hidden="true">×</span>
+                            </button>
                         </div>
                     </div>
 
@@ -177,6 +224,49 @@
                 </div>
             </div>
         `;
+
+        const closeEmailBtn = document.getElementById("close-email-btn");
+        if (closeEmailBtn) {
+            closeEmailBtn.addEventListener("click", () => {
+                closeOpenedEmail();
+            });
+        }
+
+        const actionsToggleBtn = document.getElementById("email-actions-toggle-btn");
+        const actionsMenu = document.getElementById("email-actions-menu");
+        const markUnreadBtn = document.getElementById("mark-unread-btn");
+
+        if (actionsToggleBtn && actionsMenu) {
+            actionsToggleBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                actionsMenu.hidden = !actionsMenu.hidden;
+            });
+
+            document.addEventListener("click", (e) => {
+                if (
+                    !actionsMenu.hidden &&
+                    !actionsMenu.contains(e.target) &&
+                    e.target !== actionsToggleBtn &&
+                    !actionsToggleBtn.contains(e.target)
+                ) {
+                    actionsMenu.hidden = true;
+                }
+            });
+        }
+
+        if (markUnreadBtn) {
+            markUnreadBtn.addEventListener("click", async () => {
+                markUnreadBtn.disabled = true;
+
+                try {
+                    await closeAndMarkUnread();
+                } catch (e) {
+                    console.error(e);
+                    alert(e.message || "Не удалось пометить письмо непрочитанным");
+                    markUnreadBtn.disabled = false;
+                }
+            });
+        }
 
         const closeTaskBtn = document.getElementById("close-task-btn");
         if (closeTaskBtn) {
@@ -211,7 +301,7 @@
                         emailView.innerHTML =
                             state.emails.length === 0
                                 ? '<div class="email-placeholder">Письма отсутствуют</div>'
-                                : '<div class="email-placeholder">Выберите письмо</div>';
+                                : '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
                     }
 
                 } catch (e) {
@@ -253,7 +343,7 @@
                         emailView.innerHTML =
                             state.emails.length === 0
                                 ? '<div class="email-placeholder">Письма отсутствуют</div>'
-                                : '<div class="email-placeholder">Выберите письмо</div>';
+                                : '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
                     }
                 } catch (e) {
                     console.error(e);

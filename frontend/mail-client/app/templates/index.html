@@ -51,7 +51,9 @@
                         {% endif %}
                     </h3>
                     <div class="header-controls">
-                        <span class="email-count" id="email-count-display">0 писем</span>
+                        {% if current_page == 'inbox' %}
+                            <span class="email-count" id="email-count-display">0 непрочитанных</span>
+                        {% endif %}
                         <button id="filter-toggle-btn" class="filter-toggle" title="Фильтры">
                             <img src="/static/images/filter-icon.png" alt="Фильтры" class="filter-icon">
                         </button>

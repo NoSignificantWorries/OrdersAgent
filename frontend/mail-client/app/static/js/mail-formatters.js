@@ -39,6 +39,25 @@
             .replace(/"/g, "&quot;");
     }
 
+    function pluralizeRu(count, one, few, many) {
+        const abs = Math.abs(Number(count)) % 100;
+        const last = abs % 10;
+
+        if (abs > 10 && abs < 20) return many;
+        if (last === 1) return one;
+        if (last >= 2 && last <= 4) return few;
+        return many;
+    }
+
+    function formatUnreadCount(count) {
+        return `${count} ${pluralizeRu(
+            count,
+            "непрочитанное",
+            "непрочитанных",
+            "непрочитанных",
+        )}`;
+    }
+
     function mapTaskStatusToUiStatus(taskStatus) {
         switch ((taskStatus || "").toLowerCase()) {
             case "new":
@@ -86,6 +105,8 @@
         formatDateTime,
         escapeHtml,
         escapeAttr,
+        pluralizeRu,
+        formatUnreadCount,
         mapTaskStatusToUiStatus,
         getStatusName,
     };

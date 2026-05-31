@@ -1,6 +1,7 @@
 // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
 let emails = [];
 let selectedEmailId = null;
+let unreadCount = 0;
 
 const {
     formatDate,
@@ -9,6 +10,7 @@ const {
     escapeAttr,
     mapTaskStatusToUiStatus,
     getStatusName,
+    formatUnreadCount,
 } = window.MailFormatters;
 
 const {
@@ -35,7 +37,10 @@ const {
     showLoading: showLoadingFromModule,
     highlightSelectedEmail: highlightSelectedEmailFromModule,
     renderEmailList: renderEmailListFromModule,
+    updateUnreadCount: updateUnreadCountFromModule,
     selectEmail: selectEmailFromModule,
+    closeOpenedEmail: closeOpenedEmailFromModule,
+    closeAndMarkUnread: closeAndMarkUnreadFromModule,
 } = window.MailRenderList;
 
 const {
@@ -70,6 +75,11 @@ const decisionOptions = [
     { value: "question", label: "Вопрос" },
 ];
 
+function recalculateUnreadCount() {
+    unreadCount = emails.reduce((acc, email) => {
+        return acc + (email.archived !== true && email.read !== true ? 1 : 0);
+    }, 0);
+}
 
 // ========== НОРМАЛИЗАЦИЯ ДАННЫХ API ==========
 function normalizeApiItem(item, idx) {
@@ -95,6 +105,7 @@ function normalizeApiItem(item, idx) {
         preview: emailContent.replace(/\s+/g, " ").trim().slice(0, 140),
 
         archived: item.archived === true,
+        read: item.is_read === true,
 
         prob_1: output.prob_1 ?? item.prob1 ?? null,
         predicted_class: output.predicted_class ?? item.predictedclass ?? null,
@@ -144,6 +155,7 @@ async function loadEmailsFromApi(showLoadingState = true) {
     );
 
     emails = result.emails || [];
+    recalculateUnreadCount();
     return result.ok;
 }
 
@@ -154,23 +166,50 @@ function getMailRenderListState() {
         get emails() {
             return emails;
         },
+        set emails(value) {
+            emails = value;
+        },
+
         get selectedEmailId() {
             return selectedEmailId;
         },
         set selectedEmailId(value) {
             selectedEmailId = value;
         },
+
         get currentSearchTerm() {
             return currentSearchTerm;
         },
+        set currentSearchTerm(value) {
+            currentSearchTerm = value;
+        },
+
         get currentStatusFilter() {
             return currentStatusFilter;
         },
+        set currentStatusFilter(value) {
+            currentStatusFilter = value;
+        },
+
         get currentClassFilter() {
             return currentClassFilter;
         },
+        set currentClassFilter(value) {
+            currentClassFilter = value;
+        },
+
         get sortNewestFirst() {
             return sortNewestFirst;
+        },
+        set sortNewestFirst(value) {
+            sortNewestFirst = value;
+        },
+
+        get unreadCount() {
+            return unreadCount;
+        },
+        set unreadCount(value) {
+            unreadCount = value;
         },
     };
 }
@@ -181,6 +220,13 @@ function showLoading() {
 
 function highlightSelectedEmail(id) {
     return highlightSelectedEmailFromModule(id);
+}
+
+function updateUnreadCount() {
+    return updateUnreadCountFromModule({
+        state: getMailRenderListState(),
+        formatUnreadCount,
+    });
 }
 
 function renderEmailList() {
@@ -200,6 +246,8 @@ function selectEmail(id) {
         highlightSelectedEmail,
         renderEmailCard,
         renderChatForEmail,
+        renderEmailList,
+        updateUnreadCount,
     });
 }
 
@@ -235,6 +283,20 @@ function canUnarchiveTask(email) {
     return canUnarchiveTaskFromModule(email);
 }
 
+function closeOpenedEmail() {
+    return closeOpenedEmailFromModule({
+        state: getMailRenderListState(),
+    });
+}
+
+function closeAndMarkUnread() {
+    return closeAndMarkUnreadFromModule({
+        state: getMailRenderListState(),
+        renderEmailList,
+        updateUnreadCount,
+    });
+}
+
 function renderEmailCard(email) {
     return renderEmailCardFromModule(email, {
         state: getMailRenderCardState(),
@@ -250,6 +312,8 @@ function renderEmailCard(email) {
         renderEmailList,
         highlightSelectedEmail,
         selectEmail,
+        closeOpenedEmail,
+        closeAndMarkUnread,
     });
 }
 
@@ -389,6 +453,7 @@ function refreshEmailsSilently() {
         isMaterialInputProtected,
         loadEmailsFromApi,
         renderEmailList,
+        updateUnreadCount,
         highlightSelectedEmail,
         renderChatForEmail,
         renderEmailCard,
@@ -400,6 +465,7 @@ function initMailPage(config) {
         state: getMailInitState(),
         loadEmailsFromApi,
         renderEmailList,
+        updateUnreadCount,
         selectEmail,
         initTabs,
         sendChatData,

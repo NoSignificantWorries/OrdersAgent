@@ -100,6 +100,7 @@ async def list_queue_for_user(
                 e.email_date,
                 e.model_decision AS email_model_decision,
                 e.archived AS email_archived,
+                e.is_read AS email_is_read,
                 e.created_at AS email_created_at,
 
                 t.id AS task_id,
@@ -201,6 +202,7 @@ async def list_queue_for_user(
                 e.raw_email,
                 e.email_date,
                 e.archived,
+                e.is_read,
                 e.created_at,
                 t.id,
                 t.status,
@@ -260,6 +262,7 @@ async def list_queue_for_user(
                 if row["email_created_at"]
                 else None,
                 "archived": bool(row["email_archived"]),
+                "is_read": bool(row["email_is_read"]),
                 "prob1": prob_1,
                 "predictedclass": predicted_class,
                 "modeldecision": model_decision,

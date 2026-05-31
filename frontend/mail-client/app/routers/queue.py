@@ -24,6 +24,8 @@ class DecisionUpdate(BaseModel):
 class MaterialsManualDecisionUpdate(BaseModel):
     manual_decision: dict[str, list]
 
+class EmailReadUpdate(BaseModel):
+    is_read: bool
 
 async def _load_document_bytes_from_storage(bucket_name: str, object_key: str) -> bytes:
     client = MinIOClient.get_client()
@@ -610,3 +612,66 @@ async def unarchive_email(email_id: int, request: Request):
             )
 
     return {"ok": True, "email_id": email_id, "archived": False}
+
+@router.patch("/emails/{email_id}/read")
+async def update_email_read_status(
+    email_id: int,
+    payload: EmailReadUpdate,
+    request: Request,
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if user.get("role") == "admin":
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, mailbox, is_read
+                    FROM emails
+                    WHERE id = $1
+                    LIMIT 1
+                    """,
+                    email_id,
+                )
+            else:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, mailbox, is_read
+                    FROM emails
+                    WHERE id = $1
+                      AND mailbox = $2
+                    LIMIT 1
+                    """,
+                    email_id,
+                    user["email"],
+                )
+
+            if not row:
+                raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+            if row["is_read"] == payload.is_read:
+                return {
+                    "ok": True,
+                    "email_id": email_id,
+                    "is_read": payload.is_read,
+                }
+
+            await conn.execute(
+                """
+                UPDATE emails
+                SET is_read = $1
+                WHERE id = $2
+                """,
+                payload.is_read,
+                email_id,
+            )
+
+    return {
+        "ok": True,
+        "email_id": email_id,
+        "is_read": payload.is_read,
+    }

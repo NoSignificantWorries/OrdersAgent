@@ -180,7 +180,7 @@
 
         if (!email) {
             container.innerHTML =
-                '<div class="chat-placeholder">Выберите письмо для просмотра чата</div>';
+                '<div class="chat-placeholder">👈 Выберите письмо из списка</div>';
             return;
         }
 
