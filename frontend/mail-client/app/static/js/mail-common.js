@@ -41,6 +41,7 @@ const {
 const {
     getDisplayDocuments: getDisplayDocumentsFromModule,
     canCloseTask: canCloseTaskFromModule,
+    canUnarchiveTask: canUnarchiveTaskFromModule,
     renderEmailCard: renderEmailCardFromModule,
 } = window.MailRenderCard;
 
@@ -230,6 +231,10 @@ function canCloseTask(email) {
     return canCloseTaskFromModule(email);
 }
 
+function canUnarchiveTask(email) {
+    return canUnarchiveTaskFromModule(email);
+}
+
 function renderEmailCard(email) {
     return renderEmailCardFromModule(email, {
         state: getMailRenderCardState(),
@@ -241,6 +246,7 @@ function renderEmailCard(email) {
         downloadEmailAttachments,
         getDisplayDocuments,
         canCloseTask,
+        canUnarchiveTask,
         renderEmailList,
         highlightSelectedEmail,
         selectEmail,

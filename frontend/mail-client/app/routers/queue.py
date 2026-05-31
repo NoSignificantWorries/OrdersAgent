@@ -572,3 +572,41 @@ async def archive_email(email_id: int, request: Request):
             )
 
     return {"ok": True, "email_id": email_id, "archived": True}
+
+
+@router.post("/emails/{email_id}/unarchive")
+async def unarchive_email(email_id: int, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                SELECT id, archived
+                FROM emails
+                WHERE id = $1
+                LIMIT 1
+                """,
+                email_id,
+            )
+
+            if not row:
+                raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+            if not row["archived"]:
+                return {"ok": True, "email_id": email_id, "archived": False}
+
+            await conn.execute(
+                """
+                UPDATE emails
+                SET archived = FALSE
+                WHERE id = $1
+                """,
+                email_id,
+            )
+
+    return {"ok": True, "email_id": email_id, "archived": False}

@@ -25,6 +25,10 @@
         return ["question", "error", "completed"].includes(status);
     }
 
+    function canUnarchiveTask(email) {
+        return email?.archived === true;
+    }
+
     function renderEmailCard(email, deps) {
         const {
             state,
@@ -36,6 +40,7 @@
             downloadEmailAttachments,
             getDisplayDocuments,
             canCloseTask,
+            canUnarchiveTask,
             renderEmailList,
             highlightSelectedEmail,
             selectEmail,
@@ -110,7 +115,7 @@
                 ? `
                     <div class="danger-zone">
                         <button id="close-task-btn" class="close-task-btn">
-                            Завершить задачу
+                            Закрыть задачу
                         </button>
                     </div>
                 `
@@ -125,6 +130,16 @@
                 </div>
             `;
         }
+
+        const unarchiveTaskBlock = canUnarchiveTask(email)
+                ? `
+                    <div class="danger-zone">
+                        <button id="unarchive-task-btn" class="close-task-btn">
+                            Вернуть во входящие
+                        </button>
+                    </div>
+                `
+                : "";
 
         const emailView = document.getElementById("emailView");
         if (!emailView) return;
@@ -154,6 +169,7 @@
                 ${attachmentBlock}
                 ${decisionBlock}
                 ${closeTaskBlock}
+                ${unarchiveTaskBlock}
 
                 <div class="email-body">
                     ${formattedContent}
@@ -201,6 +217,47 @@
                     console.error(e);
                     alert(e.message || "Ошибка архивирования");
                     closeTaskBtn.disabled = false;
+                }
+            });
+        }
+
+        const unarchiveTaskBtn = document.getElementById("unarchive-task-btn");
+        if (unarchiveTaskBtn) {
+            unarchiveTaskBtn.addEventListener("click", async () => {
+                unarchiveTaskBtn.disabled = true;
+
+                try {
+                    const realEmailId = email.email_id || email.id;
+
+                    const resp = await fetch(`/api/emails/${realEmailId}/unarchive`, {
+                        method: "POST",
+                        credentials: "same-origin",
+                    });
+
+                    const data = await resp.json().catch(() => ({}));
+                    if (!resp.ok) {
+                        throw new Error(data.detail || "Не удалось вернуть письмо во входящие");
+                    }
+
+                    state.emails = state.emails.filter(
+                        (item) => (item.email_id || item.id) !== realEmailId,
+                    );
+                    state.chatStorage.delete(email.id);
+                    state.selectedEmailId = null;
+
+                    renderEmailList();
+
+                    const emailView = document.getElementById("emailView");
+                    if (emailView) {
+                        emailView.innerHTML =
+                            state.emails.length === 0
+                                ? '<div class="email-placeholder">Письма отсутствуют</div>'
+                                : '<div class="email-placeholder">Выберите письмо</div>';
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert(e.message || "Ошибка возврата письма");
+                    unarchiveTaskBtn.disabled = false;
                 }
             });
         }
@@ -296,5 +353,6 @@
         getDisplayDocuments,
         canCloseTask,
         renderEmailCard,
+        canUnarchiveTask,
     };
 })();
