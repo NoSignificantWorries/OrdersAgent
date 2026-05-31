@@ -12,7 +12,9 @@ class UsersRepository(BaseRepository[Users]):
         super().__init__(Users, session)
 
     async def add_user(self, user: Dict[str, Any]) -> Users:
-        return await self.create(**user)
+        result = await self.create(**user)
+        await self.session.commit()
+        return result
 
     async def change_role(self, email: str, role: UserStatus) -> Users:
         query = (

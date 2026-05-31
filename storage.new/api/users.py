@@ -35,12 +35,13 @@ class UsersResponse(BaseModel):
 async def add_user(body: NewUserItem, session: AsyncSession = Depends(get_db_session)):
     repo = UsersRepository(session)
     result = await repo.add_user(body.model_dump())
+    await repo.session.commit()
     return UserResponse(
         ok=True, user=UserItem(id=result.id, email=result.email, status=result.status)
     )
 
 
-@router.get("/change-role", response_model=UserResponse)
+@router.post("/change-role", response_model=UserResponse)
 async def change_user_role(
     email: str = Query(..., description="User's email"),
     role: UserStatus = Query(..., description="New user's role"),
@@ -48,6 +49,7 @@ async def change_user_role(
 ):
     repo = UsersRepository(session)
     result = await repo.change_role(email, role)
+    await repo.session.commit()
     return UserResponse(
         ok=True, user=UserItem(id=result.id, email=result.email, status=result.status)
     )

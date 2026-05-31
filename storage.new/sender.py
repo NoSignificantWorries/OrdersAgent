@@ -31,9 +31,12 @@ class AsyncDBApiConnector:
         return response.json() if response.text else None
 
     async def post(
-        self, endpoint: str, payload: Optional[Dict[str, Any]] = None
+        self,
+        endpoint: str,
+        payload: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         client = await self._get_client()
-        response = await client.post(self._url(endpoint), json=payload)
+        response = await client.post(self._url(endpoint), json=payload, params=params)
         response.raise_for_status()
         return response.json() if response.text else None

@@ -41,6 +41,8 @@ async def bulk_upsert_materials(
     material_dict = [m.model_dump() for m in body.materials]
     result = await repo.bulk_upsert_materials(material_dict)
 
+    await repo.session.commit()
+
     return BulkResponse(
         ok=True,
         count=len(result),
