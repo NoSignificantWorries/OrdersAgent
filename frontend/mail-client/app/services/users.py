@@ -13,7 +13,7 @@ async def get_or_create_user_by_email(
 ) -> dict:
     """
     Возвращает пользователя из таблицы users по email.
-    Если нет — создаёт с role='manager'.
+    Если нет — создаёт, а роль выставляет БД по DEFAULT.
     """
 
     pool = await get_db_pool()
@@ -38,8 +38,8 @@ async def get_or_create_user_by_email(
         fake_password = "oauth_yandex"
         row = await conn.fetchrow(
             """
-            INSERT INTO users (login, email, pass_hash, role)
-            VALUES ($1, $2, crypt($3, gen_salt('bf')), 'manager')
+            INSERT INTO users (login, email, pass_hash)
+            VALUES ($1, $2, crypt($3, gen_salt('bf')))
             RETURNING id, login, email, role
             """,
             login or email,

@@ -79,6 +79,7 @@ async def list_queue_for_user(
     user: dict,
     status: str = "",
     limit: int | None = None,
+    archived: bool | None = None,
 ) -> list[dict]:
     pool = await get_db_pool()
 
@@ -98,6 +99,8 @@ async def list_queue_for_user(
                 e.raw_email,
                 e.email_date,
                 e.model_decision AS email_model_decision,
+                e.archived AS email_archived,
+                e.is_read AS email_is_read,
                 e.created_at AS email_created_at,
 
                 t.id AS task_id,
@@ -180,6 +183,11 @@ async def list_queue_for_user(
                 params.append(statuses)
                 param_idx += 1
 
+        if archived is not None:
+            where_clauses.append(f"e.archived = ${param_idx}")
+            params.append(archived)
+            param_idx += 1
+
         if where_clauses:
             sql += "\nWHERE " + "\n  AND ".join(where_clauses)
 
@@ -193,6 +201,8 @@ async def list_queue_for_user(
                 e.email_subject,
                 e.raw_email,
                 e.email_date,
+                e.archived,
+                e.is_read,
                 e.created_at,
                 t.id,
                 t.status,
@@ -251,6 +261,8 @@ async def list_queue_for_user(
                 "createdat": row["email_created_at"].isoformat()
                 if row["email_created_at"]
                 else None,
+                "archived": bool(row["email_archived"]),
+                "is_read": bool(row["email_is_read"]),
                 "prob1": prob_1,
                 "predictedclass": predicted_class,
                 "modeldecision": model_decision,

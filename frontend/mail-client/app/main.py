@@ -8,59 +8,85 @@ import os
 from app.config import settings
 from app.routers import auth, queue
 
-# Создание экземпляра приложения
 app = FastAPI(
     title=settings.app_name,
     debug=settings.debug
 )
 
-# Подключение статических файлов (CSS, JS)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
-# Настройка шаблонов
 templates = Jinja2Templates(directory="app/templates")
 
-# Подключение маршрутов авторизации
 app.include_router(auth.router)
-
-# Подключение API очереди писем
 app.include_router(queue.router)
+
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    """Главная страница - только для авторизованных"""
-    print(f"\n=== ГЛАВНАЯ СТРАНИЦА ===")
+    """Точка входа - только для авторизованных"""
+    print(f"\n=== ROOT / ===")
     print(f"Cookies: {request.cookies}")
-    
-    # Получаем пользователя из сессии
+
     user = auth.get_current_user(request)
     print(f"Пользователь: {user}")
-    
+
     if user:
-        print("Пользователь авторизован - показываем главную")
-        return templates.TemplateResponse(
-            request,
-            "index.html",
-            {"request": request, "user": user}
-        )
+        print("Пользователь авторизован - редирект на /inbox")
+        return RedirectResponse(url="/inbox", status_code=302)
     else:
         print("Пользователь НЕ авторизован - редирект на /login")
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=302)
+
+
+@app.get("/inbox", response_class=HTMLResponse)
+async def inbox_page(request: Request):
+    """Страница входящих писем"""
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "request": request,
+            "user": user,
+            "current_page": "inbox",
+        }
+    )
+
+
+@app.get("/archived", response_class=HTMLResponse)
+async def archived_page(request: Request):
+    """Страница отработанных писем"""
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "request": request,
+            "user": user,
+            "current_page": "archived",
+        }
+    )
+
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Страница входа"""
-    # Если уже авторизован - отправляем на главную
     user = auth.get_current_user(request)
     if user:
-        print("Уже авторизован - редирект на главную")
-        return RedirectResponse(url="/")
-    
+        print("Уже авторизован - редирект на /inbox")
+        return RedirectResponse(url="/inbox", status_code=302)
+
     return templates.TemplateResponse(
-        request,
-        "login.html",
-        {"request": request}
+        request=request,
+        name="login.html",
+        context={"request": request}
     )
+
 
 @app.get("/debug")
 async def debug_session(request: Request):
@@ -71,30 +97,30 @@ async def debug_session(request: Request):
         "session_count": len(auth.sessions)
     }
 
+
 @app.get("/test-cookie")
 async def test_cookie(request: Request):
     """Тестовый маршрут для проверки установки кук"""
     from fastapi.responses import JSONResponse
-    
-    # Устанавливаем тестовую куку
+
     response = JSONResponse({
         "message": "Тестовая кука установлена",
         "cookies": dict(request.cookies)
     })
-    
+
     response.set_cookie(
-        key="test_cookie", 
-        value="test_value_123", 
+        key="test_cookie",
+        value="test_value_123",
         httponly=True,
         max_age=60,
         samesite="lax",
         secure=False,
         path="/"
     )
-    
+
     return response
 
-# Для запуска напрямую
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

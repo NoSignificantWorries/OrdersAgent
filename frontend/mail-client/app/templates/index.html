@@ -10,8 +10,29 @@
     <div class="app-container">
         <header class="app-header">
             <div class="header-left">
-                <h2>📧 Почта менеджера</h2>
+                <div class="brand-block">
+                    <h2>Почта менеджера</h2>
+                </div>
+
+                <nav class="header-nav" aria-label="Основная навигация">
+                    <a
+                        href="/inbox"
+                        class="nav-btn {% if current_page == 'inbox' %}active{% endif %}"
+                        {% if current_page == 'inbox' %}aria-current="page"{% endif %}
+                    >
+                        Входящие
+                    </a>
+
+                    <a
+                        href="/archived"
+                        class="nav-btn {% if current_page == 'archived' %}active{% endif %}"
+                        {% if current_page == 'archived' %}aria-current="page"{% endif %}
+                    >
+                        Отработанные
+                    </a>
+                </nav>
             </div>
+
             <div class="header-right">
                 <span class="user-email">{{ user.email }}</span>
                 <span class="user-name">{{ user.name }}</span>
@@ -22,9 +43,17 @@
         <div class="main-layout">
             <aside class="email-list">
                 <div class="list-header">
-                    <h3>Входящие</h3>
+                    <h3>
+                        {% if current_page == 'archived' %}
+                            Отработанные
+                        {% else %}
+                            Входящие
+                        {% endif %}
+                    </h3>
                     <div class="header-controls">
-                        <span class="email-count" id="email-count-display">0 писем</span>
+                        {% if current_page == 'inbox' %}
+                            <span class="email-count" id="email-count-display">0 непрочитанных</span>
+                        {% endif %}
                         <button id="filter-toggle-btn" class="filter-toggle" title="Фильтры">
                             <img src="/static/images/filter-icon.png" alt="Фильтры" class="filter-icon">
                         </button>
@@ -79,6 +108,16 @@
                     <div class="search-wrapper">
                         <span class="search-icon">🔍</span>
                         <input type="text" id="search-input" placeholder="Поиск" autocomplete="off">
+                        <button
+                            type="button"
+                            id="search-clear-btn"
+                            class="search-clear-btn"
+                            aria-label="Очистить поиск"
+                            title="Очистить поиск"
+                            hidden
+                        >
+                            ×
+                        </button>
                     </div>
                 </div>
 
@@ -109,6 +148,17 @@
         </div>
     </div>
 
-    <script src="/static/js/script.js"></script>
+    <script src="/static/js/mail-formatters.js"></script>
+    <script src="/static/js/mail-api.js"></script>
+    <script src="/static/js/mail-chat.js"></script>
+    <script src="/static/js/mail-render-list.js"></script>
+    <script src="/static/js/mail-render-card.js"></script>
+    <script src="/static/js/mail-init.js"></script>
+    <script src="/static/js/mail-common.js"></script>
+    {% if current_page == 'archived' %}
+        <script src="/static/js/archived-page.js"></script>
+    {% else %}
+        <script src="/static/js/inbox-page.js"></script>
+    {% endif %}
 </body>
 </html>
