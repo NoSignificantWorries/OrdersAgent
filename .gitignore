@@ -1,12 +1,28 @@
+.venv/
+.qodo/
+.vscode/
+
 secrets/
+<<<<<<< HEAD
 private/
+=======
+attachments/
+
+logs/
+**.log
+
+>>>>>>> main-fixes
 
 !.gitkeep
 
 **.env
 **.**.env
+**.log
+**.crt
+**.key
 .venv
 __pycache__/
+__marimo__/
 
 dataset_emails/
 dataset/
@@ -14,4 +30,11 @@ debug/
 app.log
 
 *.bkp
+<<<<<<< HEAD
 
+=======
+private/
+
+*.exe
+build/
+>>>>>>> main-fixes

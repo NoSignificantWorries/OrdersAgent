@@ -1,55 +1,31 @@
 package orders
 
 import (
-    "fmt"
-    "os"
-    "path/filepath"
-    
-    "OrdersAgent/mail/internal/parser"
-    "OrdersAgent/mail/internal/storage"
+	"log"
+
+	"mail/internal/parser"
+	"mail/internal/storage"
 )
 
 type Processor struct {
-    repo storage.Repository
+	repo   storage.Repository
+	userID int64
 }
 
-func New(repo storage.Repository) *Processor {
-    return &Processor{repo: repo}
+func New(repo storage.Repository, userID int64) *Processor {
+	return &Processor{
+		repo:   repo,
+		userID: userID,
+	}
 }
 
-func (p *Processor) ProcessEmail(email *parser.Email) error {
-    fmt.Printf("   От: %s\n", email.From)
-    fmt.Printf("   Тема: %s\n", email.Subject)
-    fmt.Printf("   Дата: %s\n", email.Date)
-    fmt.Printf("   Тело: %s\n", email.Body)
-    fmt.Printf("    UID: %s\n", email.UID)
-    
-    for _, file := range email.Files {
-        if err := p.repo.SaveFile(file); err != nil {
-            fmt.Printf("%s: %v\n", file.Name, err)
-            continue
-        }
-    }
+func (p Processor) ProcessEmail(email parser.Email) error {
+	log.Printf("email uid=%d from=%q subject=%q attachments=%d",
+		email.UID, email.From, email.Subject, len(email.Files))
 
-    if err := p.repo.SaveOrder(email); err != nil {
-        return err
-    }
-    
-    fmt.Println("---")
-    return nil
-}
+	if err := p.repo.SaveOrder(p.userID, email); err != nil {
+		return err
+	}
 
-func (p *Processor) saveAttachment(file parser.Attachment) error {
-    dir := "attachment"
-    if err := os.MkdirAll(dir, 0755); err != nil {
-        return fmt.Errorf("create dir: %w", err)
-    }
-    
-    fullPath := filepath.Join(dir, file.Name)
-    
-    if err := os.WriteFile(fullPath, file.Data, 0644); err != nil {
-        return fmt.Errorf("write file: %w", err)
-    }
-    
-    return nil
+	return nil
 }
