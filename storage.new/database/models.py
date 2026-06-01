@@ -6,6 +6,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     String,
@@ -23,6 +24,12 @@ class UserStatus(str, PyEnum):
     STANDART = "standart"
     MANAGER = "manager"
     ADMIN = "admin"
+
+
+class ModelDecision(str, PyEnum):
+    REVIEW = "review"
+    CLASSIFIED = "classified"
+    NOT_CLASSIFIED = "not-classified"
 
 
 class EmailType(str, PyEnum):
@@ -43,6 +50,7 @@ class EmailTaskStatus(str, PyEnum):
 
 class FileTaskStatus(str, PyEnum):
     NEW = "new"
+    PROCESSING = "processing"
     ERROR = "error"
     COMPLETED = "completed"
 
@@ -67,12 +75,16 @@ class Users(Base):
 class Emails(Base):
     __tablename__ = "emails"
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    archived = Column(Boolean, default=False, nullable=False)
     type = Column(
         Enum(EmailType, name="email_type_enum"),
         default=EmailType.UNKNOWN,
         nullable=False,
     )
-    archived = Column(Boolean, default=False, nullable=False)
+    subject = Column(Text, default="", nullable=False)
+    body = Column(Text, default="", nullable=False)
+    with_files = Column(Boolean, default=False, nullable=False)
+    date = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -111,6 +123,12 @@ class EmailsQueue(Base):
         ForeignKey("emails.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+    prob = Column(Float, nullable=True)
+    model_decision = Column(
+        Enum(ModelDecision, name="model_decision_enum"),
+        default=ModelDecision.NOT_CLASSIFIED,
+        nullable=False,
     )
     status = Column(
         Enum(EmailTaskStatus, name="email_task_status_enum"),

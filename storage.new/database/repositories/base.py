@@ -15,7 +15,7 @@ class BaseRepository(Generic[ModelType]):
         instance = self.model(**kwargs)
         self.session.add(instance)
         await self.session.flush()
-        await self.session.commit()
+        # await self.session.commit()
         return instance
 
     async def get_by_id(self, id: int) -> Optional[ModelType]:
@@ -49,7 +49,7 @@ class BaseRepository(Generic[ModelType]):
         )
         result = await self.session.execute(query)
         await self.session.flush()
-        return result.scalars().all()
+        return result.scalar_one()
 
     async def delete(self, id: int) -> bool:
         query = delete(self.model).where(self.model.id == id)
@@ -76,3 +76,32 @@ class BaseRepository(Generic[ModelType]):
         result = await self.session.execute(query)
         await self.session.flush()
         return result.rowcount
+
+
+class UnitOfWork:
+    def __init__(self, session):
+        self._session: Optional[AsyncSession] = session
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if exc:
+            await self.rollback()
+        else:
+            await self.commit()
+        await self.close()
+
+    async def commit(self):
+        await self._session.commit()
+
+    async def rollback(self):
+        await self._session.rollback()
+
+    async def close(self):
+        await self._session.close()
+        self._session = None
+
+    @property
+    def session(self) -> AsyncSession:
+        return self._session

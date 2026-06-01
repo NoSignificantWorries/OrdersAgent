@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS mappings (
 -- Письма
 CREATE TABLE IF NOT EXISTS emails (
     id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
     mailbox VARCHAR(100) NOT NULL,
     email_uid BIGINT NOT NULL,
     email_from TEXT,

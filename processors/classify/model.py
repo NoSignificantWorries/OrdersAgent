@@ -89,6 +89,20 @@ class RFModel:
         y_proba = [float(proba[idx]) for proba, idx in zip(y_proba, class_indexes)]
         return y_pred, class_indexes, y_proba
 
+    def predict_proba(
+        self, features: List[Dict[str, Any]]
+    ) -> Tuple[List[str], List[int], List[List[float]]]:
+        if self._model is None or self._features is None or self._label_encoder is None:
+            raise ValueError("Model not loaded, run train() or load() first")
+
+        X = pd.DataFrame(features).fillna(0)[self._features]
+        y_pred_encoded = self._model.predict(X)
+        y_pred = self._label_encoder.inverse_transform(y_pred_encoded)
+
+        y_proba = self._model.predict_proba(X)
+        class_indexes = list(map(int, self._label_encoder.transform(y_pred)))
+        return y_pred, class_indexes, y_proba
+
 
 def decide_by_thresholds(
     classes: List[str], indexes: List[int], proba: List[float], threshold: float = 0.75
