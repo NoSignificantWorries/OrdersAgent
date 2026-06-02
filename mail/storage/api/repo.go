@@ -8,14 +8,18 @@ import (
 )
 
 type EmailRecord struct {
-    ID           int64     `json:"id"`
-    Mailbox      string    `json:"mailbox,omitempty"`
-    EmailUID     int64     `json:"emailuid"`
-    EmailFrom    string    `json:"emailfrom,omitempty"`
-    EmailSubject string    `json:"emailsubject,omitempty"`
-    RawEmail     string    `json:"rawemail,omitempty"`
-    EmailDate    time.Time `json:"emaildate,omitempty"`
-    CreatedAt    time.Time `json:"createdat"`
+    ID               int64     `json:"id"`
+    Mailbox          string    `json:"mailbox,omitempty"`
+    EmailUID         int64     `json:"emailuid"`
+    EmailFrom        string    `json:"emailfrom,omitempty"`
+    ReplyTo          string    `json:"replyto,omitempty"`
+    MessageID        string    `json:"messageid,omitempty"`
+    InReplyTo        string    `json:"inreplyto,omitempty"`
+    ReferencesHeader string    `json:"references_header,omitempty"`
+    EmailSubject     string    `json:"emailsubject,omitempty"`
+    RawEmail         string    `json:"rawemail,omitempty"`
+    EmailDate        time.Time `json:"emaildate,omitempty"`
+    CreatedAt        time.Time `json:"createdat"`
 }
 
 type DocumentRecord struct {
@@ -68,13 +72,21 @@ func (db DB) UpsertEmail(ctx context.Context, rec EmailRecord) (int64, error) {
             mailbox,
             email_uid,
             email_from,
+            reply_to,
+            message_id,
+            in_reply_to,
+            references_header,
             email_subject,
             raw_email,
             email_date
         )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (mailbox, email_uid) DO UPDATE SET
             email_from = EXCLUDED.email_from,
+            reply_to = EXCLUDED.reply_to,
+            message_id = EXCLUDED.message_id,
+            in_reply_to = EXCLUDED.in_reply_to,
+            references_header = EXCLUDED.references_header,
             email_subject = EXCLUDED.email_subject,
             raw_email = EXCLUDED.raw_email,
             email_date = EXCLUDED.email_date
@@ -88,6 +100,10 @@ func (db DB) UpsertEmail(ctx context.Context, rec EmailRecord) (int64, error) {
         rec.Mailbox,
         rec.EmailUID,
         rec.EmailFrom,
+        rec.ReplyTo,
+        rec.MessageID,
+        rec.InReplyTo,
+        rec.ReferencesHeader,
         rec.EmailSubject,
         rec.RawEmail,
         rec.EmailDate,
@@ -105,13 +121,21 @@ func (db DB) UpsertEmailTx(ctx context.Context, tx *sql.Tx, rec EmailRecord) (in
             mailbox,
             email_uid,
             email_from,
+            reply_to,
+            message_id,
+            in_reply_to,
+            references_header,
             email_subject,
             raw_email,
             email_date
         )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (mailbox, email_uid) DO UPDATE SET
             email_from = EXCLUDED.email_from,
+            reply_to = EXCLUDED.reply_to,
+            message_id = EXCLUDED.message_id,
+            in_reply_to = EXCLUDED.in_reply_to,
+            references_header = EXCLUDED.references_header,
             email_subject = EXCLUDED.email_subject,
             raw_email = EXCLUDED.raw_email,
             email_date = EXCLUDED.email_date
@@ -125,6 +149,10 @@ func (db DB) UpsertEmailTx(ctx context.Context, tx *sql.Tx, rec EmailRecord) (in
         rec.Mailbox,
         rec.EmailUID,
         rec.EmailFrom,
+        rec.ReplyTo,
+        rec.MessageID,
+        rec.InReplyTo,
+        rec.ReferencesHeader,
         rec.EmailSubject,
         rec.RawEmail,
         rec.EmailDate,

@@ -8,12 +8,14 @@ import (
 	"mime"
 	"strconv"
 	"strings"
+	"bufio"
+    "net/mail"
 
 	htmllib "golang.org/x/net/html"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
-	"github.com/emersion/go-message/mail"
+	msgmail "github.com/emersion/go-message/mail"
 	"golang.org/x/text/encoding/charmap"
 )
 
@@ -24,11 +26,60 @@ type Email struct {
 	Date    string
 	Body    string
 	Files   []Attachment
+	MessageID        string
+	InReplyTo        string
+	ReferencesHeader string
+	ReplyTo          string
 }
 
 type Attachment struct {
 	Name string
 	Data []byte
+}
+
+func joinAddresses(addrs []imap.Address) string {
+    parts := make([]string, 0, len(addrs))
+    for _, addr := range addrs {
+        if addr.Mailbox == "" || addr.Host == "" {
+            continue
+        }
+
+        email := fmt.Sprintf("%s@%s", addr.Mailbox, addr.Host)
+        name := strings.TrimSpace(decodeHeader(addr.Name))
+
+        if name != "" {
+            parts = append(parts, fmt.Sprintf("%s <%s>", name, email))
+        } else {
+            parts = append(parts, email)
+        }
+    }
+    return strings.Join(parts, ", ")
+}
+
+func firstAddress(addrs []imap.Address) string {
+    for _, addr := range addrs {
+        if addr.Mailbox == "" || addr.Host == "" {
+            continue
+        }
+        return fmt.Sprintf("%s@%s", addr.Mailbox, addr.Host)
+    }
+    return ""
+}
+
+func parseHeaderFields(r io.Reader) (messageID, inReplyTo, references, replyTo string, err error) {
+    mr, err := mail.ReadMessage(bufio.NewReader(r))
+    if err != nil {
+        return "", "", "", "", err
+    }
+
+    h := mr.Header
+
+    messageID = strings.TrimSpace(h.Get("Message-ID"))
+    inReplyTo = strings.TrimSpace(h.Get("In-Reply-To"))
+    references = strings.TrimSpace(h.Get("References"))
+    replyTo = strings.TrimSpace(h.Get("Reply-To"))
+
+    return messageID, inReplyTo, references, replyTo, nil
 }
 
 func decodeHeader(s string) string {
@@ -156,58 +207,74 @@ func decodeQuotedPrintable(s string) []byte {
 }
 
 func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, error) {
-	msg := fetchCmd.Next()
-	if msg == nil {
-		return nil, fmt.Errorf("no message")
-	}
+    msg := fetchCmd.Next()
+    if msg == nil {
+        return nil, fmt.Errorf("no message")
+    }
 
-	email := &Email{
-		UID: uid,
-	}
+    email := &Email{
+        UID: uid,
+    }
 
-	var bodyError error
+    var bodyError error
 
-	for {
-		item := msg.Next()
-		if item == nil {
-			break
-		}
+    for {
+        item := msg.Next()
+        if item == nil {
+            break
+        }
 
-		// 1. Заголовки
-		if env, ok := item.(imapclient.FetchItemDataEnvelope); ok {
-			decSubject := decodeHeader(env.Envelope.Subject)
+        if env, ok := item.(imapclient.FetchItemDataEnvelope); ok {
+            email.Subject = decodeHeader(env.Envelope.Subject)
+            email.From = joinAddresses(env.Envelope.From)
 
-			email.Subject = decSubject
-			email.From = ""
+            if !env.Envelope.Date.IsZero() {
+                email.Date = env.Envelope.Date.Format("2006-01-02 15:04")
+            }
 
-			for _, addr := range env.Envelope.From {
-				decodedName := decodeHeader(addr.Name)
-
-				if len(decodedName) > 0 {
-					email.From += decodedName + " "
-				}
-				if len(addr.Mailbox) > 0 && len(addr.Host) > 0 {
-					email.From += fmt.Sprintf("<%s@%s> ", addr.Mailbox, addr.Host)
-				}
+            email.MessageID = strings.TrimSpace(env.Envelope.MessageID)
+            if len(env.Envelope.InReplyTo) > 0 {
+				email.InReplyTo = strings.TrimSpace(env.Envelope.InReplyTo[0])
 			}
+            email.ReplyTo = firstAddress(env.Envelope.ReplyTo)
 
-			if !env.Envelope.Date.IsZero() {
-				email.Date = env.Envelope.Date.Format("2006-01-02 15:04")
-			}
+            continue
+        }
 
-			continue
-		}
+        if bodyData, ok := item.(imapclient.FetchItemDataBodySection); ok && bodyData.Literal != nil {
+            section := bodyData.Section
 
-		// 2. Тело письма
-		if bodyData, ok := item.(imapclient.FetchItemDataBodySection); ok && bodyData.Literal != nil {
-			if err := parseBody(email, bodyData.Literal); err != nil {
-				bodyError = err
-			}
-			continue
-		}
-	}
+            if section != nil && section.Specifier == imap.PartSpecifierHeader {
+                msgID, inReplyTo, refs, replyTo, err := parseHeaderFields(bodyData.Literal)
+                if err != nil {
+                    log.Printf("parseHeaderFields: UID=%d err=%v", email.UID, err)
+                    continue
+                }
 
-	return email, bodyError
+                if email.MessageID == "" {
+                    email.MessageID = msgID
+                }
+                if email.InReplyTo == "" {
+                    email.InReplyTo = inReplyTo
+                }
+                if email.ReferencesHeader == "" {
+                    email.ReferencesHeader = refs
+                }
+                if email.ReplyTo == "" {
+                    email.ReplyTo = replyTo
+                }
+
+                continue
+            }
+
+            if err := parseBody(email, bodyData.Literal); err != nil {
+                bodyError = err
+            }
+            continue
+        }
+    }
+
+    return email, bodyError
 }
 
 func cleanBodyText(body string) string {
@@ -266,7 +333,7 @@ func cleanBodyText(body string) string {
 }
 
 func parseBody(email *Email, literal io.Reader) error {
-	mr, err := mail.CreateReader(literal)
+	mr, err := msgmail.CreateReader(literal)
 	if err != nil {
 		return fmt.Errorf("parsing body: %w", err)
 	}

@@ -122,6 +122,26 @@ func (r *DBRepo) SaveOrder(userID int64, order any) (err error) {
 		emailFromValue = email.From
 	}
 
+	    replyToValue := ""
+    if email.ReplyTo != "" {
+        replyToValue = email.ReplyTo
+    }
+
+    messageIDValue := ""
+    if email.MessageID != "" {
+        messageIDValue = email.MessageID
+    }
+
+    inReplyToValue := ""
+    if email.InReplyTo != "" {
+        inReplyToValue = email.InReplyTo
+    }
+
+    referencesHeaderValue := ""
+    if email.ReferencesHeader != "" {
+        referencesHeaderValue = email.ReferencesHeader
+    }
+
 	emailSubjectValue := ""
 	if email.Subject != "" {
 		emailSubjectValue = email.Subject
@@ -151,13 +171,17 @@ func (r *DBRepo) SaveOrder(userID int64, order any) (err error) {
 
 	// emails: upsert по (mailbox, email_uid)
 	emailID, err := r.db.UpsertEmailTx(ctx, tx, api.EmailRecord{
-		Mailbox:      userEmail,
-		EmailUID:     emailUID,
-		EmailFrom:    emailFromValue,
-		EmailSubject: emailSubjectValue,
-		RawEmail:     rawEmailValue,
-		EmailDate:    emailDateValue,
-	})
+        Mailbox:          userEmail,
+        EmailUID:         emailUID,
+        EmailFrom:        emailFromValue,
+        ReplyTo:          replyToValue,
+        MessageID:        messageIDValue,
+        InReplyTo:        inReplyToValue,
+        ReferencesHeader: referencesHeaderValue,
+        EmailSubject:     emailSubjectValue,
+        RawEmail:         rawEmailValue,
+        EmailDate:        emailDateValue,
+    })
 	if err != nil {
 		return fmt.Errorf("upsert email (user_id=%d, uid=%d): %w", userID, emailUID, err)
 	}
