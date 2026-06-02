@@ -1,50 +1,14 @@
-import logging
-import os
-from contextlib import asynccontextmanager, contextmanager
-from dataclasses import dataclass
-from typing import AsyncGenerator, ClassVar, Generator, Optional
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, ClassVar, Optional
 
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import Session, declarative_base, sessionmaker
-
-formatter = logging.Formatter(
-    fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-)
-logger = logging.getLogger("materials_app")
-logger.setLevel(logging.DEBUG)
-
-
-@dataclass
-class DatabaseConfig:
-    host: str = "localhost"
-    port: int = 5432
-    database: str = "mails_data"
-    user: str = "dmitry"
-    password: str = "pass"
-
-    @classmethod
-    def from_env(cls) -> "DatabaseConfig":
-        return cls(
-            host=os.getenv("POSTGRES_HOST", "localhost"),
-            database=os.getenv("POSTGRES_DB", "mails_data"),
-            user=os.getenv("POSTGRES_USER", "dmitry"),
-            password=os.getenv("POSTGRES_PASSWORD", "pass"),
-        )
-
-    @property
-    def dsn(self) -> str:
-        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
-
-    @property
-    def async_dsn(self) -> str:
-        return self.dsn.replace("postgresql", "postgresql+asyncpg")
-
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
@@ -163,17 +127,3 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 def get_db_session() -> AsyncSession:
     return DatabaseManager.get_session()
-
-
-async def init_database(
-    pool_size: int = 5,
-    echo: bool = False,
-    create_tables: bool = True,
-    checkfirst: bool = True,
-):
-    config = DatabaseConfig.from_env()
-    print(config)
-    DatabaseManager.init(config.async_dsn, pool_size=pool_size, echo=echo)
-    if create_tables:
-        await DatabaseManager.create_tables(checkfirst=checkfirst)
-        logger.info("Database tables created/verified")
