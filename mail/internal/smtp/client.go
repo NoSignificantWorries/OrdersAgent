@@ -3,6 +3,7 @@ package smtp
 import (
     "crypto/tls"
     "fmt"
+	"mime"
     "net"
     "net/smtp"
     "strings"
@@ -25,27 +26,114 @@ func NewClient(cfg Config) *Client {
     return &Client{cfg: cfg}
 }
 
+func firstNonEmpty(values ...string) string {
+    for _, v := range values {
+        if strings.TrimSpace(v) != "" {
+            return v
+        }
+    }
+    return ""
+}
+
+func encodeHeaderIfNeeded(v string) string {
+    v = strings.TrimSpace(v)
+    if v == "" {
+        return ""
+    }
+    if isASCII(v) {
+        return v
+    }
+    return mime.QEncoding.Encode("utf-8", v)
+}
+
+func isASCII(s string) bool {
+    for i := 0; i < len(s); i++ {
+        if s[i] > 127 {
+            return false
+        }
+    }
+    return true
+}
+
 // SendPlainText — отправка простого text/plain письма с готовыми заголовками.
 func (c *Client) SendPlainText(from string, to []string, headers map[string]string, body string, auth smtp.Auth) error {
     if len(to) == 0 {
         return fmt.Errorf("smtp: no recipients")
     }
 
-    // Собираем заголовки.
-    var sb strings.Builder
-    for k, v := range headers {
-        if v == "" {
-            continue
-        }
-        sb.WriteString(k)
-        sb.WriteString(": ")
-        sb.WriteString(v)
-        sb.WriteString("\r\n")
-    }
-    sb.WriteString("\r\n")
-    sb.WriteString(body)
+    // Собираем заголовки в фиксированном порядке.
+	var sb strings.Builder
 
-    msg := []byte(sb.String())
+	// Базовые заголовки
+	fromHeader := firstNonEmpty(headers["From"], from)
+	if strings.TrimSpace(fromHeader) != "" {
+		sb.WriteString("From: ")
+		sb.WriteString(fromHeader)
+		sb.WriteString("\r\n")
+	}
+
+	toHeader := firstNonEmpty(headers["To"], strings.Join(to, ", "))
+	if strings.TrimSpace(toHeader) != "" {
+		sb.WriteString("To: ")
+		sb.WriteString(toHeader)
+		sb.WriteString("\r\n")
+	}
+
+	subjectHeader := encodeHeaderIfNeeded(headers["Subject"])
+	if subjectHeader != "" {
+		sb.WriteString("Subject: ")
+		sb.WriteString(subjectHeader)
+		sb.WriteString("\r\n")
+	}
+
+	dateHeader := firstNonEmpty(headers["Date"], time.Now().UTC().Format(time.RFC1123Z))
+	sb.WriteString("Date: ")
+	sb.WriteString(dateHeader)
+	sb.WriteString("\r\n")
+
+	mimeVer := firstNonEmpty(headers["MIME-Version"], "1.0")
+	sb.WriteString("MIME-Version: ")
+	sb.WriteString(mimeVer)
+	sb.WriteString("\r\n")
+
+	contentType := firstNonEmpty(headers["Content-Type"], "text/plain; charset=UTF-8")
+	sb.WriteString("Content-Type: ")
+	sb.WriteString(contentType)
+	sb.WriteString("\r\n")
+
+	// Остальные заголовки (включая In-Reply-To и References), кроме уже записанных базовых
+	for k, v := range headers {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		lower := strings.ToLower(k)
+		if lower == "from" ||
+			lower == "to" ||
+			lower == "subject" ||
+			lower == "date" ||
+			lower == "mime-version" ||
+			lower == "content-type" {
+			continue
+		}
+
+		sb.WriteString(k)
+		sb.WriteString(": ")
+		sb.WriteString(v)
+		sb.WriteString("\r\n")
+	}
+
+	normalizedBody := strings.ReplaceAll(body, "\r\n", "\n")
+	normalizedBody = strings.ReplaceAll(normalizedBody, "\r", "\n")
+	normalizedBody = strings.ReplaceAll(normalizedBody, "\n", "\r\n")
+
+	// Пустая строка между заголовками и телом
+	sb.WriteString("\r\n")
+	sb.WriteString(normalizedBody)
+
+	fmt.Printf("RAW SMTP MESSAGE:\n%s\n----END HEADERS PREVIEW----\n", sb.String())
+
+	msg := []byte(sb.String())
 
     addr := fmt.Sprintf("%s:%d", c.cfg.Host, c.cfg.Port)
 

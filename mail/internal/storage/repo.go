@@ -81,6 +81,17 @@ func extractReplyAddress(replyTo string, emailFrom string) (string, error) {
     return "", fmt.Errorf("both Reply-To and EmailFrom are empty")
 }
 
+func normalizeMessageID(v string) string {
+    v = strings.TrimSpace(v)
+    if v == "" {
+        return ""
+    }
+    if strings.HasPrefix(v, "<") && strings.HasSuffix(v, ">") {
+        return v
+    }
+    return "<" + v + ">"
+}
+
 // NewDBRepo — создаёт репозиторий с Postgres и MinIO.
 func NewDBRepo(db *api.DB, store *minio.CloudStorage) Repository {
 	return &DBRepo{
@@ -414,20 +425,33 @@ func ReplyToEmail(db *api.DB, smtpClient *mailsmtp.Client, req ReplyToEmailReque
         "Content-Type": "text/plain; charset=UTF-8",
     }
 
-    if ctx.MessageID != "" {
-        headers["In-Reply-To"] = ctx.MessageID
-    }
+    parentMessageID := normalizeMessageID(ctx.MessageID)
+	parentRefs := strings.TrimSpace(ctx.ReferencesHeader)
 
-    if ctx.ReferencesHeader != "" && ctx.MessageID != "" {
-        headers["References"] = ctx.ReferencesHeader + " " + ctx.MessageID
-    } else if ctx.MessageID != "" {
-        headers["References"] = ctx.MessageID
-    }
+	if parentMessageID != "" {
+		headers["In-Reply-To"] = parentMessageID
+	}
+
+	if parentRefs != "" && parentMessageID != "" {
+		headers["References"] = parentRefs + " " + parentMessageID
+	} else if parentMessageID != "" {
+		headers["References"] = parentMessageID
+	}
 
     // 6. SMTP auth — пока логика под пароль приложения.
     // Для Яндекс-почты: host smtp.yandex.ru, port 465/587. [web:26][web:20]
     //host := "smtp.yandex.ru"
     auth := mailsmtp.AuthXOAuth2(authData.Email, authData.AccessToken)
+
+	fmt.Printf(
+		"reply debug | email_id=%d to=%s subject=%q in_reply_to=%q references=%q message_id_parent=%q\n",
+		req.EmailID,
+		to,
+		subject,
+		headers["In-Reply-To"],
+		headers["References"],
+		ctx.MessageID,
+	)
 
     // 7. Отправляем письмо.
     if err := smtpClient.SendPlainText(

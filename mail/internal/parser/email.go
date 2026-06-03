@@ -257,12 +257,15 @@ func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, erro
                 if email.InReplyTo == "" {
                     email.InReplyTo = inReplyTo
                 }
+				log.Printf("InReplyTo: %s", email.InReplyTo)
                 if email.ReferencesHeader == "" {
                     email.ReferencesHeader = refs
                 }
+				log.Printf("ReferencesHeader: %s", email.ReferencesHeader)
                 if email.ReplyTo == "" {
                     email.ReplyTo = replyTo
                 }
+				log.Printf("ReplyTo: %s", email.ReplyTo)
 
                 continue
             }
