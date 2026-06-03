@@ -12,6 +12,8 @@ from rapidfuzz import fuzz
 
 from materials import ParseResults
 
+from .config import HEADERS_CALLCULATION, MERGES_CALLCULATION
+
 
 class CellType(Flag):
     TEXT = auto()
@@ -602,8 +604,8 @@ def make_request_xlsx(
             y = y.replace(",", ".")
             amount = amount.replace(",", ".")
             cell = ws.cell(row=current_row, column=1, value=material)
-            cell = ws.cell(row=current_row, column=11, value=float(x))
-            cell = ws.cell(row=current_row, column=12, value=float(y))
+            cell = ws.cell(row=current_row, column=11, value=int(float(x)))
+            cell = ws.cell(row=current_row, column=12, value=int(float(y)))
             cell = ws.cell(row=current_row, column=13, value=int(float(amount)))
             cell = ws.cell(row=current_row, column=14, value=marking)
             cell = ws.cell(row=current_row, column=16, value=barcode)
@@ -628,44 +630,20 @@ def make_callculation_xlsx(
     wb.remove(default_sheet)
 
     all_empty = True
+    current_row = 3
+    ws = wb.create_sheet(title="Sheet1")
     for i, sheet_data in enumerate(origin_table):
-        ws = wb.create_sheet(title=f"Sheet {i}")
+        for (row_idx, col_idx), header_content in HEADERS_CALLCULATION.items():
+            cell = ws.cell(row=row_idx + 1, column=col_idx + 1, value=header_content)
 
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
-        ws.merge_cells(start_row=1, start_column=11, end_row=1, end_column=13)
-        ws.merge_cells(start_row=1, start_column=14, end_row=1, end_column=18)
-        for col_idx, header_content in [
-            (10, "Характеристики"),
-            (13, "Доп. информация"),
-        ]:
-            cell = ws.cell(row=1, column=col_idx + 1, value=header_content)
-
-        for col_idx, header_content in enumerate(
-            [
-                "Номенклатура 1С",
-                "П1",
-                "Р1",
-                "П2",
-                "Р2",
-                "П3",
-                "Р3",
-                "П4",
-                "Герметик",
-                "Тип изделия",
-                "X",
-                "Y",
-                "Кол-во",
-                "Маркировка",
-                "ПЗ",
-                "ШК",
-                "Номер фигуры",
-                "Уточнения",
-            ]
-        ):
-            cell = ws.cell(row=2, column=col_idx + 1, value=header_content)
-
-        ws.row_dimensions[1].height = 15
-        ws.row_dimensions[2].height = 25
+        for m_range in MERGES_CALLCULATION:
+            minc, minr, maxc, maxr = m_range
+            ws.merge_cells(
+                start_row=minr,
+                start_column=minc,
+                end_row=maxr,
+                end_column=maxc,
+            )
 
         if sheet_data.empty or sheet_data.material is None or sheet_data.amount is None:
             print("Empty sheet")
@@ -688,7 +666,6 @@ def make_callculation_xlsx(
 
         all_empty = False
 
-        current_row = 3
         for obj_i in range(sheet_data.size):
             material, x, y, amount = (
                 sheet_data.material[obj_i],
@@ -698,19 +675,18 @@ def make_callculation_xlsx(
             )
             for i, (_, article, _) in enumerate(
                 elements[material].matches,
-                start=2,
+                start=3,
             ):
                 cell = ws.cell(row=current_row, column=i, value=article)
 
-            cell = ws.cell(row=current_row, column=1, value=material)
-            cell = ws.cell(row=current_row, column=11, value=x)
-            cell = ws.cell(row=current_row, column=12, value=y)
-            cell = ws.cell(row=current_row, column=13, value=int(amount))
-            cell = ws.cell(
-                row=current_row,
-                column=18,
-                value=elements[material].postfix,
-            )
+            x = x.replace(",", ".")
+            y = y.replace(",", ".")
+            amount = amount.replace(",", ".")
+            cell = ws.cell(row=current_row, column=1, value=str(obj_i + 1))
+            cell = ws.cell(row=current_row, column=2, value=int(float(amount)))
+            cell = ws.cell(row=current_row, column=10, value=int(float(x)))
+            cell = ws.cell(row=current_row, column=11, value=int(float(y)))
+            cell = ws.cell(row=current_row, column=17, value="YES")
             current_row += 1
 
     if all_empty:
