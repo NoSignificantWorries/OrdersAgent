@@ -15,7 +15,6 @@ from materials import ParseResults
 
 class CellType(Flag):
     TEXT = auto()
-    BARCODE = auto()
     NUMBER = auto()
     SIZE_H = auto()
     LENGTH_H = auto()
@@ -23,6 +22,8 @@ class CellType(Flag):
     HEIGHT_H = auto()
     AMOUNT_H = auto()
     MAT_H = auto()
+    BARCODE_H = auto()
+    MARKING_H = auto()
 
 
 HEADER = (
@@ -32,6 +33,8 @@ HEADER = (
     | CellType.LENGTH_H
     | CellType.HEIGHT_H
     | CellType.SIZE_H
+    | CellType.BARCODE_H
+    | CellType.MARKING_H
 )
 
 
@@ -43,7 +46,6 @@ class CellTypes:
 
 TYPES_CONFIG = CellTypes(
     regex={
-        CellType.BARCODE: ["[A-Z]{0,2}[0-9]{8,20}[A-Z]?"],
         CellType.NUMBER: ["^[+-]?\\d+(?:[.,]\\d+)?$"],
     },
     fuzzy={
@@ -69,6 +71,8 @@ TYPES_CONFIG = CellTypes(
             "формулазаполнения",
             "формуласп",
         ],
+        CellType.BARCODE_H: ["штрихкод", "шк"],
+        CellType.MARKING_H: ["маркировка"],
     },
 )
 
@@ -144,6 +148,7 @@ class Cell:
 
     def _clear_value(self) -> None:
         self._value = self._value.strip()
+        self._value = self._value.replace("\xa0", "")
 
     def classify(self, config: CellTypes) -> CellType:
         value = re.sub(r"\s*", "", self._value)
@@ -296,12 +301,25 @@ header1_3 = [
     CellType.AMOUNT_H,
 ]
 header_variants = [header1_1, header1_2, header1_3]
+optional_headers = [CellType.BARCODE_H, CellType.MARKING_H]
+new_header_variants = []
+for head in header_variants:
+    h1 = head + optional_headers
+    h2 = head + [optional_headers[0]]
+    h3 = head + [optional_headers[1]]
+    h4 = head + optional_headers[::-1]
+    new_header_variants += [head, h1, h2, h3, h4]
+print(new_header_variants)
+header_variants = sorted(new_header_variants, key=len, reverse=True)
+
 columnrules1 = {
     CellType.MAT_H: CellType.TEXT,
     CellType.WIDTH_H: CellType.NUMBER,
     CellType.HEIGHT_H: CellType.NUMBER,
     CellType.LENGTH_H: CellType.NUMBER,
     CellType.AMOUNT_H: CellType.NUMBER,
+    CellType.BARCODE_H: CellType.TEXT | CellType.NUMBER,
+    CellType.MARKING_H: CellType.TEXT | CellType.NUMBER,
 }
 
 
@@ -312,6 +330,8 @@ class TableParseResults:
     length: Optional[List[str]] = None
     height: Optional[List[str]] = None
     amount: Optional[List[str]] = None
+    barcode: Optional[List[str]] = None
+    marking: Optional[List[str]] = None
     size: int = 0
 
     @property
@@ -450,7 +470,7 @@ class TableWorker:
                     if match is None:
                         correct_row = False
                         break
-                    if columnrules1[header] != match.type:
+                    if match.type not in columnrules1[header]:
                         correct_row = False
                         break
 
@@ -473,6 +493,10 @@ class TableWorker:
                         res.height = values
                     case CellType.AMOUNT_H:
                         res.amount = values
+                    case CellType.BARCODE_H:
+                        res.barcode = values
+                    case CellType.MARKING_H:
+                        res.marking = values
             if res.material is None:
                 return TableParseResults()
             res.size = len(res.material)
@@ -485,7 +509,9 @@ class TableWorker:
         return results
 
 
-def make_xlsx(origin_table: List[TableParseResults], elements: Dict[str, ParseResults]):
+def make_request_xlsx(
+    origin_table: List[TableParseResults], elements: Dict[str, ParseResults]
+):
     wb = openpyxl.Workbook()
 
     default_sheet = wb.active
@@ -560,16 +586,27 @@ def make_xlsx(origin_table: List[TableParseResults], elements: Dict[str, ParseRe
                 Y[obj_i],
                 sheet_data.amount[obj_i],
             )
-            for i, part in enumerate(
+            barcode = ""
+            if sheet_data.barcode is not None:
+                barcode = sheet_data.barcode[obj_i]
+            marking = ""
+            if sheet_data.marking is not None:
+                marking = sheet_data.marking[obj_i]
+            for i, (target, _, _) in enumerate(
                 elements[material].matches,
                 start=2,
             ):
-                cell = ws.cell(row=current_row, column=i, value=part)
+                cell = ws.cell(row=current_row, column=i, value=target)
 
+            x = x.replace(",", ".")
+            y = y.replace(",", ".")
+            amount = amount.replace(",", ".")
             cell = ws.cell(row=current_row, column=1, value=material)
-            cell = ws.cell(row=current_row, column=11, value=x)
-            cell = ws.cell(row=current_row, column=12, value=y)
-            cell = ws.cell(row=current_row, column=13, value=amount)
+            cell = ws.cell(row=current_row, column=11, value=float(x))
+            cell = ws.cell(row=current_row, column=12, value=float(y))
+            cell = ws.cell(row=current_row, column=13, value=int(float(amount)))
+            cell = ws.cell(row=current_row, column=14, value=marking)
+            cell = ws.cell(row=current_row, column=16, value=barcode)
             cell = ws.cell(
                 row=current_row,
                 column=18,
@@ -582,32 +619,100 @@ def make_xlsx(origin_table: List[TableParseResults], elements: Dict[str, ParseRe
     return wb
 
 
-def development():
-    # testfile = Path("../../private/tables/1108A.xls")
-    inputs = Path("../../private/tables")
+def make_callculation_xlsx(
+    origin_table: List[TableParseResults], elements: Dict[str, ParseResults]
+):
+    wb = openpyxl.Workbook()
 
-    parsed_cnt = 0
-    all_cnt = 0
-    for file in inputs.iterdir():
-        print("\n\n", file)
-        all_cnt += 1
+    default_sheet = wb.active
+    wb.remove(default_sheet)
 
-        worker = TableWorker(None, file)
-        worker.open_and_clean()
-        if worker.tables is None or not bool(worker.tables):
-            print("Errors with table")
+    all_empty = True
+    for i, sheet_data in enumerate(origin_table):
+        ws = wb.create_sheet(title=f"Sheet {i}")
+
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
+        ws.merge_cells(start_row=1, start_column=11, end_row=1, end_column=13)
+        ws.merge_cells(start_row=1, start_column=14, end_row=1, end_column=18)
+        for col_idx, header_content in [
+            (10, "Характеристики"),
+            (13, "Доп. информация"),
+        ]:
+            cell = ws.cell(row=1, column=col_idx + 1, value=header_content)
+
+        for col_idx, header_content in enumerate(
+            [
+                "Номенклатура 1С",
+                "П1",
+                "Р1",
+                "П2",
+                "Р2",
+                "П3",
+                "Р3",
+                "П4",
+                "Герметик",
+                "Тип изделия",
+                "X",
+                "Y",
+                "Кол-во",
+                "Маркировка",
+                "ПЗ",
+                "ШК",
+                "Номер фигуры",
+                "Уточнения",
+            ]
+        ):
+            cell = ws.cell(row=2, column=col_idx + 1, value=header_content)
+
+        ws.row_dimensions[1].height = 15
+        ws.row_dimensions[2].height = 25
+
+        if sheet_data.empty or sheet_data.material is None or sheet_data.amount is None:
+            print("Empty sheet")
             continue
 
-        res = worker.simple_parser()
-        if all(map(lambda x: x.size > 0, res)):
-            print(res)
-            parsed_cnt += 1
+        X, Y = None, None
+        if sheet_data.width is None:
+            X = sheet_data.length
+            Y = sheet_data.height
+        elif sheet_data.length is None:
+            X = sheet_data.width
+            Y = sheet_data.height
+        elif sheet_data.height is None:
+            X = sheet_data.width
+            Y = sheet_data.length
 
-    if all_cnt == 0:
-        print("No files in the dir")
-    else:
-        print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
+        if X is None or Y is None:
+            print("No enough sides on sheet")
+            continue
 
+        all_empty = False
 
-if __name__ == "__main__":
-    development()
+        current_row = 3
+        for obj_i in range(sheet_data.size):
+            material, x, y, amount = (
+                sheet_data.material[obj_i],
+                X[obj_i],
+                Y[obj_i],
+                sheet_data.amount[obj_i],
+            )
+            for i, (_, article, _) in enumerate(
+                elements[material].matches,
+                start=2,
+            ):
+                cell = ws.cell(row=current_row, column=i, value=article)
+
+            cell = ws.cell(row=current_row, column=1, value=material)
+            cell = ws.cell(row=current_row, column=11, value=x)
+            cell = ws.cell(row=current_row, column=12, value=y)
+            cell = ws.cell(row=current_row, column=13, value=int(amount))
+            cell = ws.cell(
+                row=current_row,
+                column=18,
+                value=elements[material].postfix,
+            )
+            current_row += 1
+
+    if all_empty:
+        return None
+    return wb

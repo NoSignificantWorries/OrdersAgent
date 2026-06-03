@@ -209,7 +209,7 @@ class ParseResults:
     postfix: Optional[str] = None
     levels: Optional[BlockLevels] = None
     parts: List[str] = field(default_factory=list)
-    matches: List[Tuple[str, bool]] = field(default_factory=list)
+    matches: List[Tuple[str, str, bool]] = field(default_factory=list)
     parts_count: int = 0
 
 
