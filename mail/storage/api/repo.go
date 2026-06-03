@@ -9,6 +9,7 @@ import (
 
 type EmailRecord struct {
     ID               int64     `json:"id"`
+    UserID           int64     `json:"user_id"`
     Mailbox          string    `json:"mailbox,omitempty"`
     EmailUID         int64     `json:"emailuid"`
     EmailFrom        string    `json:"emailfrom,omitempty"`
@@ -66,9 +67,26 @@ type QueueEmailItem struct {
     CompletedAt   *time.Time `json:"completed_at,omitempty"`
 }
 
+type EmailForReply struct {
+    ID               int64
+    UserID           sql.NullInt64
+    Mailbox          string
+    EmailUID         int64
+    EmailFrom        string
+    ReplyTo          string
+    MessageID        string
+    InReplyTo        string
+    ReferencesHeader string
+    EmailSubject     string
+    RawEmail         string
+    EmailDate        sql.NullTime
+}
+
+
 func (db DB) UpsertEmail(ctx context.Context, rec EmailRecord) (int64, error) {
     const q = `
         INSERT INTO emails (
+            user_id,
             mailbox,
             email_uid,
             email_from,
@@ -80,8 +98,9 @@ func (db DB) UpsertEmail(ctx context.Context, rec EmailRecord) (int64, error) {
             raw_email,
             email_date
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         ON CONFLICT (mailbox, email_uid) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
             email_from = EXCLUDED.email_from,
             reply_to = EXCLUDED.reply_to,
             message_id = EXCLUDED.message_id,
@@ -97,6 +116,7 @@ func (db DB) UpsertEmail(ctx context.Context, rec EmailRecord) (int64, error) {
     err := db.Conn.QueryRowContext(
         ctx,
         q,
+        rec.UserID,
         rec.Mailbox,
         rec.EmailUID,
         rec.EmailFrom,
@@ -118,6 +138,7 @@ func (db DB) UpsertEmail(ctx context.Context, rec EmailRecord) (int64, error) {
 func (db DB) UpsertEmailTx(ctx context.Context, tx *sql.Tx, rec EmailRecord) (int64, error) {
     const q = `
         INSERT INTO emails (
+            user_id,
             mailbox,
             email_uid,
             email_from,
@@ -129,8 +150,9 @@ func (db DB) UpsertEmailTx(ctx context.Context, tx *sql.Tx, rec EmailRecord) (in
             raw_email,
             email_date
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         ON CONFLICT (mailbox, email_uid) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
             email_from = EXCLUDED.email_from,
             reply_to = EXCLUDED.reply_to,
             message_id = EXCLUDED.message_id,
@@ -146,6 +168,7 @@ func (db DB) UpsertEmailTx(ctx context.Context, tx *sql.Tx, rec EmailRecord) (in
     err := tx.QueryRowContext(
         ctx,
         q,
+        rec.UserID,
         rec.Mailbox,
         rec.EmailUID,
         rec.EmailFrom,
@@ -661,6 +684,48 @@ func (db DB) GetQueueEmailByTaskID(ctx context.Context, taskID int64) (*QueueEma
     it.DocumentNames = docNames
     return &it, nil
 }
+
+func (db DB) GetEmailForReply(ctx context.Context, id int64) (*EmailForReply, error) {
+    const q = `
+        SELECT
+            id,
+            user_id,
+            mailbox,
+            email_uid,
+            COALESCE(email_from, ''),
+            COALESCE(reply_to, ''),
+            COALESCE(message_id, ''),
+            COALESCE(in_reply_to, ''),
+            COALESCE(references_header, ''),
+            COALESCE(email_subject, ''),
+            COALESCE(raw_email, ''),
+            email_date
+        FROM emails
+        WHERE id = $1
+    `
+
+    var rec EmailForReply
+    err := db.Conn.QueryRowContext(ctx, q, id).Scan(
+        &rec.ID,
+        &rec.UserID,
+        &rec.Mailbox,
+        &rec.EmailUID,
+        &rec.EmailFrom,
+        &rec.ReplyTo,
+        &rec.MessageID,
+        &rec.InReplyTo,
+        &rec.ReferencesHeader,
+        &rec.EmailSubject,
+        &rec.RawEmail,
+        &rec.EmailDate,
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    return &rec, nil
+}
+
 
 func (db DB) UpdateTaskStatus(ctx context.Context, taskID int64, status string, errorMessage *string) error {
     const q = `
