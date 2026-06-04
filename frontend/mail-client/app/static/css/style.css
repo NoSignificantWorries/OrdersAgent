@@ -799,11 +799,10 @@ body {
 /* === СТИЛИ ДЛЯ ФОРМЫ ОТВЕТА === */
 
 .reply-block {
-    margin: 16px 0 20px;
-    padding: 16px;
-    border: 1px solid #d9e2ec;
-    border-radius: 12px;
-    background: #f8fbff;
+    margin-top: 16px;
+    padding: 0;
+    background: transparent;
+    border: 0;
 }
 
 .reply-form-block {
@@ -843,10 +842,29 @@ body {
     flex-wrap: wrap;
 }
 
-.reply-actions .decision-save-btn,
-.reply-actions .close-task-btn,
-#reply-toggle-btn {
-    min-height: 40px;
+.reply-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    padding: 6px 14px;
+    font-size: 13px;
+    line-height: 1;
+    font-weight: 600;
+    border: none;
+    border-radius: 999px;
+    box-sizing: border-box;
+    cursor: pointer;
+}
+
+.reply-btn-primary {
+    color: #fff;
+    background: linear-gradient(180deg, #6c63ff 0%, #5b57e8 100%);
+}
+
+.reply-btn-secondary {
+    color: #fff;
+    background: #ef2b2d;
 }
 
 #reply-toggle-btn:disabled,

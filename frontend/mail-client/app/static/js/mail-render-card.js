@@ -97,18 +97,6 @@
             }
         });
 
-        input.addEventListener("blur", (e) => {
-            state.isReplyInputComposing = false;
-            state.replyDrafts.set(realEmailId, e.target.value);
-
-            setTimeout(() => {
-                if (!isEditingReplyInput() && state.pendingSilentRefresh) {
-                    state.pendingSilentRefresh = false;
-                    refreshEmailsSilently();
-                }
-            }, 0);
-        });
-
         input.addEventListener("input", (e) => {
             state.replyDrafts.set(realEmailId, e.target.value);
 
@@ -238,6 +226,7 @@
 
         const realEmailId = email.email_id || email.id;
         const savedReplyDraft = state.replyDrafts?.get(realEmailId) || "";
+        const shouldShowReplyForm = Boolean(savedReplyDraft);
 
         emailView.innerHTML = `
             <div class="email-card">
@@ -303,30 +292,6 @@
                     </div>
                 </div>
 
-                <div class="reply-block">
-                    <button type="button" id="reply-toggle-btn" class="decision-save-btn">
-                        Ответить
-                    </button>
-
-                    <div id="reply-form-block" class="reply-form-block" hidden>
-                        <label for="reply-body-input" class="decision-label">Текст ответа</label>
-                        <textarea
-                            id="reply-body-input"
-                            class="reply-body-input"
-                            rows="8"
-                            placeholder="Введите текст ответа..."
-                        ></textarea>
-
-                        <div class="reply-actions">
-                            <button type="button" id="reply-send-btn" class="decision-save-btn">
-                                Отправить
-                            </button>
-                            <button type="button" id="reply-cancel-btn" class="close-task-btn">
-                                Отмена
-                            </button>
-                        </div>
-                    </div>
-                </div>
 
                 ${attachmentBlock}
                 ${decisionBlock}
@@ -336,6 +301,41 @@
                 <div class="email-body">
                     ${formattedContent}
                 </div>
+
+                <div class="reply-block">
+                    <button
+                        type="button"
+                        id="reply-toggle-btn"
+                        class="reply-btn reply-btn-primary"
+                        ${shouldShowReplyForm ? "hidden" : ""}
+                    >
+                        Ответить
+                    </button>
+
+                    <div
+                        id="reply-form-block"
+                        class="reply-form-block"
+                        ${shouldShowReplyForm ? "" : "hidden"}
+                    >
+                        <label for="reply-body-input" class="decision-label">Текст ответа</label>
+                        <textarea
+                            id="reply-body-input"
+                            class="reply-body-input"
+                            rows="8"
+                            placeholder="Введите текст ответа..."
+                        ></textarea>
+
+                        <div class="reply-actions">
+                            <button type="button" id="reply-send-btn" class="reply-btn reply-btn-primary">
+                                Отправить
+                            </button>
+                            <button type="button" id="reply-cancel-btn" class="reply-btn reply-btn-secondary">
+                                Отмена
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         `;
 
@@ -363,20 +363,18 @@
 
         if (replyToggleBtn && replyFormBlock && replyBodyInput) {
             replyToggleBtn.addEventListener("click", () => {
-                const isHidden = replyFormBlock.hidden;
-                replyFormBlock.hidden = !isHidden;
-
-                if (isHidden) {
-                    replyBodyInput.focus();
-                }
+                replyFormBlock.hidden = false;
+                replyToggleBtn.hidden = true;
+                replyBodyInput.focus();
             });
         }
 
         if (replyCancelBtn && replyFormBlock && replyBodyInput) {
             replyCancelBtn.addEventListener("click", () => {
                 replyFormBlock.hidden = true;
+                if (replyToggleBtn) replyToggleBtn.hidden = false;
                 replyBodyInput.value = "";
-                state.replyDrafts.delete(realEmailId);
+                state.replyDrafts?.delete(realEmailId);
             });
         }
 
@@ -415,6 +413,7 @@
                     state.replyDrafts.delete(realEmailId);
                     replyBodyInput.value = "";
                     replyFormBlock.hidden = true;
+                    if (replyToggleBtn) replyToggleBtn.hidden = false;
                 } catch (e) {
                     console.error(e);
                     alert(e.message || "Не удалось отправить письмо");
