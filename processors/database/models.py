@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
+from sqlalchemy.sql.expression import null
 
 Base = declarative_base()
 
@@ -61,13 +62,19 @@ class Email(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     mailbox = Column(String(100), nullable=False)
     email_uid = Column(BigInteger, nullable=False)
+    message_id = Column(Text, nullable=False)
+    in_reply_to = Column(Text, nullable=False)
+    references_header = Column(Text, nullable=False)
     email_from = Column(Text, nullable=True)
+    reply_to = Column(Text, nullable=False)
     email_subject = Column(String(500), nullable=True)
     raw_email = Column(Text, nullable=True)
     email_date = Column(DateTime(timezone=True), nullable=True)
     prob_1 = Column(Float, nullable=True)
     predicted_class = Column(SmallInteger, nullable=True)
     model_decision = Column(Text, nullable=True)
+    archived = Column(Boolean, default=False, nullable=False)
+    is_read = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     documents = relationship("Document", back_populates="email")

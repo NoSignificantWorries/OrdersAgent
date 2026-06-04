@@ -311,7 +311,7 @@ for head in header_variants:
     h3 = head + [optional_headers[1]]
     h4 = head + optional_headers[::-1]
     new_header_variants += [head, h1, h2, h3, h4]
-print(new_header_variants)
+# print(new_header_variants)
 header_variants = sorted(new_header_variants, key=len, reverse=True)
 
 columnrules1 = {
