@@ -186,6 +186,7 @@ def process_request_excel(
         # unique_parts = list(unique_parts)
 
         # searching materials
+        local_questions = dict()
         if task.manual_decision is not None:
             matches = {
                 p: (m["target"], m["article"], m["black-list"])
@@ -193,7 +194,6 @@ def process_request_excel(
             }
         else:
             matches = material_repo.batch_find(unique_parts)
-            local_questions = dict()
             for part, mat_match in matches.items():
                 if mat_match is None:
                     local_questions[part] = {
@@ -346,6 +346,7 @@ def process_calculation_excel(
         # unique_parts = list(unique_parts)
 
         # searching materials
+        local_questions = dict()
         if task.manual_decision is not None:
             matches = {
                 p: (m["target"], m["article"], m["black-list"])
@@ -353,7 +354,6 @@ def process_calculation_excel(
             }
         else:
             matches = material_repo.batch_find(unique_parts)
-            local_questions = dict()
             for part, mat_match in matches.items():
                 if mat_match is None:
                     local_questions[part] = {
