@@ -874,6 +874,11 @@ body {
     cursor: not-allowed;
 }
 
+#reply-toggle-btn[hidden],
+#reply-form-block[hidden] {
+    display: none !important;
+}
+
 @media (max-width: 640px) {
     .reply-block {
         margin: 14px 0 18px;
@@ -1390,3 +1395,4 @@ body {
   cursor: not-allowed;
   box-shadow: none;
 }
+
