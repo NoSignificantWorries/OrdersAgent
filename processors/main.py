@@ -193,22 +193,22 @@ def process_request_excel(
             }
         else:
             matches = material_repo.batch_find(unique_parts)
-        local_questions = dict()
-        for part, mat_match in matches.items():
-            if mat_match is None:
-                local_questions[part] = {
-                    "black-list": False,
-                    "target": None,
-                    "article": None,
-                }
-                continue
-            _, _, bl = mat_match
-            if bl:
-                local_questions[part] = {
-                    "black-list": True,
-                    "target": None,
-                    "article": None,
-                }
+            local_questions = dict()
+            for part, mat_match in matches.items():
+                if mat_match is None:
+                    local_questions[part] = {
+                        "black-list": False,
+                        "target": None,
+                        "article": None,
+                    }
+                    continue
+                _, _, bl = mat_match
+                if bl:
+                    local_questions[part] = {
+                        "black-list": True,
+                        "target": None,
+                        "article": None,
+                    }
 
         if bool(local_questions):
             # task_repo.update_status(task.id, "materials_review", output_data=questions)
@@ -353,22 +353,22 @@ def process_calculation_excel(
             }
         else:
             matches = material_repo.batch_find(unique_parts)
-        local_questions = dict()
-        for part, mat_match in matches.items():
-            if mat_match is None:
-                local_questions[part] = {
-                    "black-list": False,
-                    "target": None,
-                    "article": None,
-                }
-                continue
-            _, _, bl = mat_match
-            if bl:
-                local_questions[part] = {
-                    "black-list": True,
-                    "target": None,
-                    "article": None,
-                }
+            local_questions = dict()
+            for part, mat_match in matches.items():
+                if mat_match is None:
+                    local_questions[part] = {
+                        "black-list": False,
+                        "target": None,
+                        "article": None,
+                    }
+                    continue
+                _, _, bl = mat_match
+                if bl:
+                    local_questions[part] = {
+                        "black-list": True,
+                        "target": None,
+                        "article": None,
+                    }
 
         if bool(local_questions):
             # task_repo.update_status(task.id, "materials_review", output_data=questions)
