@@ -42,12 +42,19 @@
         }
 
         try {
-            for (const doc of docs) {
+            if (docs.length === 1) {
+                const doc = docs[0];
                 await downloadBlob(
                     `/api/documents/${doc.id}/download`,
-                    doc.document_name,
+                    doc.document_name || `document-${doc.id}`,
                 );
+                return;
             }
+
+            await downloadBlob(
+                `/api/emails/${email.id}/attachments/download-all`,
+                `email-${email.id}-attachments.zip`,
+            );
         } catch (e) {
             console.error(e);
             alert(e.message || "Ошибка скачивания вложений");

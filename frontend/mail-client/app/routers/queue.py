@@ -381,6 +381,96 @@ async def download_source_document(document_id: int, request: Request):
         not_found_detail="Файл не найден",
     )
 
+@router.get("/emails/{email_id}/attachments/download-all")
+async def download_all_source_documents(email_id: int, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            email_row = await conn.fetchrow(
+                """
+                SELECT
+                    e.id,
+                    e.mailbox
+                FROM emails e
+                WHERE e.id = $1
+                """,
+                email_id,
+            )
+        else:
+            email_row = await conn.fetchrow(
+                """
+                SELECT
+                    e.id,
+                    e.mailbox
+                FROM emails e
+                WHERE e.id = $1
+                  AND e.mailbox = $2
+                """,
+                email_id,
+                user["email"],
+            )
+
+        if not email_row:
+            raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+        docs = await conn.fetch(
+            """
+            SELECT
+                d.id,
+                d.filename,
+                d.minio_object_key
+            FROM documents d
+            WHERE d.email_id = $1
+            ORDER BY d.id
+            """,
+            email_id,
+        )
+
+    files_to_zip: list[tuple[str, str]] = []
+
+    for doc in docs:
+        object_key = doc["minio_object_key"]
+        filename = doc["filename"] or f"document-{doc['id']}"
+
+        if not object_key:
+            continue
+
+        files_to_zip.append((object_key, filename))
+
+    if not files_to_zip:
+        raise HTTPException(status_code=404, detail="Вложения отсутствуют")
+
+    zip_buffer = BytesIO()
+    with ZipFile(zip_buffer, mode="w", compression=ZIP_DEFLATED) as zip_file:
+        for object_key, archive_name in files_to_zip:
+            try:
+                file_bytes = await _load_document_bytes_from_storage(
+                    SOURCE_ATTACHMENTS_BUCKET,
+                    object_key,
+                )
+            except Exception as e:
+                error_text = str(e)
+                if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+                    continue
+                raise HTTPException(status_code=500, detail=f"Ошибка чтения файла: {e}")
+
+            zip_file.writestr(archive_name, file_bytes)
+
+    zip_buffer.seek(0)
+
+    zip_name = f"email-{email_id}-attachments.zip"
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}"
+        },
+    )
 
 @router.get("/documents/{document_id}/result-download")
 async def download_result_document(
