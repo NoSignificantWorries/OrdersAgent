@@ -13,6 +13,7 @@ import (
 	"mail/internal/parser"
 	"mail/storage/api"
 	minio "worker/minio/minio"
+	"mail/internal/config"
 )
 
 // Repository — общий интерфейс хранилища.
@@ -388,7 +389,7 @@ func GetEmailReplyContext(db *api.DB, emailID int64) (*EmailReplyContext, error)
 
 
 // ReplyToEmail — формирует и отправляет ответ на письмо через SMTP.
-func ReplyToEmail(db *api.DB, smtpClient *mailsmtp.Client, req ReplyToEmailRequest) error {
+func ReplyToEmail(db *api.DB, smtpClient *mailsmtp.Client, imapCfg *config.Config, req ReplyToEmailRequest) error {
     // 1. Получаем контекст письма (email + user_id).
     ctx, err := GetEmailReplyContext(db, req.EmailID)
     if err != nil {
@@ -443,26 +444,23 @@ func ReplyToEmail(db *api.DB, smtpClient *mailsmtp.Client, req ReplyToEmailReque
     //host := "smtp.yandex.ru"
     auth := mailsmtp.AuthXOAuth2(authData.Email, authData.AccessToken)
 
-	fmt.Printf(
-		"reply debug | email_id=%d to=%s subject=%q in_reply_to=%q references=%q message_id_parent=%q\n",
-		req.EmailID,
-		to,
-		subject,
-		headers["In-Reply-To"],
-		headers["References"],
-		ctx.MessageID,
-	)
-
     // 7. Отправляем письмо.
-    if err := smtpClient.SendPlainText(
-        authData.Email,
-        []string{to},
-        headers,
-        req.Body,
-        auth,
-    ); err != nil {
-        return fmt.Errorf("send reply smtp: %w", err)
-    }
+	raw, err := smtpClient.SendPlainText(
+		authData.Email,
+		[]string{to},
+		headers,
+		req.Body,
+		auth,
+	)
+	if err != nil {
+		return fmt.Errorf("send reply smtp: %w", err)
+	}
 
-    return nil
+	go func(rawMsg []byte, auth *UserMailAuth) {
+    if err := appendToSent(rawMsg, auth, imapCfg); err != nil {
+			fmt.Printf("append to Sent failed: %v\n", err)
+		}
+	}(raw, authData)
+
+	return nil
 }

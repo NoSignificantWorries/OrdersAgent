@@ -56,9 +56,9 @@ func isASCII(s string) bool {
 }
 
 // SendPlainText — отправка простого text/plain письма с готовыми заголовками.
-func (c *Client) SendPlainText(from string, to []string, headers map[string]string, body string, auth smtp.Auth) error {
+func (c *Client) SendPlainText(from string, to []string, headers map[string]string, body string, auth smtp.Auth) ([]byte, error) {
     if len(to) == 0 {
-        return fmt.Errorf("smtp: no recipients")
+        return nil, fmt.Errorf("smtp: no recipients")
     }
 
     // Собираем заголовки в фиксированном порядке.
@@ -131,8 +131,6 @@ func (c *Client) SendPlainText(from string, to []string, headers map[string]stri
 	sb.WriteString("\r\n")
 	sb.WriteString(normalizedBody)
 
-	fmt.Printf("RAW SMTP MESSAGE:\n%s\n----END HEADERS PREVIEW----\n", sb.String())
-
 	msg := []byte(sb.String())
 
     addr := fmt.Sprintf("%s:%d", c.cfg.Host, c.cfg.Port)
@@ -145,45 +143,45 @@ func (c *Client) SendPlainText(from string, to []string, headers map[string]stri
 
     conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", addr, tlsConfig)
     if err != nil {
-        return fmt.Errorf("smtp: dial tls: %w", err)
+        return nil, fmt.Errorf("smtp: dial tls: %w", err)
     }
     defer conn.Close()
 
     client, err := smtp.NewClient(conn, c.cfg.Host)
     if err != nil {
-        return fmt.Errorf("smtp: new client: %w", err)
+        return nil, fmt.Errorf("smtp: new client: %w", err)
     }
     defer client.Quit()
 
     if auth != nil {
         if err := client.Auth(auth); err != nil {
-            return fmt.Errorf("smtp: auth: %w", err)
+            return nil, fmt.Errorf("smtp: auth: %w", err)
         }
     }
 
     if err := client.Mail(from); err != nil {
-        return fmt.Errorf("smtp: MAIL FROM: %w", err)
+        return nil, fmt.Errorf("smtp: MAIL FROM: %w", err)
     }
 
     for _, rcpt := range to {
         if err := client.Rcpt(rcpt); err != nil {
-            return fmt.Errorf("smtp: RCPT TO %s: %w", rcpt, err)
+            return nil, fmt.Errorf("smtp: RCPT TO %s: %w", rcpt, err)
         }
     }
 
     wc, err := client.Data()
     if err != nil {
-        return fmt.Errorf("smtp: DATA: %w", err)
+        return nil, fmt.Errorf("smtp: DATA: %w", err)
     }
 
     if _, err := wc.Write(msg); err != nil {
         _ = wc.Close()
-        return fmt.Errorf("smtp: write message: %w", err)
+        return nil, fmt.Errorf("smtp: write message: %w", err)
     }
 
     if err := wc.Close(); err != nil {
-        return fmt.Errorf("smtp: close data: %w", err)
+        return nil, fmt.Errorf("smtp: close data: %w", err)
     }
 
-    return nil
+    return msg, nil
 }

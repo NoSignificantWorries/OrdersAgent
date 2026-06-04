@@ -57,6 +57,11 @@ func main() {
 		Host: "smtp.yandex.ru",
 		Port: 465,
 	})
+	
+	imapCfg := &config.Config{
+		Host: cfg.Host,
+		Port: cfg.Port,
+	}
 
 	replyMux := http.NewServeMux()
 
@@ -99,7 +104,7 @@ func main() {
 			return
 		}
 
-		if err := storage.ReplyToEmail(db, smtpClient, storage.ReplyToEmailRequest{
+		if err := storage.ReplyToEmail(db, smtpClient, imapCfg, storage.ReplyToEmailRequest{
 			EmailID: emailID,
 			Body:    req.Body,
 		}); err != nil {
