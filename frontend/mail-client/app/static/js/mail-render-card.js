@@ -33,6 +33,91 @@
         return window.location.pathname === "/inbox";
     }
 
+    function isEditingReplyInput() {
+        const active = document.activeElement;
+        return !!(
+            active &&
+            active.classList &&
+            active.classList.contains("reply-body-input")
+        );
+    }
+
+    function isReplyInputProtected(state) {
+        return (
+            isEditingReplyInput() ||
+            state.isReplyInputFocused === true ||
+            state.isReplyInputComposing === true
+        );
+    }
+
+    function bindReplyInputEvents({ input, email, deps }) {
+        console.log("bindReplyInputEvents state =", deps?.state);
+        console.log("bindReplyInputEvents replyDrafts =", deps?.state?.replyDrafts);
+        if (!input) return;
+
+        const { state, refreshEmailsSilently } = deps;
+        const realEmailId = email.email_id || email.id;
+
+        if (!state.replyDrafts) {
+            state.replyDrafts = new Map();
+        }
+
+        if (typeof state.isReplyInputComposing === "undefined") {
+            state.isReplyInputComposing = false;
+        }
+
+        input.addEventListener("focus", () => {
+            state.isReplyInputFocused = true;
+        });
+
+        input.addEventListener("blur", (e) => {
+            state.isReplyInputFocused = false;
+            state.isReplyInputComposing = false;
+            state.replyDrafts.set(realEmailId, e.target.value);
+
+            setTimeout(() => {
+                if (!isEditingReplyInput() && state.pendingSilentRefresh) {
+                    state.pendingSilentRefresh = false;
+                    refreshEmailsSilently();
+                }
+            }, 0);
+        });
+
+        input.addEventListener("compositionstart", () => {
+            state.isReplyInputComposing = true;
+        });
+
+        input.addEventListener("compositionend", (e) => {
+            state.isReplyInputComposing = false;
+            state.replyDrafts.set(realEmailId, e.target.value);
+
+            if (state.pendingSilentRefresh && !isEditingReplyInput()) {
+                state.pendingSilentRefresh = false;
+                refreshEmailsSilently();
+            }
+        });
+
+        input.addEventListener("blur", (e) => {
+            state.isReplyInputComposing = false;
+            state.replyDrafts.set(realEmailId, e.target.value);
+
+            setTimeout(() => {
+                if (!isEditingReplyInput() && state.pendingSilentRefresh) {
+                    state.pendingSilentRefresh = false;
+                    refreshEmailsSilently();
+                }
+            }, 0);
+        });
+
+        input.addEventListener("input", (e) => {
+            state.replyDrafts.set(realEmailId, e.target.value);
+
+            if (e.isComposing) {
+                state.isReplyInputComposing = true;
+            }
+        });
+    }
+
     function renderEmailCard(email, deps) {
         const {
             state,
@@ -50,6 +135,7 @@
             selectEmail,
             closeOpenedEmail,
             closeAndMarkUnread,
+            refreshEmailsSilently,
         } = deps;
 
         const cfg = window.MAILPAGECONFIG || {};
@@ -150,6 +236,9 @@
         const emailView = document.getElementById("emailView");
         if (!emailView) return;
 
+        const realEmailId = email.email_id || email.id;
+        const savedReplyDraft = state.replyDrafts?.get(realEmailId) || "";
+
         emailView.innerHTML = `
             <div class="email-card">
                 <div class="email-header">
@@ -168,7 +257,7 @@
                             </div>
 
                             ${
-                                canMarkUnread(email)
+                                canMarkUnread()
                                     ? `
                                         <div class="email-actions-menu-wrap">
                                             <button
@@ -214,6 +303,31 @@
                     </div>
                 </div>
 
+                <div class="reply-block">
+                    <button type="button" id="reply-toggle-btn" class="decision-save-btn">
+                        Ответить
+                    </button>
+
+                    <div id="reply-form-block" class="reply-form-block" hidden>
+                        <label for="reply-body-input" class="decision-label">Текст ответа</label>
+                        <textarea
+                            id="reply-body-input"
+                            class="reply-body-input"
+                            rows="8"
+                            placeholder="Введите текст ответа..."
+                        ></textarea>
+
+                        <div class="reply-actions">
+                            <button type="button" id="reply-send-btn" class="decision-save-btn">
+                                Отправить
+                            </button>
+                            <button type="button" id="reply-cancel-btn" class="close-task-btn">
+                                Отмена
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 ${attachmentBlock}
                 ${decisionBlock}
                 ${closeTaskBlock}
@@ -229,6 +343,86 @@
         if (closeEmailBtn) {
             closeEmailBtn.addEventListener("click", () => {
                 closeOpenedEmail();
+            });
+        }
+
+        const replyToggleBtn = document.getElementById("reply-toggle-btn");
+        const replyFormBlock = document.getElementById("reply-form-block");
+        const replyBodyInput = document.getElementById("reply-body-input");
+        const replySendBtn = document.getElementById("reply-send-btn");
+        const replyCancelBtn = document.getElementById("reply-cancel-btn");
+
+        if (replyBodyInput) {
+            replyBodyInput.value = savedReplyDraft;
+            bindReplyInputEvents({
+                input: replyBodyInput,
+                email,
+                deps,
+            });
+        }
+
+        if (replyToggleBtn && replyFormBlock && replyBodyInput) {
+            replyToggleBtn.addEventListener("click", () => {
+                const isHidden = replyFormBlock.hidden;
+                replyFormBlock.hidden = !isHidden;
+
+                if (isHidden) {
+                    replyBodyInput.focus();
+                }
+            });
+        }
+
+        if (replyCancelBtn && replyFormBlock && replyBodyInput) {
+            replyCancelBtn.addEventListener("click", () => {
+                replyFormBlock.hidden = true;
+                replyBodyInput.value = "";
+                state.replyDrafts.delete(realEmailId);
+            });
+        }
+
+        if (replySendBtn && replyBodyInput) {
+            replySendBtn.addEventListener("click", async () => {
+                const body = replyBodyInput.value.trim();
+                if (!body) {
+                    alert("Введите текст ответа");
+                    return;
+                }
+
+                replySendBtn.disabled = true;
+                if (replyToggleBtn) replyToggleBtn.disabled = true;
+                if (replyCancelBtn) replyCancelBtn.disabled = true;
+
+                try {
+                    const resp = await fetch(`/api/emails/${realEmailId}/reply`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        credentials: "same-origin",
+                        body: JSON.stringify({ body }),
+                    });
+
+                    if (!resp.ok) {
+                        let errorMessage = "Не удалось отправить письмо";
+                        try {
+                            const data = await resp.json();
+                            errorMessage = data.detail || errorMessage;
+                        } catch (_) {}
+                        throw new Error(errorMessage);
+                    }
+
+                    alert("Ответное письмо отправлено");
+                    state.replyDrafts.delete(realEmailId);
+                    replyBodyInput.value = "";
+                    replyFormBlock.hidden = true;
+                } catch (e) {
+                    console.error(e);
+                    alert(e.message || "Не удалось отправить письмо");
+                } finally {
+                    replySendBtn.disabled = false;
+                    if (replyToggleBtn) replyToggleBtn.disabled = false;
+                    if (replyCancelBtn) replyCancelBtn.disabled = false;
+                }
             });
         }
 
@@ -445,5 +639,8 @@
         canCloseTask,
         renderEmailCard,
         canUnarchiveTask,
+        isEditingReplyInput,
+        isReplyInputProtected,
+        bindReplyInputEvents,
     };
 })();
