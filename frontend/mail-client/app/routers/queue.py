@@ -5,6 +5,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ConfigDict
+from pathlib import Path
 
 from app.db import get_db_pool
 from app.routers import auth
@@ -102,28 +103,45 @@ async def get_result_documents(task_id: int, request: Request):
 
     for doc in docs:
         object_key = doc["minio_object_key"]
+        filename = doc["filename"] or f"document-{doc['id']}"
+
         if not object_key:
             continue
 
-        try:
-            client.stat_object(RESULTS_BUCKET, object_key)
-            result_docs.append({
-                "id": doc["id"],
-                "filename": doc["filename"] or f"document-{doc['id']}",
-            })
+        candidates = [
+            {
+                "variant": "main",
+                "object_key": object_key,
+                "filename": filename,
+            }
+        ]
 
-        # Предпочтительно ловить конкретный тип ошибки MinIO SDK.
-        # Например:
-        # except S3Error as e:
-        #     if e.code in ("NoSuchKey", "NoSuchObject"):
-        #         continue
-        #     raise HTTPException(status_code=500, detail=f"Ошибка проверки файла: {e}")
+        display_filename2 = Path(filename).stem + "_(articles)" + Path(filename).suffix
+        object_key_filename2 = Path(object_key).stem + "_(articles)" + Path(object_key).suffix
+        object_key2 = str(Path(object_key).with_name(object_key_filename2))
 
-        except Exception as e:
-            error_text = str(e)
-            if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
-                continue
-            raise HTTPException(status_code=500, detail=f"Ошибка проверки файла: {e}")
+
+        candidates.append(
+            {
+                "variant": "articles",
+                "object_key": object_key2,
+                "filename": display_filename2,
+            }
+        )
+
+        for candidate in candidates:
+            try:
+                client.stat_object(RESULTS_BUCKET, candidate["object_key"])
+                result_docs.append({
+                    "id": doc["id"],
+                    "filename": candidate["filename"],
+                    "variant": candidate["variant"],
+                })
+            except Exception as e:
+                error_text = str(e)
+                if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+                    continue
+                raise HTTPException(status_code=500, detail=f"Ошибка проверки файла: {e}")
 
     return {"documents": result_docs}
 
@@ -162,6 +180,7 @@ async def _download_document_by_id(
     request: Request,
     bucket_name: str,
     not_found_detail: str = "Файл не найден",
+    variant: str = "main",
 ):
     user = auth.get_current_user(request)
     if not user:
@@ -206,15 +225,26 @@ async def _download_document_by_id(
     if not row:
         raise HTTPException(status_code=404, detail=not_found_detail)
 
-    object_key = row["minio_object_key"]
-    filename = row["filename"] or f"document-{document_id}"
+    base_object_key = row["minio_object_key"]
+    base_filename = row["filename"] or f"document-{document_id}"
 
-    if not object_key:
+    if not base_object_key:
         raise HTTPException(status_code=404, detail="У файла отсутствует object_key")
+
+    if variant == "main":
+        object_key = base_object_key
+        filename = base_filename
+    elif variant == "articles":
+        display_filename = Path(base_filename).stem + "_(articles)" + Path(base_filename).suffix
+        object_key_filename = Path(base_object_key).stem + "_(articles)" + Path(base_object_key).suffix
+
+        filename = display_filename
+        object_key = str(Path(base_object_key).with_name(object_key_filename))
+    else:
+        raise HTTPException(status_code=400, detail="Некорректный variant")
 
     try:
         file_bytes = await _load_document_bytes_from_storage(bucket_name, object_key)
-
     except Exception as e:
         error_text = str(e)
         if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
@@ -241,12 +271,17 @@ async def download_source_document(document_id: int, request: Request):
 
 
 @router.get("/documents/{document_id}/result-download")
-async def download_result_document(document_id: int, request: Request):
+async def download_result_document(
+    document_id: int,
+    request: Request,
+    variant: str = "main",
+):
     return await _download_document_by_id(
         document_id=document_id,
         request=request,
         bucket_name=RESULTS_BUCKET,
         not_found_detail="Файл не найден",
+        variant=variant,
     )
 
 @router.post("/queue/{task_id}/decision")
@@ -470,21 +505,15 @@ async def update_materials_manual_decision(
                 if not isinstance(material, str) or not material.strip():
                     raise HTTPException(status_code=400, detail="Некорректный ключ материала")
 
-                normalized_manual_decision = {}
+                target_value = (value.target or "").strip() or None
+                article_value = (value.article or "").strip() or None
+                blacklist_value = bool(value.black_list)
 
-                for material, value in payload.manual_decision.items():
-                    if not isinstance(material, str) or not material.strip():
-                        raise HTTPException(status_code=400, detail="Некорректный ключ материала")
-
-                    target_value = (value.target or "").strip() or None
-                    article_value = (value.article or "").strip() or None
-                    blacklist_value = bool(value.black_list)
-
-                    normalized_manual_decision[material] = {
-                        "target": target_value,
-                        "article": article_value,
-                        "black-list": blacklist_value,
-                    }
+                normalized_manual_decision[material] = {
+                    "target": target_value,
+                    "article": article_value,
+                    "black-list": blacklist_value,
+                }
 
             updated_task = await conn.fetchrow(
                 """

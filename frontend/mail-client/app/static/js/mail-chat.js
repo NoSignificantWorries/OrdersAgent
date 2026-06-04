@@ -1,6 +1,4 @@
 (function () {
-    console.error("MAIL-CHAT NEW FILE LOADED");
-
     // function extractMaterialNames(value) {
     //     if (!value) return [];
 
@@ -62,14 +60,6 @@
     // }
 
     function extractMaterialsFromOutput(output) {
-        console.log("[MailChat] extractMaterialsFromOutput: raw output =", output);
-        console.log(
-            "[MailChat] extractMaterialsFromOutput: keys =",
-            output && typeof output === "object" && !Array.isArray(output)
-                ? Object.keys(output)
-                : null,
-        );
-
         if (!output || typeof output !== "object" || Array.isArray(output)) {
             return [];
         }
@@ -121,14 +111,10 @@
     // }
 
     function buildChatItemsFromOutput(output, emailId, chatStorage) {
-        console.log("[MailChat] buildChatItemsFromOutput: emailId =", emailId);
-        console.log("[MailChat] buildChatItemsFromOutput: output =", output);
-
         const safeChatStorage =
             chatStorage instanceof Map ? chatStorage : new Map();
 
         const materials = extractMaterialsFromOutput(output);
-        console.log("[MailChat] buildChatItemsFromOutput: materials =", materials);
 
         const source = output && typeof output === "object" && !Array.isArray(output)
             ? output
@@ -140,16 +126,6 @@
                 ? saved
                 : {};
 
-            console.log("[MailChat] material row:", {
-                material,
-                saved,
-                normalized: {
-                    target: row.target == null ? "" : String(row.target),
-                    article: row.article == null ? "" : String(row.article),
-                    blacklist: Boolean(row["black-list"]),
-                },
-            });
-
             return {
                 material,
                 target: row.target == null ? "" : String(row.target),
@@ -158,10 +134,7 @@
             };
         });
 
-        console.log("[MailChat] buildChatItemsFromOutput: chatItems =", chatItems);
-
         const cached = safeChatStorage.get(emailId);
-        console.log("[MailChat] buildChatItemsFromOutput: cached =", cached);
 
         if (Array.isArray(cached) && cached.length > 0) {
             const merged = chatItems.map((item) => {
@@ -176,7 +149,6 @@
                     : item;
             });
 
-            console.log("[MailChat] buildChatItemsFromOutput: merged chatItems =", merged);
             return merged;
         }
 
@@ -258,9 +230,6 @@
             loadAvailableResultDocuments,
             downloadAvailableResultDocuments,
         } = deps;
-
-        console.log("[MailChat] renderChatForEmail: email =", email);
-        console.log("[MailChat] renderChatForEmail: email.chatItems =", email?.chatItems);
 
         const container = document.getElementById("chat-rows-container");
         const submitContainer = document.querySelector(".chat-submit");

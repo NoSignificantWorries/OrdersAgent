@@ -84,7 +84,7 @@
 
         for (const doc of docs) {
             await downloadBlob(
-                `/api/documents/${doc.id}/result-download`,
+                `/api/documents/${doc.id}/result-download?variant=${encodeURIComponent(doc.variant || "main")}`,
                 doc.filename || `result-doc-${doc.id}`,
             );
         }
