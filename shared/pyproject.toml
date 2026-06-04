@@ -1,0 +1,14 @@
+[project]
+name = "m1-shared"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "anyio>=4.13.0",
+    "asyncpg>=0.31.0",
+    "minio>=7.2.20",
+    "psycopg2-binary>=2.9.12",
+    "pydantic>=2.13.4",
+    "sqlalchemy>=2.0.50",
+]

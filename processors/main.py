@@ -19,7 +19,12 @@ from database import (
 )
 from database.models import TaskStatus
 from materials import DELIMETERS, ParseResults, ParserV2
-from table import TableParseResults, TableWorker, make_xlsx
+from table import (
+    TableParseResults,
+    TableWorker,
+    make_callculation_xlsx,
+    make_request_xlsx,
+)
 
 POLL_INTERVAL = 30
 BUSY_INTERVAL = 5
@@ -125,7 +130,7 @@ def process_request_excel(
     logger.info(f"Task {task.id}: Processing documents: {', '.join(docnames)}")
     unique_materials_dict = {}
     unique_parts = set()
-    questions = set()
+    questions = dict()
     at_leat_one_file_saved = False
     file_errors = {}
     for doc in documents:
@@ -181,36 +186,38 @@ def process_request_excel(
         # unique_parts = list(unique_parts)
 
         # searching materials
-        if task.manual_decision is not None:
-            matches = {p: (m, False) for p, (m, bl) in task.manual_decision.items()}
-        else:
-            matches = material_repo.batch_find(unique_parts)
-        local_questions = set()
+        matches = material_repo.batch_find(unique_parts)
+        local_questions = dict()
         for part, mat_match in matches.items():
             if mat_match is None:
-                local_questions.add((part, False))
+                local_questions[part] = {
+                    "black-list": False,
+                    "target": None,
+                    "article": None,
+                }
                 continue
-            if len(mat_match) == 2:
-                _, bl = mat_match
-            else:
-                _, _, bl = mat_match
+            _, _, bl = mat_match
             if bl:
-                local_questions.add((part, True))
+                local_questions[part] = {
+                    "black-list": True,
+                    "target": None,
+                    "article": None,
+                }
 
         if bool(local_questions):
             # task_repo.update_status(task.id, "materials_review", output_data=questions)
             logger.info(
                 f"Task {task.id}: Needs manual matching for material parts for file {filename}"
             )
-            questions |= local_questions
+            questions.update(local_questions)
             continue
 
         for material, material_obj in unique_materials_dict.items():
             for part in material_obj.parts:
-                material_obj.matches.append(matches[part][0])
+                material_obj.matches.append(matches[part])
 
         try:
-            wb = make_xlsx(res, unique_materials_dict)
+            wb = make_request_xlsx(res, unique_materials_dict)
         except Exception as err:
             logger.exception(
                 f"Task {task.id}: Unexpected errors while saving file '{filename}' in workbook: {err}"
@@ -243,7 +250,6 @@ def process_request_excel(
         at_leat_one_file_saved = True
 
     if questions:
-        questions = [{p: bl} for p, bl in questions]
         task_repo.update_status(task.id, "materials_review", output_data=questions)
         logger.info(
             f"Task {task.id}: Needs manual matching for material parts: f{questions}"
@@ -278,7 +284,7 @@ def process_calculation_excel(
     logger.info(f"Task {task.id}: Processing documents: {', '.join(docnames)}")
     unique_materials_dict = {}
     unique_parts = set()
-    questions = set()
+    questions = dict()
     at_leat_one_file_saved = False
     file_errors = {}
     for doc in documents:
@@ -334,40 +340,44 @@ def process_calculation_excel(
         # unique_parts = list(unique_parts)
 
         # searching materials
-        if task.manual_decision is not None:
-            matches = {p: (m, False) for p, (m, bl) in task.manual_decision.items()}
-        else:
-            matches = material_repo.batch_find(unique_parts)
-        local_questions = set()
+        # if task.manual_decision is not None:
+        #     matches = {p: (m, False) for p, (m, bl) in task.manual_decision.items()}
+        # else:
+        matches = material_repo.batch_find(unique_parts)
+        local_questions = dict()
         for part, mat_match in matches.items():
             if mat_match is None:
-                local_questions.add((part, False))
+                local_questions[part] = {
+                    "black-list": False,
+                    "target": None,
+                    "article": None,
+                }
                 continue
-            if len(mat_match) == 2:
-                _, bl = mat_match
-            else:
-                _, _, bl = mat_match
+            _, _, bl = mat_match
             if bl:
-                local_questions.add((part, True))
+                local_questions[part] = {
+                    "black-list": True,
+                    "target": None,
+                    "article": None,
+                }
 
         if bool(local_questions):
             # task_repo.update_status(task.id, "materials_review", output_data=questions)
             logger.info(
                 f"Task {task.id}: Needs manual matching for material parts for file {filename}"
             )
-            questions |= local_questions
+            questions.update(local_questions)
             continue
 
+        # matching materials
         for material, material_obj in unique_materials_dict.items():
             for part in material_obj.parts:
                 ms = matches[part]
-                if len(ms) == 2:
-                    material_obj.matches.append(matches[part][0])
-                else:
-                    material_obj.matches.append(matches[part][1])
+                material_obj.matches.append(ms)
 
         try:
-            wb = make_xlsx(res, unique_materials_dict)
+            wb = make_request_xlsx(res, unique_materials_dict)
+            wb2 = make_callculation_xlsx(res, unique_materials_dict)
         except Exception as err:
             logger.exception(
                 f"Task {task.id}: Unexpected errors while saving file '{filename}' in workbook: {err}"
@@ -377,15 +387,19 @@ def process_calculation_excel(
             )
             continue
 
-        if wb is None:
+        if wb is None or wb2 is None:
             # task_repo.update_status(task.id, "error")
             logger.warning(f"Task {task.id}: Empty output file")
-            file_errors[filename] = "Пустой выходной файл."
+            file_errors[filename] = "Пустой выходной файл(ы)."
             continue
 
         data = BytesIO()
         wb.save(data)
         data.seek(0)
+
+        data2 = BytesIO()
+        wb2.save(data2)
+        data2.seek(0)
 
         err = put_bytes_object(
             cloud,
@@ -397,10 +411,23 @@ def process_calculation_excel(
         if err:
             logger.error(f"Task {task.id}: Can't save file, retrying...")
             continue
+
+        filename2 = Path(filename).parent / (
+            Path(filename).stem + "_(articles)" + Path(filename).suffix
+        )
+        err = put_bytes_object(
+            cloud,
+            RESULTS_BUCKET,
+            str(filename2),
+            data2,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        if err:
+            logger.error(f"Task {task.id}: Can't save articles file, retrying...")
+            continue
         at_leat_one_file_saved = True
 
     if questions:
-        questions = [{p: bl} for p, bl in questions]
         task_repo.update_status(task.id, "materials_review", output_data=questions)
         logger.info(
             f"Task {task.id}: Needs manual matching for material parts: f{questions}"
@@ -436,22 +463,10 @@ def process_manual_matching(
         logger.error(f"Task {task.id}: Not classified yet")
         task_repo.update_status(task.id, "new")
         return
-    match email.model_decision:
-        case "request":
-            answers_flat = [
-                (part, data[0], None, data[1]) for part, data in answers.items()
-            ]
-        case "calculation":
-            answers_flat = [
-                (part, None, data[0], data[1]) for part, data in answers.items()
-            ]
-        case _:
-            logger.error(f"Task {task.id}: Unsupported class")
-            task_repo.mark_error(
-                task.id, "Неподдерживаемый класс письма для ввода данных."
-            )
-            task_repo.update_status(task.id, "error")
-            return
+    answers_flat = [
+        (part, data["target"], data["article"], data["black-list"])
+        for part, data in answers.items()
+    ]
     try:
         material_repo.batch_add(answers_flat)
     except Exception as err:
@@ -627,7 +642,7 @@ def development() -> None:
             material_obj.matches.append(matches[part][0])
     print(unique_materials_dict)
 
-    wb = make_xlsx(res, unique_materials_dict)
+    wb = make_request_xlsx(res, unique_materials_dict)
     print(wb)
 
     if wb is None:
