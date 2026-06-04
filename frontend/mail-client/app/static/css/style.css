@@ -1067,14 +1067,25 @@ body {
     word-break: break-word;
 }
 
-.answer-input {
-    width: 100%;
+.target-input {
+    width: 45%;
     padding: 10px 12px;
     border: 1px solid #cbd5e1;
     border-radius: 12px;
     font-size: 14px;
     box-sizing: border-box;
 }
+
+.article-input {
+    width: 45%;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+
 
 .blacklist-label {
     display: flex;

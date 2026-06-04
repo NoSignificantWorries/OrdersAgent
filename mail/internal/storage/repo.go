@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"strings"
+	"net/mail"
 
+    mailsmtp "mail/internal/smtp"
 	"mail/internal/parser"
 	"mail/storage/api"
 	minio "worker/minio/minio"
@@ -32,10 +35,61 @@ type MailUser struct {
 	Email string
 }
 
+type EmailReplyContext struct {
+    EmailID           int64
+    UserID            int64
+    Mailbox           string
+    EmailFrom         string
+    ReplyTo           string
+    MessageID         string
+    InReplyTo         string
+    ReferencesHeader  string
+    EmailSubject      string
+    RawEmail          string
+    EmailDate         time.Time
+}
+
+// ReplyToEmailRequest — данные для ответа на письмо.
+type ReplyToEmailRequest struct {
+    EmailID int64  // ID письма в таблице emails
+    Body    string // Текст ответа (plain text)
+}
+
 // DBRepo — пишет метаданные в Postgres и файлы в MinIO.
 type DBRepo struct {
 	db    *api.DB
 	store *minio.CloudStorage
+}
+
+func extractReplyAddress(replyTo string, emailFrom string) (string, error) {
+    if strings.TrimSpace(replyTo) != "" {
+        addr, err := mail.ParseAddress(strings.TrimSpace(replyTo))
+        if err == nil {
+            return addr.Address, nil
+        }
+        return strings.TrimSpace(replyTo), nil
+    }
+
+    if strings.TrimSpace(emailFrom) != "" {
+        addr, err := mail.ParseAddress(strings.TrimSpace(emailFrom))
+        if err != nil {
+            return "", fmt.Errorf("parse EmailFrom address: %w", err)
+        }
+        return addr.Address, nil
+    }
+
+    return "", fmt.Errorf("both Reply-To and EmailFrom are empty")
+}
+
+func normalizeMessageID(v string) string {
+    v = strings.TrimSpace(v)
+    if v == "" {
+        return ""
+    }
+    if strings.HasPrefix(v, "<") && strings.HasSuffix(v, ">") {
+        return v
+    }
+    return "<" + v + ">"
 }
 
 // NewDBRepo — создаёт репозиторий с Postgres и MinIO.
@@ -122,6 +176,26 @@ func (r *DBRepo) SaveOrder(userID int64, order any) (err error) {
 		emailFromValue = email.From
 	}
 
+	    replyToValue := ""
+    if email.ReplyTo != "" {
+        replyToValue = email.ReplyTo
+    }
+
+    messageIDValue := ""
+    if email.MessageID != "" {
+        messageIDValue = email.MessageID
+    }
+
+    inReplyToValue := ""
+    if email.InReplyTo != "" {
+        inReplyToValue = email.InReplyTo
+    }
+
+    referencesHeaderValue := ""
+    if email.ReferencesHeader != "" {
+        referencesHeaderValue = email.ReferencesHeader
+    }
+
 	emailSubjectValue := ""
 	if email.Subject != "" {
 		emailSubjectValue = email.Subject
@@ -151,13 +225,18 @@ func (r *DBRepo) SaveOrder(userID int64, order any) (err error) {
 
 	// emails: upsert по (mailbox, email_uid)
 	emailID, err := r.db.UpsertEmailTx(ctx, tx, api.EmailRecord{
-		Mailbox:      userEmail,
-		EmailUID:     emailUID,
-		EmailFrom:    emailFromValue,
-		EmailSubject: emailSubjectValue,
-		RawEmail:     rawEmailValue,
-		EmailDate:    emailDateValue,
-	})
+		UserID:           userID,
+        Mailbox:          userEmail,
+        EmailUID:         emailUID,
+        EmailFrom:        emailFromValue,
+        ReplyTo:          replyToValue,
+        MessageID:        messageIDValue,
+        InReplyTo:        inReplyToValue,
+        ReferencesHeader: referencesHeaderValue,
+        EmailSubject:     emailSubjectValue,
+        RawEmail:         rawEmailValue,
+        EmailDate:        emailDateValue,
+    })
 	if err != nil {
 		return fmt.Errorf("upsert email (user_id=%d, uid=%d): %w", userID, emailUID, err)
 	}
@@ -272,4 +351,118 @@ func GetUsersWithMailAuth(db *api.DB) ([]MailUser, error) {
 	}
 
 	return users, nil
+}
+
+func GetEmailReplyContext(db *api.DB, emailID int64) (*EmailReplyContext, error) {
+    rec, err := db.GetEmailForReply(context.Background(), emailID)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return nil, fmt.Errorf("email not found: id=%d", emailID)
+        }
+        return nil, fmt.Errorf("get email for reply: %w", err)
+    }
+
+    if !rec.UserID.Valid {
+        return nil, fmt.Errorf("email id=%d has NULL user_id", emailID)
+    }
+
+    var emailDate time.Time
+    if rec.EmailDate.Valid {
+        emailDate = rec.EmailDate.Time
+    }
+
+    return &EmailReplyContext{
+        EmailID:          rec.ID,
+        UserID:           rec.UserID.Int64,
+        Mailbox:          rec.Mailbox,
+        EmailFrom:        rec.EmailFrom,
+        ReplyTo:          rec.ReplyTo,
+        MessageID:        rec.MessageID,
+        InReplyTo:        rec.InReplyTo,
+        ReferencesHeader: rec.ReferencesHeader,
+        EmailSubject:     rec.EmailSubject,
+        RawEmail:         rec.RawEmail,
+        EmailDate:        emailDate,
+    }, nil
+}
+
+
+// ReplyToEmail — формирует и отправляет ответ на письмо через SMTP.
+func ReplyToEmail(db *api.DB, smtpClient *mailsmtp.Client, req ReplyToEmailRequest) error {
+    // 1. Получаем контекст письма (email + user_id).
+    ctx, err := GetEmailReplyContext(db, req.EmailID)
+    if err != nil {
+        return err
+    }
+
+    // 2. Получаем почтовые токены пользователя.
+    authData, err := GetUserMailAuth(db, ctx.UserID)
+    if err != nil {
+        return fmt.Errorf("get user mail auth: %w", err)
+    }
+
+    // 3. Определяем адрес, куда отвечать.
+    to, err := extractReplyAddress(ctx.ReplyTo, ctx.EmailFrom)
+	if err != nil {
+		return fmt.Errorf("reply-to email: %w", err)
+	}
+
+    // 4. Формируем тему.
+    subject := ctx.EmailSubject
+    if subject == "" {
+        subject = "Re:"
+    } else if !strings.HasPrefix(strings.ToLower(subject), "re:") {
+        subject = "Re: " + subject
+    }
+
+    // 5. Формируем заголовки для threading.
+    headers := map[string]string{
+        "From":         authData.Email,
+        "To":           to,
+        "Subject":      subject,
+        "Date":         time.Now().UTC().Format(time.RFC1123Z),
+        "MIME-Version": "1.0",
+        "Content-Type": "text/plain; charset=UTF-8",
+    }
+
+    parentMessageID := normalizeMessageID(ctx.MessageID)
+	parentRefs := strings.TrimSpace(ctx.ReferencesHeader)
+
+	if parentMessageID != "" {
+		headers["In-Reply-To"] = parentMessageID
+	}
+
+	if parentRefs != "" && parentMessageID != "" {
+		headers["References"] = parentRefs + " " + parentMessageID
+	} else if parentMessageID != "" {
+		headers["References"] = parentMessageID
+	}
+
+    // 6. SMTP auth — пока логика под пароль приложения.
+    // Для Яндекс-почты: host smtp.yandex.ru, port 465/587. [web:26][web:20]
+    //host := "smtp.yandex.ru"
+    auth := mailsmtp.AuthXOAuth2(authData.Email, authData.AccessToken)
+
+	fmt.Printf(
+		"reply debug | email_id=%d to=%s subject=%q in_reply_to=%q references=%q message_id_parent=%q\n",
+		req.EmailID,
+		to,
+		subject,
+		headers["In-Reply-To"],
+		headers["References"],
+		ctx.MessageID,
+	)
+
+    // 7. Отправляем письмо.
+    if err := smtpClient.SendPlainText(
+        authData.Email,
+        []string{to},
+        headers,
+        req.Body,
+        auth,
+    ); err != nil {
+        return fmt.Errorf("send reply smtp: %w", err)
+    }
+
+    return nil
 }

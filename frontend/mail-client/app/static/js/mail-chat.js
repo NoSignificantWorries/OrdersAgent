@@ -1,100 +1,183 @@
 (function () {
-    function extractMaterialNames(value) {
-        if (!value) return [];
+    console.error("MAIL-CHAT NEW FILE LOADED");
 
-        if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-                if (typeof item === "string") {
-                    const s = item.trim();
-                    return s ? [s] : [];
-                }
+    // function extractMaterialNames(value) {
+    //     if (!value) return [];
 
-                if (item && typeof item === "object" && !Array.isArray(item)) {
-                    return Object.keys(item)
-                        .map((k) => String(k).trim())
-                        .filter(Boolean);
-                }
+    //     if (Array.isArray(value)) {
+    //         return value.flatMap((item) => {
+    //             if (typeof item === "string") {
+    //                 const s = item.trim();
+    //                 return s ? [s] : [];
+    //             }
 
-                return [];
-            });
-        }
+    //             if (item && typeof item === "object" && !Array.isArray(item)) {
+    //                 return Object.keys(item)
+    //                     .map((k) => String(k).trim())
+    //                     .filter(Boolean);
+    //             }
 
-        if (value && typeof value === "object") {
-            return Object.keys(value)
-                .map((k) => String(k).trim())
-                .filter(Boolean);
-        }
+    //             return [];
+    //         });
+    //     }
 
-        return [];
-    }
+    //     if (value && typeof value === "object") {
+    //         return Object.keys(value)
+    //             .map((k) => String(k).trim())
+    //             .filter(Boolean);
+    //     }
+
+    //     return [];
+    // }
+
+    // function extractMaterialsFromOutput(output) {
+    //     if (!output || typeof output !== "object") return ["output_data"];
+
+    //     if (Array.isArray(output)) {
+    //         return extractMaterialNames(output);
+    //     }
+
+    //     const candidates = [
+    //         output.queries,
+    //         output.requests,
+    //         output.materials,
+    //         output.material_queries,
+    //         output.output_data,
+    //         output.data,
+    //         output.items,
+    //         output.result,
+    //     ];
+
+    //     for (const value of candidates) {
+    //         const names = extractMaterialNames(value);
+    //         if (names.length > 0) return names;
+    //     }
+
+    //     for (const value of Object.values(output)) {
+    //         const names = extractMaterialNames(value);
+    //         if (names.length > 0) return names;
+    //     }
+
+    //     return [];
+    // }
 
     function extractMaterialsFromOutput(output) {
-        if (!output || typeof output !== "object") return ["output_data"];
+        console.log("[MailChat] extractMaterialsFromOutput: raw output =", output);
+        console.log(
+            "[MailChat] extractMaterialsFromOutput: keys =",
+            output && typeof output === "object" && !Array.isArray(output)
+                ? Object.keys(output)
+                : null,
+        );
 
-        if (Array.isArray(output)) {
-            return extractMaterialNames(output);
+        if (!output || typeof output !== "object" || Array.isArray(output)) {
+            return [];
         }
 
-        const candidates = [
-            output.queries,
-            output.requests,
-            output.materials,
-            output.material_queries,
-            output.output_data,
-            output.data,
-            output.items,
-            output.result,
-        ];
-
-        for (const value of candidates) {
-            const names = extractMaterialNames(value);
-            if (names.length > 0) return names;
-        }
-
-        for (const value of Object.values(output)) {
-            const names = extractMaterialNames(value);
-            if (names.length > 0) return names;
-        }
-
-        return [];
+        return Object.keys(output)
+            .map((k) => String(k).trim())
+            .filter(Boolean);
     }
 
+    // function buildChatItemsFromOutput(output, emailId, chatStorage) {
+    //     const safeChatStorage =
+    //         chatStorage instanceof Map ? chatStorage : new Map();
+
+    //     const materials = extractMaterialsFromOutput(output);
+
+    //     const manualDecision =
+    //         output &&
+    //         !Array.isArray(output) &&
+    //         output.manual_decision &&
+    //         typeof output.manual_decision === "object" &&
+    //         !Array.isArray(output.manual_decision)
+    //             ? output.manual_decision
+    //             : {};
+
+    //     const chatItems = materials.map((material) => {
+    //         const saved = manualDecision[material];
+    //         return {
+    //             material,
+    //             answer: Array.isArray(saved) ? String(saved[0] ?? "") : "",
+    //             blacklist: Array.isArray(saved) ? Boolean(saved[1]) : false,
+    //         };
+    //     });
+
+    //     const cached = safeChatStorage.get(emailId);
+    //     if (Array.isArray(cached) && cached.length > 0) {
+    //         return chatItems.map((item) => {
+    //             const fromCache = cached.find((x) => x.material === item.material);
+    //             return fromCache
+    //                 ? {
+    //                       ...item,
+    //                       answer: fromCache.answer,
+    //                       blacklist: fromCache.blacklist,
+    //                   }
+    //                 : item;
+    //         });
+    //     }
+
+    //     return chatItems;
+    // }
+
     function buildChatItemsFromOutput(output, emailId, chatStorage) {
+        console.log("[MailChat] buildChatItemsFromOutput: emailId =", emailId);
+        console.log("[MailChat] buildChatItemsFromOutput: output =", output);
+
         const safeChatStorage =
             chatStorage instanceof Map ? chatStorage : new Map();
 
         const materials = extractMaterialsFromOutput(output);
+        console.log("[MailChat] buildChatItemsFromOutput: materials =", materials);
 
-        const manualDecision =
-            output &&
-            !Array.isArray(output) &&
-            output.manual_decision &&
-            typeof output.manual_decision === "object" &&
-            !Array.isArray(output.manual_decision)
-                ? output.manual_decision
-                : {};
+        const source = output && typeof output === "object" && !Array.isArray(output)
+            ? output
+            : {};
 
         const chatItems = materials.map((material) => {
-            const saved = manualDecision[material];
+            const saved = source[material];
+            const row = saved && typeof saved === "object" && !Array.isArray(saved)
+                ? saved
+                : {};
+
+            console.log("[MailChat] material row:", {
+                material,
+                saved,
+                normalized: {
+                    target: row.target == null ? "" : String(row.target),
+                    article: row.article == null ? "" : String(row.article),
+                    blacklist: Boolean(row["black-list"]),
+                },
+            });
+
             return {
                 material,
-                answer: Array.isArray(saved) ? String(saved[0] ?? "") : "",
-                blacklist: Array.isArray(saved) ? Boolean(saved[1]) : false,
+                target: row.target == null ? "" : String(row.target),
+                article: row.article == null ? "" : String(row.article),
+                blacklist: Boolean(row["black-list"]),
             };
         });
 
+        console.log("[MailChat] buildChatItemsFromOutput: chatItems =", chatItems);
+
         const cached = safeChatStorage.get(emailId);
+        console.log("[MailChat] buildChatItemsFromOutput: cached =", cached);
+
         if (Array.isArray(cached) && cached.length > 0) {
-            return chatItems.map((item) => {
+            const merged = chatItems.map((item) => {
                 const fromCache = cached.find((x) => x.material === item.material);
                 return fromCache
                     ? {
-                          ...item,
-                          answer: fromCache.answer,
-                          blacklist: fromCache.blacklist,
-                      }
+                        ...item,
+                        target: fromCache.target ?? item.target,
+                        article: fromCache.article ?? item.article,
+                        blacklist: Boolean(fromCache.blacklist),
+                    }
                     : item;
             });
+
+            console.log("[MailChat] buildChatItemsFromOutput: merged chatItems =", merged);
+            return merged;
         }
 
         return chatItems;
@@ -105,7 +188,11 @@
         return !!(
             active &&
             active.classList &&
-            active.classList.contains("answer-input")
+            active.classList &&
+            (
+                active.classList.contains("target-input") ||
+                active.classList.contains("article-input")
+            )
         );
     }
 
@@ -121,7 +208,7 @@
         );
     }
 
-    function bindMaterialInputEvents({ input, item, email, deps }) {
+    function bindMaterialInputEvents({ input, item, email, deps, field }) {
         if (!input) return;
 
         const { state, refreshEmailsSilently } = deps;
@@ -132,7 +219,7 @@
 
         input.addEventListener("compositionend", (e) => {
             state.isMaterialInputComposing = false;
-            item.answer = e.target.value;
+            item[field] = e.target.value;
             state.chatStorage.set(email.id, email.chatItems);
 
             if (state.pendingSilentRefresh && !isEditingMaterialInput()) {
@@ -143,7 +230,7 @@
 
         input.addEventListener("blur", (e) => {
             state.isMaterialInputComposing = false;
-            item.answer = e.target.value;
+            item[field] = e.target.value;
             state.chatStorage.set(email.id, email.chatItems);
 
             setTimeout(() => {
@@ -155,7 +242,7 @@
         });
 
         input.addEventListener("input", (e) => {
-            item.answer = e.target.value;
+            item[field] = e.target.value;
             state.chatStorage.set(email.id, email.chatItems);
 
             if (e.isComposing) {
@@ -171,6 +258,9 @@
             loadAvailableResultDocuments,
             downloadAvailableResultDocuments,
         } = deps;
+
+        console.log("[MailChat] renderChatForEmail: email =", email);
+        console.log("[MailChat] renderChatForEmail: email.chatItems =", email?.chatItems);
 
         const container = document.getElementById("chat-rows-container");
         const submitContainer = document.querySelector(".chat-submit");
@@ -277,12 +367,18 @@
                             Черный список
                         </label>
                     </div>
-                    <div class="chat-row-bottom">
+                    <div class="chat-row-bottom chat-row-bottom-two-fields">
                         <input
                             type="text"
-                            class="answer-input"
-                            value="${escapeHtml(item.answer)}"
-                            placeholder="Введите значение"
+                            class="article-input"
+                            value="${escapeHtml(item.article || "")}"
+                            placeholder="Введите артикул"
+                        >
+                        <input
+                            type="text"
+                            class="target-input"
+                            value="${escapeHtml(item.target || "")}"
+                            placeholder="Введите полуфабрикат"
                         >
                     </div>
                 </div>
@@ -292,28 +388,40 @@
         container.innerHTML = html;
 
         email.chatItems.forEach((item, idx) => {
-            const row = container.querySelector(`.chat-row[data-row-idx="${idx}"]`);
-            if (!row) return;
+        const row = container.querySelector(`.chat-row[data-row-idx="${idx}"]`);
+        if (!row) return;
 
-            const input = row.querySelector(".answer-input");
-            const chk = row.querySelector(".blacklist-checkbox");
+        const articleInput = row.querySelector(".article-input");
+        const targetInput = row.querySelector(".target-input");
+        const chk = row.querySelector(".blacklist-checkbox");
 
-            if (input) {
-                bindMaterialInputEvents({
-                    input,
-                    item,
-                    email,
-                    deps,
-                });
-            }
+        if (articleInput) {
+            bindMaterialInputEvents({
+                input: articleInput,
+                item,
+                email,
+                deps,
+                field: "article",
+            });
+        }
 
-            if (chk) {
-                chk.addEventListener("change", (e) => {
-                    item.blacklist = e.target.checked;
-                    state.chatStorage.set(email.id, email.chatItems);
-                });
-            }
-        });
+        if (targetInput) {
+            bindMaterialInputEvents({
+                input: targetInput,
+                item,
+                email,
+                deps,
+                field: "target",
+            });
+        }
+
+        if (chk) {
+            chk.addEventListener("change", (e) => {
+                item.blacklist = e.target.checked;
+                state.chatStorage.set(email.id, email.chatItems);
+            });
+        }
+    });
     }
 
     async function sendChatData(deps) {
@@ -351,20 +459,13 @@
             return;
         }
 
-        const hasEmpty = email.chatItems.some(
-            (item) => !String(item.answer || "").trim(),
-        );
-        if (hasEmpty) {
-            alert("Заполните все значения перед отправкой");
-            return;
-        }
-
         const manualDecision = {};
         email.chatItems.forEach((item) => {
-            manualDecision[item.material] = [
-                String(item.answer || "").trim(),
-                Boolean(item.blacklist),
-            ];
+            manualDecision[item.material] = {
+                target: String(item.target || "").trim() || null,
+                article: String(item.article || "").trim() || null,
+                "black-list": Boolean(item.blacklist),
+            };
         });
 
         try {
@@ -379,7 +480,19 @@
 
             const data = await resp.json().catch(() => ({}));
             if (!resp.ok) {
-                throw new Error(data.detail || "Ошибка отправки");
+                let message = "Ошибка отправки";
+
+                if (typeof data?.detail === "string") {
+                    message = data.detail;
+                } else if (Array.isArray(data?.detail)) {
+                    message = data.detail
+                        .map((x) => x?.msg || JSON.stringify(x))
+                        .join("; ");
+                } else if (data?.detail && typeof data.detail === "object") {
+                    message = JSON.stringify(data.detail);
+                }
+
+                throw new Error(message);
             }
 
             const savedEmailId = email.id;
@@ -395,12 +508,11 @@
 
                 const chatTab = document.getElementById("tab-chat");
                 if (chatTab && chatTab.classList.contains("active")) {
-                    renderChatForEmail(freshEmail);
+                    renderChatForEmail(freshEmail, deps);
                 } else {
                     renderEmailCard(freshEmail);
                 }
             }
-
         } catch (e) {
             console.error(e);
             alert(e.message || "Ошибка");
@@ -408,7 +520,6 @@
     }
 
     window.MailChat = {
-        extractMaterialNames,
         extractMaterialsFromOutput,
         buildChatItemsFromOutput,
         isEditingMaterialInput,

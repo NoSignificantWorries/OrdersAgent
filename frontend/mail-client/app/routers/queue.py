@@ -4,7 +4,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 
 from app.db import get_db_pool
 from app.routers import auth
@@ -21,8 +21,15 @@ class DecisionUpdate(BaseModel):
     model_decision: str | None = None
     status: str | None = None
 
+class MaterialManualDecisionItem(BaseModel):
+    target: str | None = None
+    article: str | None = None
+    black_list: bool = Field(default=False, alias="black-list")
+
+    model_config = ConfigDict(populate_by_name=True)
+
 class MaterialsManualDecisionUpdate(BaseModel):
-    manual_decision: dict[str, list]
+    manual_decision: dict[str, MaterialManualDecisionItem]
 
 class EmailReadUpdate(BaseModel):
     is_read: bool
@@ -463,22 +470,21 @@ async def update_materials_manual_decision(
                 if not isinstance(material, str) or not material.strip():
                     raise HTTPException(status_code=400, detail="Некорректный ключ материала")
 
-                if not isinstance(value, list) or len(value) != 2:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"manual_decision['{material}'] должен быть массивом [answer, blacklist]"
-                    )
+                normalized_manual_decision = {}
 
-                user_value = str(value[0] or "").strip()
-                blacklist_value = bool(value[1])
+                for material, value in payload.manual_decision.items():
+                    if not isinstance(material, str) or not material.strip():
+                        raise HTTPException(status_code=400, detail="Некорректный ключ материала")
 
-                if not user_value:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Для материала '{material}' не заполнено значение"
-                    )
+                    target_value = (value.target or "").strip() or None
+                    article_value = (value.article or "").strip() or None
+                    blacklist_value = bool(value.black_list)
 
-                normalized_manual_decision[material] = [user_value, blacklist_value]
+                    normalized_manual_decision[material] = {
+                        "target": target_value,
+                        "article": article_value,
+                        "black-list": blacklist_value,
+                    }
 
             updated_task = await conn.fetchrow(
                 """

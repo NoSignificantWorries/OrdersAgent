@@ -7,6 +7,13 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"context"
+    "encoding/json"
+    "net/http"
+    "strconv"
+    "strings"
+
+    mailsmtp "mail/internal/smtp"
 
 	"github.com/joho/godotenv"
 
@@ -45,6 +52,69 @@ func main() {
 	}
 
 	repo := storage.NewDBRepo(db, store)
+
+	smtpClient := mailsmtp.NewClient(mailsmtp.Config{
+		Host: "smtp.yandex.ru",
+		Port: 465,
+	})
+
+	replyMux := http.NewServeMux()
+
+	replyMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	replyMux.HandleFunc("/emails/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		path := strings.TrimPrefix(r.URL.Path, "/emails/")
+		parts := strings.Split(path, "/")
+		if len(parts) != 2 || parts[1] != "reply" {
+			http.NotFound(w, r)
+			return
+		}
+
+		emailID, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil || emailID <= 0 {
+			http.Error(w, "invalid email id", http.StatusBadRequest)
+			return
+		}
+
+		type replyRequest struct {
+			Body string `json:"body"`
+		}
+
+		var req replyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json body", http.StatusBadRequest)
+			return
+		}
+
+		if strings.TrimSpace(req.Body) == "" {
+			http.Error(w, "body is empty", http.StatusBadRequest)
+			return
+		}
+
+		if err := storage.ReplyToEmail(db, smtpClient, storage.ReplyToEmailRequest{
+			EmailID: emailID,
+			Body:    req.Body,
+		}); err != nil {
+			log.Printf("reply send failed | email_id=%d err=%v", emailID, err)
+			http.Error(w, "failed to send reply", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	replyServer := &http.Server{
+		Addr:    ":8080",
+		Handler: replyMux,
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -102,6 +172,13 @@ func main() {
 	}
 
 	log.Printf("mail agent supervisor started")
+	go func() {
+		log.Printf("reply http server started on %s", replyServer.Addr)
+		if err := replyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("reply http server: %v", err)
+		}
+	}()
+
 
 	startNewWorkers()
 
@@ -119,6 +196,12 @@ func main() {
 			mu.Unlock()
 
 			close(stopChan)
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := replyServer.Shutdown(shutdownCtx); err != nil {
+				log.Printf("reply server shutdown: %v", err)
+			}
+			cancel()
+
 			wg.Wait()
 			log.Printf("all user workers stopped")
 			return

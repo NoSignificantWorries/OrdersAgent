@@ -3,11 +3,15 @@
 .vscode/
 
 secrets/
+<<<<<<< HEAD
+private/
+=======
 attachments/
 
 logs/
 **.log
 
+>>>>>>> main-fixes
 
 !.gitkeep
 
@@ -26,7 +30,11 @@ debug/
 app.log
 
 *.bkp
+<<<<<<< HEAD
+
+=======
 private/
 
 *.exe
 build/
+>>>>>>> main-fixes

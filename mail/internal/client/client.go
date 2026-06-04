@@ -88,9 +88,15 @@ func (c *Client) FetchMessage(uid imap.UID) (*imapclient.FetchCommand, error) {
 	fetchOptions := &imap.FetchOptions{
 		UID:      true,
 		Envelope: true,
-		BodySection: []*imap.FetchItemBodySection{{
-			Peek: true,
-		}},
+		BodySection: []*imap.FetchItemBodySection{
+            {
+                Peek: true,
+                Specifier: imap.PartSpecifierHeader,
+            },
+            {
+                Peek: true,
+            },
+        },
 	}
 
 	return c.conn.Fetch(imap.UIDSetNum(uid), fetchOptions), nil
