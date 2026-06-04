@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+from zipfile import ZipFile, ZIP_DEFLATED
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, HTTPException
@@ -120,7 +121,6 @@ async def get_result_documents(task_id: int, request: Request):
         object_key_filename2 = Path(object_key).stem + "_(articles)" + Path(object_key).suffix
         object_key2 = str(Path(object_key).with_name(object_key_filename2))
 
-
         candidates.append(
             {
                 "variant": "articles",
@@ -145,6 +145,118 @@ async def get_result_documents(task_id: int, request: Request):
 
     return {"documents": result_docs}
 
+@router.get("/tasks/{task_id}/result-documents/download-all")
+async def download_all_result_documents(task_id: int, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            task = await conn.fetchrow(
+                """
+                SELECT
+                    t.id,
+                    t.email_id,
+                    e.mailbox
+                FROM tasks t
+                JOIN emails e ON e.id = t.email_id
+                WHERE t.id = $1
+                """,
+                task_id,
+            )
+        else:
+            task = await conn.fetchrow(
+                """
+                SELECT
+                    t.id,
+                    t.email_id,
+                    e.mailbox
+                FROM tasks t
+                JOIN emails e ON e.id = t.email_id
+                WHERE t.id = $1
+                  AND e.mailbox = $2
+                """,
+                task_id,
+                user["email"],
+            )
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Задача не найдена")
+
+        docs = await conn.fetch(
+            """
+            SELECT
+                d.id,
+                d.filename,
+                d.minio_object_key
+            FROM documents d
+            WHERE d.email_id = $1
+            ORDER BY d.id
+            """,
+            task["email_id"],
+        )
+
+    files_to_zip: list[tuple[str, str]] = []
+
+    for doc in docs:
+        base_object_key = doc["minio_object_key"]
+        base_filename = doc["filename"] or f"document-{doc['id']}"
+
+        if not base_object_key:
+            continue
+
+        files_to_zip.append((base_object_key, base_filename))
+
+        articles_display_filename = (
+            Path(base_filename).stem + "_(articles)" + Path(base_filename).suffix
+        )
+        articles_object_key_filename = (
+            Path(base_object_key).stem + "_(articles)" + Path(base_object_key).suffix
+        )
+        articles_object_key = str(
+            Path(base_object_key).with_name(articles_object_key_filename)
+        )
+
+        client = MinIOClient.get_client()
+        try:
+            client.stat_object(RESULTS_BUCKET, articles_object_key)
+            files_to_zip.append((articles_object_key, articles_display_filename))
+        except Exception as e:
+            error_text = str(e)
+            if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+                pass
+            else:
+                raise HTTPException(status_code=500, detail=f"Ошибка проверки файла: {e}")
+
+    if not files_to_zip:
+        raise HTTPException(status_code=404, detail="Результирующие файлы отсутствуют")
+
+    zip_buffer = BytesIO()
+    with ZipFile(zip_buffer, mode="w", compression=ZIP_DEFLATED) as zip_file:
+        for object_key, archive_name in files_to_zip:
+            try:
+                file_bytes = await _load_document_bytes_from_storage(RESULTS_BUCKET, object_key)
+            except Exception as e:
+                error_text = str(e)
+                if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+                    continue
+                raise HTTPException(status_code=500, detail=f"Ошибка чтения файла: {e}")
+
+            zip_file.writestr(archive_name, file_bytes)
+
+    zip_buffer.seek(0)
+
+    zip_name = f"task-{task_id}-results.zip"
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}"
+        },
+    )
 
 @router.get("/queue")
 async def get_queue(

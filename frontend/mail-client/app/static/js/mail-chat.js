@@ -1,64 +1,4 @@
 (function () {
-    // function extractMaterialNames(value) {
-    //     if (!value) return [];
-
-    //     if (Array.isArray(value)) {
-    //         return value.flatMap((item) => {
-    //             if (typeof item === "string") {
-    //                 const s = item.trim();
-    //                 return s ? [s] : [];
-    //             }
-
-    //             if (item && typeof item === "object" && !Array.isArray(item)) {
-    //                 return Object.keys(item)
-    //                     .map((k) => String(k).trim())
-    //                     .filter(Boolean);
-    //             }
-
-    //             return [];
-    //         });
-    //     }
-
-    //     if (value && typeof value === "object") {
-    //         return Object.keys(value)
-    //             .map((k) => String(k).trim())
-    //             .filter(Boolean);
-    //     }
-
-    //     return [];
-    // }
-
-    // function extractMaterialsFromOutput(output) {
-    //     if (!output || typeof output !== "object") return ["output_data"];
-
-    //     if (Array.isArray(output)) {
-    //         return extractMaterialNames(output);
-    //     }
-
-    //     const candidates = [
-    //         output.queries,
-    //         output.requests,
-    //         output.materials,
-    //         output.material_queries,
-    //         output.output_data,
-    //         output.data,
-    //         output.items,
-    //         output.result,
-    //     ];
-
-    //     for (const value of candidates) {
-    //         const names = extractMaterialNames(value);
-    //         if (names.length > 0) return names;
-    //     }
-
-    //     for (const value of Object.values(output)) {
-    //         const names = extractMaterialNames(value);
-    //         if (names.length > 0) return names;
-    //     }
-
-    //     return [];
-    // }
-
     function extractMaterialsFromOutput(output) {
         if (!output || typeof output !== "object" || Array.isArray(output)) {
             return [];
@@ -68,47 +8,6 @@
             .map((k) => String(k).trim())
             .filter(Boolean);
     }
-
-    // function buildChatItemsFromOutput(output, emailId, chatStorage) {
-    //     const safeChatStorage =
-    //         chatStorage instanceof Map ? chatStorage : new Map();
-
-    //     const materials = extractMaterialsFromOutput(output);
-
-    //     const manualDecision =
-    //         output &&
-    //         !Array.isArray(output) &&
-    //         output.manual_decision &&
-    //         typeof output.manual_decision === "object" &&
-    //         !Array.isArray(output.manual_decision)
-    //             ? output.manual_decision
-    //             : {};
-
-    //     const chatItems = materials.map((material) => {
-    //         const saved = manualDecision[material];
-    //         return {
-    //             material,
-    //             answer: Array.isArray(saved) ? String(saved[0] ?? "") : "",
-    //             blacklist: Array.isArray(saved) ? Boolean(saved[1]) : false,
-    //         };
-    //     });
-
-    //     const cached = safeChatStorage.get(emailId);
-    //     if (Array.isArray(cached) && cached.length > 0) {
-    //         return chatItems.map((item) => {
-    //             const fromCache = cached.find((x) => x.material === item.material);
-    //             return fromCache
-    //                 ? {
-    //                       ...item,
-    //                       answer: fromCache.answer,
-    //                       blacklist: fromCache.blacklist,
-    //                   }
-    //                 : item;
-    //         });
-    //     }
-
-    //     return chatItems;
-    // }
 
     function buildChatItemsFromOutput(output, emailId, chatStorage) {
         const safeChatStorage =
@@ -287,7 +186,7 @@
                         downloadBtn.addEventListener("click", async (e) => {
                             e.stopPropagation();
                             try {
-                                await downloadAvailableResultDocuments(docs);
+                                await downloadAvailableResultDocuments(email.task.id, docs);
                             } catch (err) {
                                 console.error(err);
                                 alert(err.message || "Ошибка скачивания");

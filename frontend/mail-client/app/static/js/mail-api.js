@@ -76,18 +76,25 @@
         return data.documents || [];
     }
 
-    async function downloadAvailableResultDocuments(docs) {
+    async function downloadAvailableResultDocuments(taskId, docs) {
         if (!docs.length) {
             alert("Нет файлов для скачивания");
             return;
         }
 
-        for (const doc of docs) {
+        if (docs.length === 1) {
+            const doc = docs[0];
             await downloadBlob(
                 `/api/documents/${doc.id}/result-download?variant=${encodeURIComponent(doc.variant || "main")}`,
                 doc.filename || `result-doc-${doc.id}`,
             );
+            return;
         }
+
+        await downloadBlob(
+            `/api/tasks/${taskId}/result-documents/download-all`,
+            `task-${taskId}-results.zip`,
+        );
     }
 
     async function loadEmailsFromApi(showLoadingState = true, normalizeApiItem) {
