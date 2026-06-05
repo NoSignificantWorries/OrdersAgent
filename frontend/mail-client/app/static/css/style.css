@@ -911,21 +911,54 @@ body {
     }
 }
 
-@media (max-width: 640px) {
-    .reply-block {
-        margin: 14px 0 18px;
-        padding: 12px;
-    }
+.reply-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
 
-    .reply-actions {
-        flex-direction: column;
-    }
+.reply-files-input-native {
+    flex: 0 0 auto;
+    width: 44px;
+    min-width: 44px;
+    overflow: hidden;
+    font-size: 14px;
+    color: transparent;
+    background: transparent;
+}
 
-    .reply-actions .decision-save-btn,
-    .reply-actions .close-task-btn,
-    #reply-toggle-btn {
-        width: 100%;
-    }
+.reply-files-input-native::file-selector-button {
+    width: 36px;
+    height: 36px;
+    border: 0px solid #ffffff00;
+    border-radius: 10px;
+    background: #ffffff00 url("/static/images/attachments.svg") center center / 26px 26px no-repeat;
+    cursor: pointer;
+    color: transparent;
+    font-size: 0;
+    padding: 0;
+    margin: 0;
+}
+
+.reply-files-input-native:hover::file-selector-button {
+    background-color: #f5f7fb;
+    border-color: #b8c2d1;
+}
+
+.reply-files-input-native:focus-visible {
+    outline: none;
+}
+
+.reply-files-input-native:focus-visible::file-selector-button {
+    border-color: #8aa4ff;
+    box-shadow: 0 0 0 3px rgba(138, 164, 255, 0.22);
+}
+
+.reply-files-list {
+    margin-top: 8px;
+    margin-left: 2px;
 }
 
 /* Вложения */

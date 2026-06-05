@@ -325,7 +325,6 @@
                     </div>
                 </div>
 
-
                 ${attachmentBlock}
                 ${decisionBlock}
                 ${closeTaskBlock}
@@ -358,29 +357,30 @@
                             placeholder="Введите текст ответа..."
                         ></textarea>
 
-                        <label for="reply-files-input" class="decision-label">Вложения</label>
-                        <input
-                            id="reply-files-input"
-                            class="reply-files-input"
-                            type="file"
-                            multiple
-                        />
-
                         <div id="reply-files-list" class="reply-files-list"></div>
 
                         <div class="reply-actions">
                             <button type="button" id="reply-send-btn" class="reply-btn reply-btn-primary">
                                 Отправить
                             </button>
+
                             <button type="button" id="reply-cancel-btn" class="reply-btn reply-btn-secondary">
                                 Отмена
                             </button>
+
+                            <input
+                                id="reply-files-input"
+                                class="reply-files-input-native"
+                                type="file"
+                                multiple
+                                aria-label="Добавить вложения"
+                                title="Добавить вложения"
+                            />
                         </div>
                     </div>
                 </div>
 
                 <div id="mail-toast" class="mail-toast" aria-live="polite" aria-atomic="true"></div>
-
             </div>
         `;
 
