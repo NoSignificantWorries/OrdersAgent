@@ -879,6 +879,38 @@ body {
     display: none !important;
 }
 
+.mail-toast {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 1000;
+    min-width: 180px;
+    max-width: 320px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(31, 41, 55, 0.712);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.35;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    pointer-events: none;
+}
+
+.mail-toast.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mail-toast {
+        transition: none;
+        transform: none;
+    }
+}
+
 @media (max-width: 640px) {
     .reply-block {
         margin: 14px 0 18px;

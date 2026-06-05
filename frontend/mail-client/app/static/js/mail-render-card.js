@@ -75,6 +75,17 @@
             state.isReplyInputComposing = false;
             state.replyDrafts.set(realEmailId, e.target.value);
 
+            const nextFocused = e.relatedTarget;
+            const isReplyActionTarget =
+                nextFocused &&
+                (nextFocused.id === "reply-send-btn" ||
+                nextFocused.id === "reply-cancel-btn" ||
+                nextFocused.id === "reply-toggle-btn");
+
+            if (isReplyActionTarget) {
+                return;
+            }
+
             setTimeout(() => {
                 if (!isEditingReplyInput() && state.pendingSilentRefresh) {
                     state.pendingSilentRefresh = false;
@@ -104,6 +115,24 @@
                 state.isReplyInputComposing = true;
             }
         });
+    }
+
+    let toastTimer = null;
+
+    function showToast(message) {
+        const toast = document.getElementById("mail-toast");
+        if (!toast) return;
+
+        toast.textContent = message;
+        toast.classList.add("is-visible");
+
+        if (toastTimer) {
+            clearTimeout(toastTimer);
+        }
+
+        toastTimer = setTimeout(() => {
+            toast.classList.remove("is-visible");
+        }, 2800);
     }
 
     function renderEmailCard(email, deps) {
@@ -336,6 +365,8 @@
                     </div>
                 </div>
 
+                <div id="mail-toast" class="mail-toast" aria-live="polite" aria-atomic="true"></div>
+
             </div>
         `;
 
@@ -409,7 +440,7 @@
                         throw new Error(errorMessage);
                     }
 
-                    alert("Ответное письмо отправлено");
+                    showToast("Письмо отправлено");
                     state.replyDrafts.delete(realEmailId);
                     replyBodyInput.value = "";
                     replyFormBlock.hidden = true;
