@@ -1064,6 +1064,9 @@ async def reply_to_email(
         raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
 
     if resp.status_code != 204:
+        print("mail service status =", resp.status_code)
+        print("mail service text =", resp.text)
+
         detail = "Не удалось отправить ответное письмо"
         try:
             data = resp.json()

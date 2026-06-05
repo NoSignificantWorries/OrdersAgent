@@ -89,12 +89,21 @@ func main() {
 			return
 		}
 
-		if err := r.ParseMultipartForm(25 << 20); err != nil {
-			http.Error(w, "invalid multipart form", http.StatusBadRequest)
-			return
+		contentType := r.Header.Get("Content-Type")
+
+		if strings.HasPrefix(contentType, "multipart/form-data") {
+			if err := r.ParseMultipartForm(25 << 20); err != nil {
+				http.Error(w, "invalid multipart form", http.StatusBadRequest)
+				return
+			}
+		} else {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
 		}
 
-		log.Printf("reply multipart parsed | email_id=%d body=%q", emailID, r.FormValue("body"))
+		log.Printf("reply parsed | email_id=%d content_type=%q body=%q", emailID, contentType, r.FormValue("body"))
 
 		body := strings.TrimSpace(r.FormValue("body"))
 		if body == "" {
@@ -136,14 +145,14 @@ func main() {
 					return
 				}
 
-				contentType := strings.TrimSpace(fh.Header.Get("Content-Type"))
-				if contentType == "" {
-					contentType = "application/octet-stream"
+				partContentType := strings.TrimSpace(fh.Header.Get("Content-Type"))
+				if partContentType == "" {
+					partContentType = "application/octet-stream"
 				}
 
 				attachments = append(attachments, storage.ReplyAttachment{
 					Filename:    fh.Filename,
-					ContentType: contentType,
+					ContentType: partContentType,
 					Data:        data,
 				})
 			}
