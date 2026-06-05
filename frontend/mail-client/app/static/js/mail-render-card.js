@@ -43,10 +43,14 @@
     }
 
     function isReplyInputProtected(state) {
+        const selectedId = state.selectedEmailId;
+
         return (
             isEditingReplyInput() ||
             state.isReplyInputFocused === true ||
-            state.isReplyInputComposing === true
+            state.isReplyInputComposing === true ||
+            state.isReplyFileDialogOpen === true ||
+            (selectedId != null && state.openReplyForms?.has(selectedId) === true)
         );
     }
 
@@ -87,7 +91,7 @@
             }
 
             setTimeout(() => {
-                if (!isEditingReplyInput() && state.pendingSilentRefresh) {
+                if (state.pendingSilentRefresh && !isReplyInputProtected(state)) {
                     state.pendingSilentRefresh = false;
                     refreshEmailsSilently();
                 }
@@ -102,7 +106,7 @@
             state.isReplyInputComposing = false;
             state.replyDrafts.set(realEmailId, e.target.value);
 
-            if (state.pendingSilentRefresh && !isEditingReplyInput()) {
+            if (state.pendingSilentRefresh && !isReplyInputProtected(state)) {
                 state.pendingSilentRefresh = false;
                 refreshEmailsSilently();
             }
@@ -255,7 +259,7 @@
 
         const realEmailId = email.email_id || email.id;
         const savedReplyDraft = state.replyDrafts?.get(realEmailId) || "";
-        const shouldShowReplyForm = Boolean(savedReplyDraft);
+        const shouldShowReplyForm = state.openReplyForms?.has(realEmailId) === true;
 
         emailView.innerHTML = `
             <div class="email-card">
@@ -354,6 +358,16 @@
                             placeholder="Введите текст ответа..."
                         ></textarea>
 
+                        <label for="reply-files-input" class="decision-label">Вложения</label>
+                        <input
+                            id="reply-files-input"
+                            class="reply-files-input"
+                            type="file"
+                            multiple
+                        />
+
+                        <div id="reply-files-list" class="reply-files-list"></div>
+
                         <div class="reply-actions">
                             <button type="button" id="reply-send-btn" class="reply-btn reply-btn-primary">
                                 Отправить
@@ -382,6 +396,8 @@
         const replyBodyInput = document.getElementById("reply-body-input");
         const replySendBtn = document.getElementById("reply-send-btn");
         const replyCancelBtn = document.getElementById("reply-cancel-btn");
+        const replyFilesInput = document.getElementById("reply-files-input");
+        const replyFilesList = document.getElementById("reply-files-list");
 
         if (replyBodyInput) {
             replyBodyInput.value = savedReplyDraft;
@@ -392,8 +408,46 @@
             });
         }
 
+        if (replyFilesInput && replyFilesList) {
+            replyFilesInput.addEventListener("click", () => {
+                state.isReplyFileDialogOpen = true;
+            });
+
+            replyFilesInput.addEventListener("change", () => {
+                state.isReplyFileDialogOpen = false;
+
+                const files = Array.from(replyFilesInput.files || []);
+
+                replyFilesList.innerHTML = files.length
+                    ? files
+                        .map(
+                            (file) =>
+                                `<div class="reply-file-item">${escapeHtml(file.name)}</div>`,
+                        )
+                        .join("")
+                    : "";
+
+                if (state.pendingSilentRefresh && !isReplyInputProtected(state)) {
+                    state.pendingSilentRefresh = false;
+                    refreshEmailsSilently();
+                }
+            });
+
+            replyFilesInput.addEventListener("blur", () => {
+                setTimeout(() => {
+                    state.isReplyFileDialogOpen = false;
+
+                    if (state.pendingSilentRefresh && !isReplyInputProtected(state)) {
+                        state.pendingSilentRefresh = false;
+                        refreshEmailsSilently();
+                    }
+                }, 0);
+            });
+        }
+
         if (replyToggleBtn && replyFormBlock && replyBodyInput) {
             replyToggleBtn.addEventListener("click", () => {
+                state.openReplyForms?.add(realEmailId);
                 replyFormBlock.hidden = false;
                 replyToggleBtn.hidden = true;
                 replyBodyInput.focus();
@@ -405,7 +459,13 @@
                 replyFormBlock.hidden = true;
                 if (replyToggleBtn) replyToggleBtn.hidden = false;
                 replyBodyInput.value = "";
-                state.replyDrafts?.delete(realEmailId);
+                if (replyFilesInput) replyFilesInput.value = "";
+                if (replyFilesList) replyFilesList.innerHTML = "";
+                state.isReplyFileDialogOpen = false;
+                state.isReplyInputFocused = false;
+                state.isReplyInputComposing = false;
+                state.replyDrafts.delete(realEmailId);
+                state.openReplyForms?.delete(realEmailId);
             });
         }
 
@@ -422,13 +482,34 @@
                 if (replyCancelBtn) replyCancelBtn.disabled = true;
 
                 try {
+                    const formData = new FormData();
+                    formData.append("body", body);
+
+                    const files = Array.from(replyFilesInput?.files || []);
+                    for (const file of files) {
+                        formData.append("attachments", file, file.name);
+                    }
+
+                    
+                    for (const [key, value] of formData.entries()) {
+                        console.log("formData", key, value);
+                    }
+
+                    console.log("reply body:", body);
+                    console.log(
+                        "reply files:",
+                        Array.from(replyFilesInput?.files || []).map((f) => ({
+                            name: f.name,
+                            size: f.size,
+                            type: f.type,
+                        })),
+                    );
+
+                    
                     const resp = await fetch(`/api/emails/${realEmailId}/reply`, {
                         method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                        },
                         credentials: "same-origin",
-                        body: JSON.stringify({ body }),
+                        body: formData,
                     });
 
                     if (!resp.ok) {
@@ -442,13 +523,20 @@
 
                     showToast("Письмо отправлено");
                     state.replyDrafts.delete(realEmailId);
+                    state.openReplyForms?.delete(realEmailId);
+                    state.isReplyInputFocused = false;
+                    state.isReplyInputComposing = false;
                     replyBodyInput.value = "";
+                    if (replyFilesInput) replyFilesInput.value = "";
+                    if (replyFilesList) replyFilesList.innerHTML = "";
+                    state.isReplyFileDialogOpen = false;
                     replyFormBlock.hidden = true;
                     if (replyToggleBtn) replyToggleBtn.hidden = false;
                 } catch (e) {
                     console.error(e);
                     alert(e.message || "Не удалось отправить письмо");
                 } finally {
+                    state.isReplyFileDialogOpen = false;
                     replySendBtn.disabled = false;
                     if (replyToggleBtn) replyToggleBtn.disabled = false;
                     if (replyCancelBtn) replyCancelBtn.disabled = false;

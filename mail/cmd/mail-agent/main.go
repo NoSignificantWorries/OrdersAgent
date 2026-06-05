@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 	"context"
-    "encoding/json"
+    "io"
     "net/http"
     "strconv"
     "strings"
@@ -89,24 +89,72 @@ func main() {
 			return
 		}
 
-		type replyRequest struct {
-			Body string `json:"body"`
-		}
-
-		var req replyRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid json body", http.StatusBadRequest)
+		if err := r.ParseMultipartForm(25 << 20); err != nil {
+			http.Error(w, "invalid multipart form", http.StatusBadRequest)
 			return
 		}
 
-		if strings.TrimSpace(req.Body) == "" {
+		log.Printf("reply multipart parsed | email_id=%d body=%q", emailID, r.FormValue("body"))
+
+		body := strings.TrimSpace(r.FormValue("body"))
+		if body == "" {
 			http.Error(w, "body is empty", http.StatusBadRequest)
 			return
 		}
 
+		const maxAttachmentsCount = 5
+		const maxAttachmentSize = 10 << 20 // 10 MB
+
+		var attachments []storage.ReplyAttachment
+
+		if r.MultipartForm != nil {
+			files := r.MultipartForm.File["attachments"]
+
+			if len(files) > maxAttachmentsCount {
+				http.Error(w, "too many attachments", http.StatusBadRequest)
+				return
+			}
+
+			attachments = make([]storage.ReplyAttachment, 0, len(files))
+
+			for _, fh := range files {
+				src, err := fh.Open()
+				if err != nil {
+					http.Error(w, "failed to open attachment", http.StatusBadRequest)
+					return
+				}
+
+				data, err := io.ReadAll(src)
+				_ = src.Close()
+				if err != nil {
+					http.Error(w, "failed to read attachment", http.StatusBadRequest)
+					return
+				}
+
+				if len(data) > maxAttachmentSize {
+					http.Error(w, "attachment too large", http.StatusBadRequest)
+					return
+				}
+
+				contentType := strings.TrimSpace(fh.Header.Get("Content-Type"))
+				if contentType == "" {
+					contentType = "application/octet-stream"
+				}
+
+				attachments = append(attachments, storage.ReplyAttachment{
+					Filename:    fh.Filename,
+					ContentType: contentType,
+					Data:        data,
+				})
+			}
+		}
+
+		log.Printf("reply send start | email_id=%d attachments=%d", emailID, len(attachments))
+
 		if err := storage.ReplyToEmail(db, smtpClient, imapCfg, storage.ReplyToEmailRequest{
-			EmailID: emailID,
-			Body:    req.Body,
+			EmailID:     emailID,
+			Body:        body,
+			Attachments: attachments,
 		}); err != nil {
 			log.Printf("reply send failed | email_id=%d err=%v", emailID, err)
 			http.Error(w, "failed to send reply", http.StatusInternalServerError)

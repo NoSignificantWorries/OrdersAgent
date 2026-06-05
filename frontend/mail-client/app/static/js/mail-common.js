@@ -70,6 +70,8 @@ let refreshSeq = 0;
 let isReplyInputComposing = false;
 const replyDrafts = new Map();
 let isReplyInputFocused = false;
+let isReplyFileDialogOpen = false;
+const openReplyForms = new Set();
 
 // ========== КОНФИГУРАЦИЯ ==========
 const decisionOptions = [
@@ -215,6 +217,8 @@ function getMailRenderListState() {
         set unreadCount(value) {
             unreadCount = value;
         },
+
+        openReplyForms,
     };
 }
 
@@ -289,8 +293,15 @@ function getMailRenderCardState() {
         set isReplyInputFocused(value) {
             isReplyInputFocused = value;
         },
+        get isReplyFileDialogOpen() {
+            return isReplyFileDialogOpen;
+        },
+        set isReplyFileDialogOpen(value) {
+            isReplyFileDialogOpen = value;
+        },
         replyDrafts,
         chatStorage,
+        openReplyForms,
     };
 }
 
@@ -350,7 +361,14 @@ function isMaterialInputProtected() {
 }
 
 function isReplyInputProtected(state) {
-    return isReplyInputProtectedFromModule(state);
+    const selectedId = state.selectedEmailId;
+
+    return (
+        state.isReplyInputFocused === true ||
+        state.isReplyInputComposing === true ||
+        state.isReplyFileDialogOpen === true ||
+        (selectedId != null && state.openReplyForms?.has(selectedId) === true)
+    );
 }
 
 function getMailChatDeps() {
@@ -422,6 +440,7 @@ function getMailInitState() {
         },
         chatStorage,
         replyDrafts,
+        openReplyForms, 
         get currentSearchTerm() {
             return currentSearchTerm;
         },
@@ -475,6 +494,12 @@ function getMailInitState() {
         },
         set isReplyInputFocused(value) {
             isReplyInputFocused = value;
+        },
+        get isReplyFileDialogOpen() {
+            return isReplyFileDialogOpen;
+        },
+        set isReplyFileDialogOpen(value) {
+            isReplyFileDialogOpen = value;
         },
     };
 }
