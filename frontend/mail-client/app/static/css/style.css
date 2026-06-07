@@ -961,6 +961,63 @@ body {
     margin-left: 2px;
 }
 
+.reply-files-list {
+    margin-top: 8px;
+    margin-left: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.reply-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 8px;
+    min-height: 36px;
+    padding: 5px 5px;
+    border: 1px solid #d7dbe2;
+    border-radius: 10px;
+    background: #f8f9fb;
+}
+
+.reply-file-name {
+    min-width: 0;
+    font-size: 14px;
+    color: #2b2f36;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.reply-file-remove-btn {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border: 1px solid #d7dbe2;
+    border-radius: 8px;
+    background: #fff;
+    color: #5b6575;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.reply-file-remove-btn:hover {
+    background: #f1f4f8;
+    border-color: #bcc6d6;
+    color: #2f3744;
+}
+
+.reply-file-remove-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(138, 164, 255, 0.22);
+}
+
 /* Вложения */
 .email-attachments {
     margin: 16px 0;

@@ -409,23 +409,54 @@
         }
 
         if (replyFilesInput && replyFilesList) {
+            const renderReplyFiles = () => {
+                const files = Array.from(replyFilesInput.files || []);
+
+                replyFilesList.innerHTML = files.length
+                    ? files
+                        .map(
+                            (file, index) => `
+                                <div class="reply-file-item">
+                                    <div class="reply-file-name" title="${escapeHtml(file.name)}">
+                                        ${escapeHtml(file.name)}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        class="reply-file-remove-btn"
+                                        data-file-index="${index}"
+                                        aria-label="Убрать файл ${escapeHtml(file.name)}"
+                                        title="Убрать"
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            `,
+                        )
+                        .join("")
+                    : "";
+            };
+
+            const removeReplyFileByIndex = (removeIndex) => {
+                const dt = new DataTransfer();
+                const files = Array.from(replyFilesInput.files || []);
+
+                files.forEach((file, index) => {
+                    if (index !== removeIndex) {
+                        dt.items.add(file);
+                    }
+                });
+
+                replyFilesInput.files = dt.files;
+                renderReplyFiles();
+            };
+
             replyFilesInput.addEventListener("click", () => {
                 state.isReplyFileDialogOpen = true;
             });
 
             replyFilesInput.addEventListener("change", () => {
                 state.isReplyFileDialogOpen = false;
-
-                const files = Array.from(replyFilesInput.files || []);
-
-                replyFilesList.innerHTML = files.length
-                    ? files
-                        .map(
-                            (file) =>
-                                `<div class="reply-file-item">${escapeHtml(file.name)}</div>`,
-                        )
-                        .join("")
-                    : "";
+                renderReplyFiles();
 
                 if (state.pendingSilentRefresh && !isReplyInputProtected(state)) {
                     state.pendingSilentRefresh = false;
@@ -442,6 +473,20 @@
                         refreshEmailsSilently();
                     }
                 }, 0);
+            });
+
+            replyFilesList.addEventListener("click", (event) => {
+                const removeBtn = event.target.closest(".reply-file-remove-btn");
+                if (!removeBtn) {
+                    return;
+                }
+
+                const removeIndex = Number(removeBtn.dataset.fileIndex);
+                if (Number.isNaN(removeIndex)) {
+                    return;
+                }
+
+                removeReplyFileByIndex(removeIndex);
             });
         }
 

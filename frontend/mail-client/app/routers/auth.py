@@ -29,7 +29,6 @@ async def auth_yandex():
     """Начало авторизации через Яндекс (с правами на почту)"""
     state = generate_state()
 
-    # Если агент только читает письма, можно заменить на mail:imap_ro
     scope = "login:email login:info mail:imap_full mail:smtp"
 
     params = {
