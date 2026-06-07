@@ -1,75 +1,5 @@
 (function () {
-    console.error("MAIL-CHAT NEW FILE LOADED");
-
-    // function extractMaterialNames(value) {
-    //     if (!value) return [];
-
-    //     if (Array.isArray(value)) {
-    //         return value.flatMap((item) => {
-    //             if (typeof item === "string") {
-    //                 const s = item.trim();
-    //                 return s ? [s] : [];
-    //             }
-
-    //             if (item && typeof item === "object" && !Array.isArray(item)) {
-    //                 return Object.keys(item)
-    //                     .map((k) => String(k).trim())
-    //                     .filter(Boolean);
-    //             }
-
-    //             return [];
-    //         });
-    //     }
-
-    //     if (value && typeof value === "object") {
-    //         return Object.keys(value)
-    //             .map((k) => String(k).trim())
-    //             .filter(Boolean);
-    //     }
-
-    //     return [];
-    // }
-
-    // function extractMaterialsFromOutput(output) {
-    //     if (!output || typeof output !== "object") return ["output_data"];
-
-    //     if (Array.isArray(output)) {
-    //         return extractMaterialNames(output);
-    //     }
-
-    //     const candidates = [
-    //         output.queries,
-    //         output.requests,
-    //         output.materials,
-    //         output.material_queries,
-    //         output.output_data,
-    //         output.data,
-    //         output.items,
-    //         output.result,
-    //     ];
-
-    //     for (const value of candidates) {
-    //         const names = extractMaterialNames(value);
-    //         if (names.length > 0) return names;
-    //     }
-
-    //     for (const value of Object.values(output)) {
-    //         const names = extractMaterialNames(value);
-    //         if (names.length > 0) return names;
-    //     }
-
-    //     return [];
-    // }
-
     function extractMaterialsFromOutput(output) {
-        console.log("[MailChat] extractMaterialsFromOutput: raw output =", output);
-        console.log(
-            "[MailChat] extractMaterialsFromOutput: keys =",
-            output && typeof output === "object" && !Array.isArray(output)
-                ? Object.keys(output)
-                : null,
-        );
-
         if (!output || typeof output !== "object" || Array.isArray(output)) {
             return [];
         }
@@ -79,56 +9,11 @@
             .filter(Boolean);
     }
 
-    // function buildChatItemsFromOutput(output, emailId, chatStorage) {
-    //     const safeChatStorage =
-    //         chatStorage instanceof Map ? chatStorage : new Map();
-
-    //     const materials = extractMaterialsFromOutput(output);
-
-    //     const manualDecision =
-    //         output &&
-    //         !Array.isArray(output) &&
-    //         output.manual_decision &&
-    //         typeof output.manual_decision === "object" &&
-    //         !Array.isArray(output.manual_decision)
-    //             ? output.manual_decision
-    //             : {};
-
-    //     const chatItems = materials.map((material) => {
-    //         const saved = manualDecision[material];
-    //         return {
-    //             material,
-    //             answer: Array.isArray(saved) ? String(saved[0] ?? "") : "",
-    //             blacklist: Array.isArray(saved) ? Boolean(saved[1]) : false,
-    //         };
-    //     });
-
-    //     const cached = safeChatStorage.get(emailId);
-    //     if (Array.isArray(cached) && cached.length > 0) {
-    //         return chatItems.map((item) => {
-    //             const fromCache = cached.find((x) => x.material === item.material);
-    //             return fromCache
-    //                 ? {
-    //                       ...item,
-    //                       answer: fromCache.answer,
-    //                       blacklist: fromCache.blacklist,
-    //                   }
-    //                 : item;
-    //         });
-    //     }
-
-    //     return chatItems;
-    // }
-
     function buildChatItemsFromOutput(output, emailId, chatStorage) {
-        console.log("[MailChat] buildChatItemsFromOutput: emailId =", emailId);
-        console.log("[MailChat] buildChatItemsFromOutput: output =", output);
-
         const safeChatStorage =
             chatStorage instanceof Map ? chatStorage : new Map();
 
         const materials = extractMaterialsFromOutput(output);
-        console.log("[MailChat] buildChatItemsFromOutput: materials =", materials);
 
         const source = output && typeof output === "object" && !Array.isArray(output)
             ? output
@@ -140,16 +25,6 @@
                 ? saved
                 : {};
 
-            console.log("[MailChat] material row:", {
-                material,
-                saved,
-                normalized: {
-                    target: row.target == null ? "" : String(row.target),
-                    article: row.article == null ? "" : String(row.article),
-                    blacklist: Boolean(row["black-list"]),
-                },
-            });
-
             return {
                 material,
                 target: row.target == null ? "" : String(row.target),
@@ -158,10 +33,7 @@
             };
         });
 
-        console.log("[MailChat] buildChatItemsFromOutput: chatItems =", chatItems);
-
         const cached = safeChatStorage.get(emailId);
-        console.log("[MailChat] buildChatItemsFromOutput: cached =", cached);
 
         if (Array.isArray(cached) && cached.length > 0) {
             const merged = chatItems.map((item) => {
@@ -176,7 +48,6 @@
                     : item;
             });
 
-            console.log("[MailChat] buildChatItemsFromOutput: merged chatItems =", merged);
             return merged;
         }
 
@@ -259,9 +130,6 @@
             downloadAvailableResultDocuments,
         } = deps;
 
-        console.log("[MailChat] renderChatForEmail: email =", email);
-        console.log("[MailChat] renderChatForEmail: email.chatItems =", email?.chatItems);
-
         const container = document.getElementById("chat-rows-container");
         const submitContainer = document.querySelector(".chat-submit");
 
@@ -318,7 +186,7 @@
                         downloadBtn.addEventListener("click", async (e) => {
                             e.stopPropagation();
                             try {
-                                await downloadAvailableResultDocuments(docs);
+                                await downloadAvailableResultDocuments(email.task.id, docs);
                             } catch (err) {
                                 console.error(err);
                                 alert(err.message || "Ошибка скачивания");

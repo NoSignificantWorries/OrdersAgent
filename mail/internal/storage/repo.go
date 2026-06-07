@@ -13,6 +13,7 @@ import (
 	"mail/internal/parser"
 	"mail/storage/api"
 	minio "worker/minio/minio"
+	"mail/internal/config"
 )
 
 // Repository — общий интерфейс хранилища.
@@ -49,10 +50,17 @@ type EmailReplyContext struct {
     EmailDate         time.Time
 }
 
+type ReplyAttachment struct {
+    Filename    string
+    ContentType string
+    Data        []byte
+}
+
 // ReplyToEmailRequest — данные для ответа на письмо.
 type ReplyToEmailRequest struct {
-    EmailID int64  // ID письма в таблице emails
-    Body    string // Текст ответа (plain text)
+    EmailID     int64
+    Body        string
+    Attachments []ReplyAttachment
 }
 
 // DBRepo — пишет метаданные в Postgres и файлы в MinIO.
@@ -388,7 +396,7 @@ func GetEmailReplyContext(db *api.DB, emailID int64) (*EmailReplyContext, error)
 
 
 // ReplyToEmail — формирует и отправляет ответ на письмо через SMTP.
-func ReplyToEmail(db *api.DB, smtpClient *mailsmtp.Client, req ReplyToEmailRequest) error {
+func ReplyToEmail(db *api.DB, smtpClient *mailsmtp.Client, imapCfg *config.Config, req ReplyToEmailRequest) error {
     // 1. Получаем контекст письма (email + user_id).
     ctx, err := GetEmailReplyContext(db, req.EmailID)
     if err != nil {
@@ -443,26 +451,48 @@ func ReplyToEmail(db *api.DB, smtpClient *mailsmtp.Client, req ReplyToEmailReque
     //host := "smtp.yandex.ru"
     auth := mailsmtp.AuthXOAuth2(authData.Email, authData.AccessToken)
 
-	fmt.Printf(
-		"reply debug | email_id=%d to=%s subject=%q in_reply_to=%q references=%q message_id_parent=%q\n",
-		req.EmailID,
-		to,
-		subject,
-		headers["In-Reply-To"],
-		headers["References"],
-		ctx.MessageID,
-	)
-
     // 7. Отправляем письмо.
-    if err := smtpClient.SendPlainText(
-        authData.Email,
-        []string{to},
-        headers,
-        req.Body,
-        auth,
-    ); err != nil {
-        return fmt.Errorf("send reply smtp: %w", err)
-    }
+	var raw []byte
 
-    return nil
+	if len(req.Attachments) == 0 {
+		raw, err = smtpClient.SendPlainText(
+			authData.Email,
+			[]string{to},
+			headers,
+			req.Body,
+			auth,
+		)
+		if err != nil {
+			return fmt.Errorf("send reply smtp: %w", err)
+		}
+	} else {
+		smtpAttachments := make([]mailsmtp.Attachment, 0, len(req.Attachments))
+		for _, att := range req.Attachments {
+			smtpAttachments = append(smtpAttachments, mailsmtp.Attachment{
+				Filename:    att.Filename,
+				ContentType: att.ContentType,
+				Data:        att.Data,
+			})
+		}
+
+		raw, err = smtpClient.SendWithAttachments(
+			authData.Email,
+			[]string{to},
+			headers,
+			req.Body,
+			smtpAttachments,
+			auth,
+		)
+		if err != nil {
+			return fmt.Errorf("send reply smtp with attachments: %w", err)
+		}
+	}
+
+	go func(rawMsg []byte, auth *UserMailAuth) {
+    if err := appendToSent(rawMsg, auth, imapCfg); err != nil {
+			fmt.Printf("append to Sent failed: %v\n", err)
+		}
+	}(raw, authData)
+
+	return nil
 }

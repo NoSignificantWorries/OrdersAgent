@@ -1,10 +1,14 @@
 import json
 from io import BytesIO
+from zipfile import ZipFile, ZIP_DEFLATED
 from urllib.parse import quote
+import httpx
 
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import StreamingResponse
+from typing import Annotated
+from fastapi import APIRouter, Request, HTTPException, Form, File, UploadFile
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field, ConfigDict
+from pathlib import Path
 
 from app.db import get_db_pool
 from app.routers import auth
@@ -33,6 +37,9 @@ class MaterialsManualDecisionUpdate(BaseModel):
 
 class EmailReadUpdate(BaseModel):
     is_read: bool
+
+# class EmailReplyCreate(BaseModel):
+#     body: str
 
 async def _load_document_bytes_from_storage(bucket_name: str, object_key: str) -> bytes:
     client = MinIOClient.get_client()
@@ -102,31 +109,159 @@ async def get_result_documents(task_id: int, request: Request):
 
     for doc in docs:
         object_key = doc["minio_object_key"]
+        filename = doc["filename"] or f"document-{doc['id']}"
+
         if not object_key:
             continue
 
-        try:
-            client.stat_object(RESULTS_BUCKET, object_key)
-            result_docs.append({
-                "id": doc["id"],
-                "filename": doc["filename"] or f"document-{doc['id']}",
-            })
+        candidates = [
+            {
+                "variant": "main",
+                "object_key": object_key,
+                "filename": filename,
+            }
+        ]
 
-        # Предпочтительно ловить конкретный тип ошибки MinIO SDK.
-        # Например:
-        # except S3Error as e:
-        #     if e.code in ("NoSuchKey", "NoSuchObject"):
-        #         continue
-        #     raise HTTPException(status_code=500, detail=f"Ошибка проверки файла: {e}")
+        display_filename2 = Path(filename).stem + "_(articles)" + Path(filename).suffix
+        object_key_filename2 = Path(object_key).stem + "_(articles)" + Path(object_key).suffix
+        object_key2 = str(Path(object_key).with_name(object_key_filename2))
 
-        except Exception as e:
-            error_text = str(e)
-            if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
-                continue
-            raise HTTPException(status_code=500, detail=f"Ошибка проверки файла: {e}")
+        candidates.append(
+            {
+                "variant": "articles",
+                "object_key": object_key2,
+                "filename": display_filename2,
+            }
+        )
+
+        for candidate in candidates:
+            try:
+                client.stat_object(RESULTS_BUCKET, candidate["object_key"])
+                result_docs.append({
+                    "id": doc["id"],
+                    "filename": candidate["filename"],
+                    "variant": candidate["variant"],
+                })
+            except Exception as e:
+                error_text = str(e)
+                if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+                    continue
+                raise HTTPException(status_code=500, detail=f"Ошибка проверки файла: {e}")
 
     return {"documents": result_docs}
 
+@router.get("/tasks/{task_id}/result-documents/download-all")
+async def download_all_result_documents(task_id: int, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            task = await conn.fetchrow(
+                """
+                SELECT
+                    t.id,
+                    t.email_id,
+                    e.mailbox
+                FROM tasks t
+                JOIN emails e ON e.id = t.email_id
+                WHERE t.id = $1
+                """,
+                task_id,
+            )
+        else:
+            task = await conn.fetchrow(
+                """
+                SELECT
+                    t.id,
+                    t.email_id,
+                    e.mailbox
+                FROM tasks t
+                JOIN emails e ON e.id = t.email_id
+                WHERE t.id = $1
+                  AND e.mailbox = $2
+                """,
+                task_id,
+                user["email"],
+            )
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Задача не найдена")
+
+        docs = await conn.fetch(
+            """
+            SELECT
+                d.id,
+                d.filename,
+                d.minio_object_key
+            FROM documents d
+            WHERE d.email_id = $1
+            ORDER BY d.id
+            """,
+            task["email_id"],
+        )
+
+    files_to_zip: list[tuple[str, str]] = []
+
+    for doc in docs:
+        base_object_key = doc["minio_object_key"]
+        base_filename = doc["filename"] or f"document-{doc['id']}"
+
+        if not base_object_key:
+            continue
+
+        files_to_zip.append((base_object_key, base_filename))
+
+        articles_display_filename = (
+            Path(base_filename).stem + "_(articles)" + Path(base_filename).suffix
+        )
+        articles_object_key_filename = (
+            Path(base_object_key).stem + "_(articles)" + Path(base_object_key).suffix
+        )
+        articles_object_key = str(
+            Path(base_object_key).with_name(articles_object_key_filename)
+        )
+
+        client = MinIOClient.get_client()
+        try:
+            client.stat_object(RESULTS_BUCKET, articles_object_key)
+            files_to_zip.append((articles_object_key, articles_display_filename))
+        except Exception as e:
+            error_text = str(e)
+            if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+                pass
+            else:
+                raise HTTPException(status_code=500, detail=f"Ошибка проверки файла: {e}")
+
+    if not files_to_zip:
+        raise HTTPException(status_code=404, detail="Результирующие файлы отсутствуют")
+
+    zip_buffer = BytesIO()
+    with ZipFile(zip_buffer, mode="w", compression=ZIP_DEFLATED) as zip_file:
+        for object_key, archive_name in files_to_zip:
+            try:
+                file_bytes = await _load_document_bytes_from_storage(RESULTS_BUCKET, object_key)
+            except Exception as e:
+                error_text = str(e)
+                if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+                    continue
+                raise HTTPException(status_code=500, detail=f"Ошибка чтения файла: {e}")
+
+            zip_file.writestr(archive_name, file_bytes)
+
+    zip_buffer.seek(0)
+
+    zip_name = f"task-{task_id}-results.zip"
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}"
+        },
+    )
 
 @router.get("/queue")
 async def get_queue(
@@ -162,6 +297,7 @@ async def _download_document_by_id(
     request: Request,
     bucket_name: str,
     not_found_detail: str = "Файл не найден",
+    variant: str = "main",
 ):
     user = auth.get_current_user(request)
     if not user:
@@ -206,15 +342,26 @@ async def _download_document_by_id(
     if not row:
         raise HTTPException(status_code=404, detail=not_found_detail)
 
-    object_key = row["minio_object_key"]
-    filename = row["filename"] or f"document-{document_id}"
+    base_object_key = row["minio_object_key"]
+    base_filename = row["filename"] or f"document-{document_id}"
 
-    if not object_key:
+    if not base_object_key:
         raise HTTPException(status_code=404, detail="У файла отсутствует object_key")
+
+    if variant == "main":
+        object_key = base_object_key
+        filename = base_filename
+    elif variant == "articles":
+        display_filename = Path(base_filename).stem + "_(articles)" + Path(base_filename).suffix
+        object_key_filename = Path(base_object_key).stem + "_(articles)" + Path(base_object_key).suffix
+
+        filename = display_filename
+        object_key = str(Path(base_object_key).with_name(object_key_filename))
+    else:
+        raise HTTPException(status_code=400, detail="Некорректный variant")
 
     try:
         file_bytes = await _load_document_bytes_from_storage(bucket_name, object_key)
-
     except Exception as e:
         error_text = str(e)
         if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
@@ -239,14 +386,109 @@ async def download_source_document(document_id: int, request: Request):
         not_found_detail="Файл не найден",
     )
 
+@router.get("/emails/{email_id}/attachments/download-all")
+async def download_all_source_documents(email_id: int, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            email_row = await conn.fetchrow(
+                """
+                SELECT
+                    e.id,
+                    e.mailbox
+                FROM emails e
+                WHERE e.id = $1
+                """,
+                email_id,
+            )
+        else:
+            email_row = await conn.fetchrow(
+                """
+                SELECT
+                    e.id,
+                    e.mailbox
+                FROM emails e
+                WHERE e.id = $1
+                  AND e.mailbox = $2
+                """,
+                email_id,
+                user["email"],
+            )
+
+        if not email_row:
+            raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+        docs = await conn.fetch(
+            """
+            SELECT
+                d.id,
+                d.filename,
+                d.minio_object_key
+            FROM documents d
+            WHERE d.email_id = $1
+            ORDER BY d.id
+            """,
+            email_id,
+        )
+
+    files_to_zip: list[tuple[str, str]] = []
+
+    for doc in docs:
+        object_key = doc["minio_object_key"]
+        filename = doc["filename"] or f"document-{doc['id']}"
+
+        if not object_key:
+            continue
+
+        files_to_zip.append((object_key, filename))
+
+    if not files_to_zip:
+        raise HTTPException(status_code=404, detail="Вложения отсутствуют")
+
+    zip_buffer = BytesIO()
+    with ZipFile(zip_buffer, mode="w", compression=ZIP_DEFLATED) as zip_file:
+        for object_key, archive_name in files_to_zip:
+            try:
+                file_bytes = await _load_document_bytes_from_storage(
+                    SOURCE_ATTACHMENTS_BUCKET,
+                    object_key,
+                )
+            except Exception as e:
+                error_text = str(e)
+                if "NoSuchKey" in error_text or "NoSuchObject" in error_text:
+                    continue
+                raise HTTPException(status_code=500, detail=f"Ошибка чтения файла: {e}")
+
+            zip_file.writestr(archive_name, file_bytes)
+
+    zip_buffer.seek(0)
+
+    zip_name = f"email-{email_id}-attachments.zip"
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}"
+        },
+    )
 
 @router.get("/documents/{document_id}/result-download")
-async def download_result_document(document_id: int, request: Request):
+async def download_result_document(
+    document_id: int,
+    request: Request,
+    variant: str = "main",
+):
     return await _download_document_by_id(
         document_id=document_id,
         request=request,
         bucket_name=RESULTS_BUCKET,
         not_found_detail="Файл не найден",
+        variant=variant,
     )
 
 @router.post("/queue/{task_id}/decision")
@@ -470,21 +712,15 @@ async def update_materials_manual_decision(
                 if not isinstance(material, str) or not material.strip():
                     raise HTTPException(status_code=400, detail="Некорректный ключ материала")
 
-                normalized_manual_decision = {}
+                target_value = (value.target or "").strip() or None
+                article_value = (value.article or "").strip() or None
+                blacklist_value = bool(value.black_list)
 
-                for material, value in payload.manual_decision.items():
-                    if not isinstance(material, str) or not material.strip():
-                        raise HTTPException(status_code=400, detail="Некорректный ключ материала")
-
-                    target_value = (value.target or "").strip() or None
-                    article_value = (value.article or "").strip() or None
-                    blacklist_value = bool(value.black_list)
-
-                    normalized_manual_decision[material] = {
-                        "target": target_value,
-                        "article": article_value,
-                        "black-list": blacklist_value,
-                    }
+                normalized_manual_decision[material] = {
+                    "target": target_value,
+                    "article": article_value,
+                    "black-list": blacklist_value,
+                }
 
             updated_task = await conn.fetchrow(
                 """
@@ -681,3 +917,163 @@ async def update_email_read_status(
         "email_id": email_id,
         "is_read": payload.is_read,
     }
+
+# @router.post("/emails/{email_id}/reply", status_code=204)
+# async def reply_to_email(
+#     email_id: int,
+#     payload: EmailReplyCreate,
+#     request: Request,
+# ):
+#     user = auth.get_current_user(request)
+#     if not user:
+#         raise HTTPException(status_code=401, detail="Unauthorized")
+
+#     if not payload.body.strip():
+#         raise HTTPException(status_code=400, detail="body is empty")
+
+#     pool = await get_db_pool()
+
+#     async with pool.acquire() as conn:
+#         if user.get("role") == "admin":
+#             row = await conn.fetchrow(
+#                 """
+#                 SELECT id, mailbox
+#                 FROM emails
+#                 WHERE id = $1
+#                 LIMIT 1
+#                 """,
+#                 email_id,
+#             )
+#         else:
+#             row = await conn.fetchrow(
+#                 """
+#                 SELECT id, mailbox
+#                 FROM emails
+#                 WHERE id = $1
+#                   AND mailbox = $2
+#                 LIMIT 1
+#                 """,
+#                 email_id,
+#                 user["email"],
+#             )
+
+#     if not row:
+#         raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+#     mail_service_url = f"http://mail:8080/emails/{email_id}/reply"
+
+#     try:
+#         async with httpx.AsyncClient(timeout=30.0) as client:
+#             resp = await client.post(
+#                 mail_service_url,
+#                 json={"body": payload.body},
+#             )
+#     except httpx.RequestError as e:
+#         raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
+
+#     if resp.status_code != 204:
+#         detail = "Не удалось отправить ответное письмо"
+#         try:
+#             data = resp.json()
+#             detail = data.get("detail") or detail
+#         except Exception:
+#             pass
+
+#         raise HTTPException(status_code=resp.status_code, detail=detail)
+
+#     return Response(status_code=204)
+
+@router.post("/emails/{email_id}/reply", status_code=204)
+async def reply_to_email(
+    email_id: int,
+    request: Request,
+    body: Annotated[str, Form(...)],
+    attachments: Annotated[list[UploadFile] | None, File()] = None,
+):
+    attachments = attachments or []
+    
+    print("reply_to_email called")
+    print("email_id =", email_id)
+    print("body =", body)
+    print("attachments count =", len(attachments))
+    print("attachment names =", [a.filename for a in attachments])
+
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not body.strip():
+        raise HTTPException(status_code=400, detail="body is empty")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            row = await conn.fetchrow(
+                """
+                SELECT id, mailbox
+                FROM emails
+                WHERE id = $1
+                LIMIT 1
+                """,
+                email_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                SELECT id, mailbox
+                FROM emails
+                WHERE id = $1
+                  AND mailbox = $2
+                LIMIT 1
+                """,
+                email_id,
+                user["email"],
+            )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+    mail_service_url = f"http://mail:8080/emails/{email_id}/reply"
+
+    files = []
+    try:
+        for attachment in attachments:
+            content = await attachment.read()
+            files.append(
+                (
+                    "attachments",
+                    (
+                        attachment.filename or "attachment",
+                        content,
+                        attachment.content_type or "application/octet-stream",
+                    ),
+                )
+            )
+
+        print("forwarding to mail service")
+        print("files payload =", [(name, meta[0], meta[2]) for name, meta in files])
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                mail_service_url,
+                data={"body": body},
+                files=files,
+            )
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
+
+    if resp.status_code != 204:
+        print("mail service status =", resp.status_code)
+        print("mail service text =", resp.text)
+
+        detail = "Не удалось отправить ответное письмо"
+        try:
+            data = resp.json()
+            detail = data.get("detail") or detail
+        except Exception:
+            pass
+
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+
+    return Response(status_code=204)

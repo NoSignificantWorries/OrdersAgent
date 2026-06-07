@@ -796,6 +796,227 @@ body {
     color: #475569;
 }
 
+/* === СТИЛИ ДЛЯ ФОРМЫ ОТВЕТА === */
+
+.reply-block {
+    margin-top: 16px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+}
+
+.reply-form-block {
+    margin-top: 14px;
+}
+
+.reply-body-input {
+    width: 100%;
+    min-height: 160px;
+    resize: vertical;
+    box-sizing: border-box;
+    padding: 12px 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #1f2937;
+    font: inherit;
+    line-height: 1.5;
+    outline: none;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.reply-body-input::placeholder {
+    color: #94a3b8;
+}
+
+.reply-body-input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+    background: #ffffff;
+}
+
+.reply-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+}
+
+.reply-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    padding: 6px 14px;
+    font-size: 13px;
+    line-height: 1;
+    font-weight: 600;
+    border: none;
+    border-radius: 999px;
+    box-sizing: border-box;
+    cursor: pointer;
+}
+
+.reply-btn-primary {
+    color: #fff;
+    background: linear-gradient(180deg, #6c63ff 0%, #5b57e8 100%);
+}
+
+.reply-btn-secondary {
+    color: #fff;
+    background: #ef2b2d;
+}
+
+#reply-toggle-btn:disabled,
+#reply-send-btn:disabled,
+#reply-cancel-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+#reply-toggle-btn[hidden],
+#reply-form-block[hidden] {
+    display: none !important;
+}
+
+.mail-toast {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 1000;
+    min-width: 180px;
+    max-width: 320px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(31, 41, 55, 0.712);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.35;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    pointer-events: none;
+}
+
+.mail-toast.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mail-toast {
+        transition: none;
+        transform: none;
+    }
+}
+
+.reply-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.reply-files-input-native {
+    flex: 0 0 auto;
+    width: 44px;
+    min-width: 44px;
+    overflow: hidden;
+    font-size: 14px;
+    color: transparent;
+    background: transparent;
+}
+
+.reply-files-input-native::file-selector-button {
+    width: 36px;
+    height: 36px;
+    border: 0px solid #ffffff00;
+    border-radius: 10px;
+    background: #ffffff00 url("/static/images/attachments.svg") center center / 26px 26px no-repeat;
+    cursor: pointer;
+    color: transparent;
+    font-size: 0;
+    padding: 0;
+    margin: 0;
+}
+
+.reply-files-input-native:hover::file-selector-button {
+    background-color: #f5f7fb;
+    border-color: #b8c2d1;
+}
+
+.reply-files-input-native:focus-visible {
+    outline: none;
+}
+
+.reply-files-input-native:focus-visible::file-selector-button {
+    border-color: #8aa4ff;
+    box-shadow: 0 0 0 3px rgba(138, 164, 255, 0.22);
+}
+
+.reply-files-list {
+    margin-top: 8px;
+    margin-left: 2px;
+}
+
+.reply-files-list {
+    margin-top: 8px;
+    margin-left: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.reply-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 8px;
+    min-height: 36px;
+    padding: 5px 5px;
+    border: 1px solid #d7dbe2;
+    border-radius: 10px;
+    background: #f8f9fb;
+}
+
+.reply-file-name {
+    min-width: 0;
+    font-size: 14px;
+    color: #2b2f36;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.reply-file-remove-btn {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border: 1px solid #d7dbe2;
+    border-radius: 8px;
+    background: #fff;
+    color: #5b6575;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.reply-file-remove-btn:hover {
+    background: #f1f4f8;
+    border-color: #bcc6d6;
+    color: #2f3744;
+}
+
+.reply-file-remove-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(138, 164, 255, 0.22);
+}
 
 /* Вложения */
 .email-attachments {
@@ -1296,3 +1517,4 @@ body {
   cursor: not-allowed;
   box-shadow: none;
 }
+

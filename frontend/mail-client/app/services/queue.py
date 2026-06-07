@@ -169,6 +169,10 @@ async def list_queue_for_user(
         params: list[object] = []
         param_idx = 1
 
+        print("QUEUE USER =", user)
+        print("QUEUE USER ROLE =", user.get("role"))
+        print("QUEUE USER EMAIL =", user.get("email"))
+
         if user.get("role") != "admin":
             where_clauses.append(f"e.mailbox = ${param_idx}")
             params.append(user["email"])

@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 	"context"
-    "encoding/json"
+    "io"
     "net/http"
     "strconv"
     "strings"
@@ -57,6 +57,11 @@ func main() {
 		Host: "smtp.yandex.ru",
 		Port: 465,
 	})
+	
+	imapCfg := &config.Config{
+		Host: cfg.Host,
+		Port: cfg.Port,
+	}
 
 	replyMux := http.NewServeMux()
 
@@ -84,24 +89,81 @@ func main() {
 			return
 		}
 
-		type replyRequest struct {
-			Body string `json:"body"`
+		contentType := r.Header.Get("Content-Type")
+
+		if strings.HasPrefix(contentType, "multipart/form-data") {
+			if err := r.ParseMultipartForm(25 << 20); err != nil {
+				http.Error(w, "invalid multipart form", http.StatusBadRequest)
+				return
+			}
+		} else {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
 		}
 
-		var req replyRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid json body", http.StatusBadRequest)
-			return
-		}
+		log.Printf("reply parsed | email_id=%d content_type=%q body=%q", emailID, contentType, r.FormValue("body"))
 
-		if strings.TrimSpace(req.Body) == "" {
+		body := strings.TrimSpace(r.FormValue("body"))
+		if body == "" {
 			http.Error(w, "body is empty", http.StatusBadRequest)
 			return
 		}
 
-		if err := storage.ReplyToEmail(db, smtpClient, storage.ReplyToEmailRequest{
-			EmailID: emailID,
-			Body:    req.Body,
+		const maxAttachmentsCount = 5
+		const maxAttachmentSize = 10 << 20 // 10 MB
+
+		var attachments []storage.ReplyAttachment
+
+		if r.MultipartForm != nil {
+			files := r.MultipartForm.File["attachments"]
+
+			if len(files) > maxAttachmentsCount {
+				http.Error(w, "too many attachments", http.StatusBadRequest)
+				return
+			}
+
+			attachments = make([]storage.ReplyAttachment, 0, len(files))
+
+			for _, fh := range files {
+				src, err := fh.Open()
+				if err != nil {
+					http.Error(w, "failed to open attachment", http.StatusBadRequest)
+					return
+				}
+
+				data, err := io.ReadAll(src)
+				_ = src.Close()
+				if err != nil {
+					http.Error(w, "failed to read attachment", http.StatusBadRequest)
+					return
+				}
+
+				if len(data) > maxAttachmentSize {
+					http.Error(w, "attachment too large", http.StatusBadRequest)
+					return
+				}
+
+				partContentType := strings.TrimSpace(fh.Header.Get("Content-Type"))
+				if partContentType == "" {
+					partContentType = "application/octet-stream"
+				}
+
+				attachments = append(attachments, storage.ReplyAttachment{
+					Filename:    fh.Filename,
+					ContentType: partContentType,
+					Data:        data,
+				})
+			}
+		}
+
+		log.Printf("reply send start | email_id=%d attachments=%d", emailID, len(attachments))
+
+		if err := storage.ReplyToEmail(db, smtpClient, imapCfg, storage.ReplyToEmailRequest{
+			EmailID:     emailID,
+			Body:        body,
+			Attachments: attachments,
 		}); err != nil {
 			log.Printf("reply send failed | email_id=%d err=%v", emailID, err)
 			http.Error(w, "failed to send reply", http.StatusInternalServerError)

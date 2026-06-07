@@ -50,6 +50,7 @@
             state,
             isChatTabActive,
             isMaterialInputProtected,
+            isReplyInputProtected = () => false,
             loadEmailsFromApi,
             renderEmailList,
             updateUnreadCount,
@@ -60,12 +61,17 @@
 
         const mySeq = state.refreshSeq;
         const prevId = state.selectedEmailId;
-        const inChat = isChatTabActive();
 
-        if (isMaterialInputProtected()) {
+        const isProtectedBeforeLoad =
+            isMaterialInputProtected() ||
+            isReplyInputProtected(state);
+
+        if (isProtectedBeforeLoad) {
             state.pendingSilentRefresh = true;
             return;
         }
+
+        state.pendingSilentRefresh = false;
 
         await loadEmailsFromApi(false);
 
@@ -74,37 +80,39 @@
         renderEmailList();
         updateUnreadCount();
 
+        const isProtectedBeforeRender =
+            isMaterialInputProtected() ||
+            isReplyInputProtected(state);
+
+        if (isProtectedBeforeRender) {
+            state.pendingSilentRefresh = true;
+            return;
+        }
+
+        const inChat = isChatTabActive();
         const currentEmail = prevId
             ? state.emails.find((e) => e.id === prevId)
             : null;
 
-                if (currentEmail) {
-                    highlightSelectedEmail(prevId);
+        if (currentEmail) {
+            highlightSelectedEmail(prevId);
 
-                    if (inChat) {
-                        if (isMaterialInputProtected()) {
-                            state.pendingSilentRefresh = true;
-                        } else {
-                            renderChatForEmail(currentEmail);
-                        }
-                    } else {
-                        renderEmailCard(currentEmail);
-                    }
-                } else if (inChat) {
-                    if (isMaterialInputProtected()) {
-                        state.pendingSilentRefresh = true;
-                    } else {
-                        renderChatForEmail(null);
-                    }
-                } else {
-                    state.selectedEmailId = null;
+            if (inChat) {
+                renderChatForEmail(currentEmail);
+            } else {
+                renderEmailCard(currentEmail);
+            }
+        } else if (inChat) {
+            renderChatForEmail(null);
+        } else {
+            state.selectedEmailId = null;
 
-                    const emailView = document.getElementById("emailView");
-                    if (emailView) {
-                        emailView.innerHTML =
-                            '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
-                    }
-                }
+            const emailView = document.getElementById("emailView");
+            if (emailView) {
+                emailView.innerHTML =
+                    '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+            }
+        }
 
         const submitContainer = document.querySelector(".chat-submit");
         if (submitContainer) {

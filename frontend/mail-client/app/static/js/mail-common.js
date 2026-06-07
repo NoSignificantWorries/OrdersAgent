@@ -48,6 +48,7 @@ const {
     canCloseTask: canCloseTaskFromModule,
     canUnarchiveTask: canUnarchiveTaskFromModule,
     renderEmailCard: renderEmailCardFromModule,
+    isReplyInputProtected: isReplyInputProtectedFromModule,
 } = window.MailRenderCard;
 
 const {
@@ -66,6 +67,11 @@ let currentSearchTerm = "";
 let isMaterialInputComposing = false;
 let pendingSilentRefresh = false;
 let refreshSeq = 0;
+let isReplyInputComposing = false;
+const replyDrafts = new Map();
+let isReplyInputFocused = false;
+let isReplyFileDialogOpen = false;
+const openReplyForms = new Set();
 
 // ========== КОНФИГУРАЦИЯ ==========
 const decisionOptions = [
@@ -211,6 +217,8 @@ function getMailRenderListState() {
         set unreadCount(value) {
             unreadCount = value;
         },
+
+        openReplyForms,
     };
 }
 
@@ -267,7 +275,33 @@ function getMailRenderCardState() {
         set selectedEmailId(value) {
             selectedEmailId = value;
         },
+        get pendingSilentRefresh() {
+            return pendingSilentRefresh;
+        },
+        set pendingSilentRefresh(value) {
+            pendingSilentRefresh = value;
+        },
+        get isReplyInputComposing() {
+            return isReplyInputComposing;
+        },
+        set isReplyInputComposing(value) {
+            isReplyInputComposing = value;
+        },
+        get isReplyInputFocused() {
+            return isReplyInputFocused;
+        },
+        set isReplyInputFocused(value) {
+            isReplyInputFocused = value;
+        },
+        get isReplyFileDialogOpen() {
+            return isReplyFileDialogOpen;
+        },
+        set isReplyFileDialogOpen(value) {
+            isReplyFileDialogOpen = value;
+        },
+        replyDrafts,
         chatStorage,
+        openReplyForms,
     };
 }
 
@@ -314,6 +348,7 @@ function renderEmailCard(email) {
         selectEmail,
         closeOpenedEmail,
         closeAndMarkUnread,
+        refreshEmailsSilently,
     });
 }
 
@@ -323,6 +358,17 @@ function isMaterialInputProtected() {
     return isMaterialInputProtectedFromModule({
         isMaterialInputComposing,
     });
+}
+
+function isReplyInputProtected(state) {
+    const selectedId = state.selectedEmailId;
+
+    return (
+        state.isReplyInputFocused === true ||
+        state.isReplyInputComposing === true ||
+        state.isReplyFileDialogOpen === true ||
+        (selectedId != null && state.openReplyForms?.has(selectedId) === true)
+    );
 }
 
 function getMailChatDeps() {
@@ -393,6 +439,8 @@ function getMailInitState() {
             selectedEmailId = value;
         },
         chatStorage,
+        replyDrafts,
+        openReplyForms, 
         get currentSearchTerm() {
             return currentSearchTerm;
         },
@@ -423,6 +471,12 @@ function getMailInitState() {
         set isMaterialInputComposing(value) {
             isMaterialInputComposing = value;
         },
+        get isReplyInputComposing() {
+            return isReplyInputComposing;
+        },
+        set isReplyInputComposing(value) {
+            isReplyInputComposing = value;
+        },
         get pendingSilentRefresh() {
             return pendingSilentRefresh;
         },
@@ -434,6 +488,18 @@ function getMailInitState() {
         },
         set refreshSeq(value) {
             refreshSeq = value;
+        },
+        get isReplyInputFocused() {
+            return isReplyInputFocused;
+        },
+        set isReplyInputFocused(value) {
+            isReplyInputFocused = value;
+        },
+        get isReplyFileDialogOpen() {
+            return isReplyFileDialogOpen;
+        },
+        set isReplyFileDialogOpen(value) {
+            isReplyFileDialogOpen = value;
         },
     };
 }
@@ -451,6 +517,7 @@ function refreshEmailsSilently() {
         state: getMailInitState(),
         isChatTabActive,
         isMaterialInputProtected,
+        isReplyInputProtected,
         loadEmailsFromApi,
         renderEmailList,
         updateUnreadCount,
@@ -471,6 +538,7 @@ function initMailPage(config) {
         sendChatData,
         isChatTabActive,
         isMaterialInputProtected,
+        isReplyInputProtected,
         highlightSelectedEmail,
         renderChatForEmail,
         renderEmailCard,
