@@ -1,3 +1,86 @@
+from dataclasses import dataclass
+from enum import Enum, Flag, auto
+from typing import Dict, List, Optional
+
+
+class CellType(Flag):
+    TEXT = auto()
+    NUMBER = auto()
+    SIZE_H = auto()
+    LENGTH_H = auto()
+    WIDTH_H = auto()
+    HEIGHT_H = auto()
+    AMOUNT_H = auto()
+    MAT_H = auto()
+    BARCODE_H = auto()
+    MARKING_H = auto()
+
+
+CellCode = {
+    CellType.TEXT: "t",
+    CellType.NUMBER: "n",
+    CellType.SIZE_H: "S",
+    CellType.LENGTH_H: "L",
+    CellType.WIDTH_H: "W",
+    CellType.HEIGHT_H: "H",
+    CellType.AMOUNT_H: "A",
+    CellType.MAT_H: "R",
+    CellType.BARCODE_H: "B",
+    CellType.MARKING_H: "M",
+}
+
+
+HEADER = (
+    CellType.MAT_H
+    | CellType.AMOUNT_H
+    | CellType.WIDTH_H
+    | CellType.LENGTH_H
+    | CellType.HEIGHT_H
+    | CellType.SIZE_H
+    | CellType.BARCODE_H
+    | CellType.MARKING_H
+)
+
+
+@dataclass
+class CellTypes:
+    regex: Optional[Dict[CellType, List[str]]] = None
+    fuzzy: Optional[Dict[CellType, List[str]]] = None
+
+
+TYPES_CONFIG = CellTypes(
+    regex={
+        CellType.NUMBER: ["^[+-]?\\d+(?:[.,]\\d+)?$"],
+    },
+    fuzzy={
+        CellType.SIZE_H: [
+            "размер",
+            "размеры",
+            "размеры,мм",
+            "размеры[мм]",
+            "размеры(мм)",
+        ],
+        CellType.LENGTH_H: ["длина", "длина,мм", "длина[мм]", "длина(мм)"],
+        CellType.WIDTH_H: ["ширина", "ширина,мм", "ширина[мм]", "ширина(мм)"],
+        CellType.HEIGHT_H: ["высота", "высота,мм", "высота[мм]", "высота(мм)"],
+        CellType.AMOUNT_H: ["кол-во", "количество", "кол-во(шт)", "количество(шт)"],
+        CellType.MAT_H: [
+            "наименование",
+            "обозначение",
+            "имя",
+            "номенклатура",
+            "артикул",
+            "типпакета",
+            "формула",
+            "формулазаполнения",
+            "формуласп",
+        ],
+        CellType.BARCODE_H: ["штрихкод", "шк"],
+        CellType.MARKING_H: ["маркировка"],
+    },
+)
+
+
 MERGES_CALLCULATION = [
     (43, 1, 46, 1),
     (48, 1, 68, 1),
