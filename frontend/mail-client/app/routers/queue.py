@@ -38,9 +38,6 @@ class MaterialsManualDecisionUpdate(BaseModel):
 class EmailReadUpdate(BaseModel):
     is_read: bool
 
-# class EmailReplyCreate(BaseModel):
-#     body: str
-
 async def _load_document_bytes_from_storage(bucket_name: str, object_key: str) -> bytes:
     client = MinIOClient.get_client()
     response = client.get_object(bucket_name, object_key)
@@ -918,70 +915,6 @@ async def update_email_read_status(
         "is_read": payload.is_read,
     }
 
-# @router.post("/emails/{email_id}/reply", status_code=204)
-# async def reply_to_email(
-#     email_id: int,
-#     payload: EmailReplyCreate,
-#     request: Request,
-# ):
-#     user = auth.get_current_user(request)
-#     if not user:
-#         raise HTTPException(status_code=401, detail="Unauthorized")
-
-#     if not payload.body.strip():
-#         raise HTTPException(status_code=400, detail="body is empty")
-
-#     pool = await get_db_pool()
-
-#     async with pool.acquire() as conn:
-#         if user.get("role") == "admin":
-#             row = await conn.fetchrow(
-#                 """
-#                 SELECT id, mailbox
-#                 FROM emails
-#                 WHERE id = $1
-#                 LIMIT 1
-#                 """,
-#                 email_id,
-#             )
-#         else:
-#             row = await conn.fetchrow(
-#                 """
-#                 SELECT id, mailbox
-#                 FROM emails
-#                 WHERE id = $1
-#                   AND mailbox = $2
-#                 LIMIT 1
-#                 """,
-#                 email_id,
-#                 user["email"],
-#             )
-
-#     if not row:
-#         raise HTTPException(status_code=404, detail="Письмо не найдено")
-
-#     mail_service_url = f"http://mail:8080/emails/{email_id}/reply"
-
-#     try:
-#         async with httpx.AsyncClient(timeout=30.0) as client:
-#             resp = await client.post(
-#                 mail_service_url,
-#                 json={"body": payload.body},
-#             )
-#     except httpx.RequestError as e:
-#         raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
-
-#     if resp.status_code != 204:
-#         detail = "Не удалось отправить ответное письмо"
-#         try:
-#             data = resp.json()
-#             detail = data.get("detail") or detail
-#         except Exception:
-#             pass
-
-#         raise HTTPException(status_code=resp.status_code, detail=detail)
-
-#     return Response(status_code=204)
 
 @router.post("/emails/{email_id}/reply", status_code=204)
 async def reply_to_email(
