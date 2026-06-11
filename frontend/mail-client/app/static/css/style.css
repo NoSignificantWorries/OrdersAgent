@@ -308,27 +308,27 @@ body {
 }
 
 .email-item--odd {
-    background: #fcfdff;
-    border-color: #dbe4f2;
-    border-left-color: #6b94ed;
+    background: #fffefce2;
+    border-color: #f3e9b3;
+    border-left-color: #eadb84;
 }
 
 .email-item--even {
-    background: #fbfbfe;
-    border-color: #e2def0;
-    border-left-color: #9a7aeb;
+    background: #fdfffcdb;
+    border-color: #c5ddb3;
+    border-left-color: #8fbc78;
 }
 
 .email-item--odd:hover {
-    background: #f7faff;
-    border-color: #c9d7eb;
-    border-left-color: #6389db;
+    background: #fffef9e2;
+    border-color: #eee19b;
+    border-left-color: #e1ce67;
 }
 
 .email-item--even:hover {
-    background: #f8f7fd;
-    border-color: #d7cfea;
-    border-left-color: #8e6fdd;
+    background: #fbfff9df;
+    border-color: #b2d298;
+    border-left-color: #79aa61;
 }
 
 .email-item.selected,
