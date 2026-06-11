@@ -84,9 +84,19 @@
         }
 
         container.innerHTML = filtered
-            .map(
-                (email) => `
-                    <div class="email-item ${email.read ? "is-read" : "is-unread"}" data-id="${email.id}">
+            .map((email) => {
+                const mailParityId = Number(email.email_id || email.emailid || email.id);
+                const parityClass =
+                    Number.isFinite(mailParityId) && mailParityId % 2 === 0
+                        ? "email-item--even"
+                        : "email-item--odd";
+
+                return `
+                    <div
+                        class="email-item ${email.read ? "is-read" : "is-unread"} ${parityClass}"
+                        data-id="${email.id}"
+                        data-email-id="${mailParityId}"
+                    >
                         <div class="subject">${escapeHtml(email.subject)}</div>
                         <div class="email-item-header">
                             <div class="sender">От: ${escapeHtml(email.sender)}</div>
@@ -97,8 +107,8 @@
                         <div class="recipient">Кому: ${escapeHtml(email.mailbox || "")}</div>
                         <div class="date">${formatDate(email.date)}</div>
                     </div>
-                `,
-            )
+                `;
+            })
             .join("");
 
         document.querySelectorAll(".email-item").forEach((el) => {
