@@ -787,18 +787,18 @@ async def archive_email(email_id: int, request: Request):
             if row["status"] is None:
                 raise HTTPException(status_code=400, detail="У письма нет связанной задачи")
 
-            allowed_statuses = {"question", "error", "completed"}
-            current_status = row["status"]
+            # allowed_statuses = {"question", "error", "completed"}
+            # current_status = row["status"]
 
-            if current_status not in allowed_statuses:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Архивация доступна только для статусов "
-                        "question, error, completed. "
-                        f"Текущий статус: {current_status}"
-                    ),
-                )
+            # if current_status not in allowed_statuses:
+            #     raise HTTPException(
+            #         status_code=400,
+            #         detail=(
+            #             "Архивация доступна только для статусов "
+            #             "question, error, completed. "
+            #             f"Текущий статус: {current_status}"
+            #         ),
+            #     )
 
             if row["archived"]:
                 return {"ok": True, "email_id": email_id, "archived": True}
