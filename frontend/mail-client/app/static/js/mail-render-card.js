@@ -18,11 +18,13 @@
     function canCloseTask(email) {
         if (email?.archived === true) return false;
 
-        const status = String(
-            email?.task_status || email?.taskstatus || email?.task?.status || email?.status || "",
-        ).toLowerCase();
+        // const status = String(
+        //     email?.task_status || email?.taskstatus || email?.task?.status || email?.status || "",
+        // ).toLowerCase();
 
-        return ["question", "error", "completed"].includes(status);
+        // return ["question", "error", "completed"].includes(status);
+
+        return true;
     }
 
     function canUnarchiveTask(email) {
