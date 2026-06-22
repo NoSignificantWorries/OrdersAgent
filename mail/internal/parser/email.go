@@ -2,6 +2,7 @@ package parser
 
 import (
 	"encoding/base64"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	_ "github.com/emersion/go-message/charset"
 	msgmail "github.com/emersion/go-message/mail"
 	"golang.org/x/text/encoding/charmap"
 )
@@ -35,6 +37,86 @@ type Email struct {
 type Attachment struct {
 	Name string
 	Data []byte
+}
+
+func decodeBodyBytes(b []byte, contentType string) string {
+    if len(b) == 0 {
+        return ""
+    }
+
+    // Пытаемся вытащить charset из Content-Type
+    _, params, err := mime.ParseMediaType(contentType)
+    charsetName := ""
+    if err == nil {
+        charsetName = strings.ToLower(strings.TrimSpace(params["charset"]))
+    }
+
+    // По умолчанию считаем UTF-8
+    if charsetName == "" || charsetName == "utf-8" || charsetName == "us-ascii" {
+		return string(b)
+	}
+
+    switch charsetName {
+    case "windows-1251", "cp1251":
+        decoded, err := charmap.Windows1251.NewDecoder().Bytes(b)
+        if err == nil {
+            return string(decoded)
+        }
+    case "koi8-r":
+        decoded, err := charmap.KOI8R.NewDecoder().Bytes(b)
+        if err == nil {
+            return string(decoded)
+        }
+    // при необходимости можно добавить другие чарсеты
+    }
+
+    // Fallback — возвращаем как есть
+    return string(b)
+}
+
+func extractNestedMessageText(raw []byte) string {
+    r := bytes.NewReader(raw)
+    mr, err := msgmail.CreateReader(r)
+    if err != nil {
+        return strings.TrimSpace(extractTextFromHTML(string(raw)))
+    }
+
+    var plainPart, htmlPart string
+
+    for {
+        p, err := mr.NextPart()
+        if err == io.EOF {
+            break
+        }
+        if err != nil {
+            break
+        }
+
+        contentType := p.Header.Get("Content-Type")
+        ctLower := strings.ToLower(contentType)
+        bodyBytes, _ := io.ReadAll(p.Body)
+
+        if strings.HasPrefix(ctLower, "text/plain") {
+            txt := strings.TrimSpace(decodeBodyBytes(bodyBytes, contentType))
+            if txt != "" && plainPart == "" {
+                plainPart = txt
+            }
+        } else if strings.HasPrefix(ctLower, "text/html") {
+            html := decodeBodyBytes(bodyBytes, contentType)
+            txt := strings.TrimSpace(extractTextFromHTML(html))
+            if txt != "" && htmlPart == "" {
+                htmlPart = txt
+            }
+        }
+    }
+
+    if plainPart != "" {
+        return plainPart
+    }
+    if htmlPart != "" {
+        return htmlPart
+    }
+    return ""
 }
 
 func joinAddresses(addrs []imap.Address) string {
@@ -281,136 +363,142 @@ func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, erro
 }
 
 func cleanBodyText(body string) string {
-	// Сначала вычищаем рамки forwarded прямо в тексте,
-	// а не выкидываем строки целиком.
-	replacements := []string{
-		"-------- Пересылаемое сообщение --------",
-		"-------- Пересылаемое письмо --------",
-		"-------- Конец пересылаемого сообщения --------",
-		"-------- Конец пересылаемого письма --------",
-	}
-	for _, r := range replacements {
-		body = strings.ReplaceAll(body, r, "")
-	}
+    // 1. Убираем явный CSS/HTML‑мусор, но не контент
+    lines := strings.Split(body, "\n")
+    cleaned := make([]string, 0, len(lines))
 
-	lines := strings.Split(body, "\n")
-	var cleaned []string
+    prevEmpty := false
 
-	// важно: итерируемся по значениям, а не по индексам
-	for _, raw := range lines {
-		line := strings.TrimSpace(raw)
+    for _, raw := range lines {
+        line := strings.TrimRight(raw, " \t\r")
 
-		if line == "" {
-			continue
-		}
+        // Удаляем явный техмусор
+        trimmed := strings.TrimSpace(line)
+        if trimmed == "" {
+            // схлопываем пачки пустых строк в одну
+            if !prevEmpty {
+                cleaned = append(cleaned, "")
+                prevEmpty = true
+            }
+            continue
+        }
+        prevEmpty = false
 
-		// Служебные строки пересылки
-		if strings.HasPrefix(line, "От:") ||
-			strings.HasPrefix(line, "К:") ||
-			strings.HasPrefix(line, "Кому:") ||
-			strings.HasPrefix(line, "А также к:") ||
-			strings.HasPrefix(line, "Тема:") ||
-			strings.HasPrefix(line, "Дата:") ||
-			strings.HasPrefix(line, "Время создания:") ||
-			strings.HasPrefix(line, "Прикрепленные файлы:") {
-			continue
-		}
+        // CSS/HTML‑мусор
+        if strings.Contains(trimmed, "blockquote.rt") ||
+            strings.HasPrefix(trimmed, "p {") ||
+            strings.Contains(trimmed, ".email-signature") {
+            continue
+        }
 
-		// HTML/CSS‑мусор
-		if strings.Contains(line, "blockquote.rt") ||
-			strings.HasPrefix(line, "p {") ||
-			strings.Contains(line, ".email-signature") {
-			continue
-		}
+        // Ничего не обрываем по "С уважением" и т.п.
+        cleaned = append(cleaned, trimmed)
+    }
 
-		if strings.HasPrefix(line, "С уважением") ||
-			line == "--" {
-			break
-		}
+    res := strings.Join(cleaned, "\n")
 
-		cleaned = append(cleaned, line)
-	}
-
-	result := strings.Join(cleaned, "\n")
-	return result
+    // Убираем ведущие/замыкающие пустые строки
+    res = strings.Trim(res, "\n")
+    return res
 }
 
 func parseBody(email *Email, literal io.Reader) error {
-	mr, err := msgmail.CreateReader(literal)
-	if err != nil {
-		return fmt.Errorf("parsing body: %w", err)
+    mr, err := msgmail.CreateReader(literal)
+    if err != nil {
+        return fmt.Errorf("parsing body: %w", err)
+    }
+
+    var plainPart string
+    var htmlPart string
+    var nestedPart string
+
+    for {
+        p, err := mr.NextPart()
+        if err == io.EOF {
+            break
+        }
+        if err != nil {
+            log.Printf("NextPart error UID=%d: %v", email.UID, err)
+            continue
+        }
+
+        contentType := p.Header.Get("Content-Type")
+        disp := p.Header.Get("Content-Disposition")
+        ctLower := strings.ToLower(contentType)
+
+        switch {
+        // ---------------- text/plain ----------------
+        case strings.HasPrefix(ctLower, "text/plain"):
+            bodyBytes, _ := io.ReadAll(p.Body)
+            txt := decodeBodyBytes(bodyBytes, contentType)
+            txt = strings.TrimSpace(txt)
+            if txt != "" {
+                // Если уже был plain, второй не добавляем, чтобы не дублировать
+                if plainPart == "" {
+                    plainPart = txt
+                } else {
+                    // можно залогировать, что plain дублируется
+                    log.Printf("UID=%d: extra text/plain part skipped", email.UID)
+                }
+            }
+
+        // ---------------- text/html ----------------
+        case strings.HasPrefix(ctLower, "text/html"):
+            bodyBytes, _ := io.ReadAll(p.Body)
+            html := decodeBodyBytes(bodyBytes, contentType)
+            txt := strings.TrimSpace(extractTextFromHTML(html))
+            if txt != "" && htmlPart == "" {
+                htmlPart = txt
+            }
+
+        // ---------------- вложенное письмо message/rfc822 ----------------
+        case strings.HasPrefix(ctLower, "message/rfc822"):
+            nestedBytes, _ := io.ReadAll(p.Body)
+            if len(nestedBytes) > 0 && nestedPart == "" {
+                nestedText := extractNestedMessageText(nestedBytes)
+                if nestedText != "" {
+                    nestedPart = nestedText
+                }
+            }
+
+        // ---------------- вложения ----------------
+        default:
+            if strings.Contains(strings.ToLower(disp), "attachment") ||
+                strings.HasPrefix(ctLower, "application/") ||
+                strings.HasPrefix(ctLower, "image/") {
+
+                name := extractFilename(disp, contentType)
+                if name == "" {
+                    continue
+                }
+                att := Attachment{Name: name}
+                att.Data, _ = io.ReadAll(p.Body)
+                email.Files = append(email.Files, att)
+            }
+        }
+    }
+
+    // Выбор лучшей ветки
+    var body string
+    plain := strings.TrimSpace(plainPart)
+	html := strings.TrimSpace(htmlPart)
+	nested := strings.TrimSpace(nestedPart)
+
+	switch {
+	case plain != "" && len([]rune(plain)) > 30:
+		body = plain
+	case nested != "":
+		body = nested
+	case html != "":
+		body = html
+	case plain != "":
+		body = plain
+	default:
+		body = ""
 	}
 
-	var parts []string
-
-	for {
-		p, err := mr.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			continue
-		}
-
-		contentType := p.Header.Get("Content-Type")
-
-		// text/plain
-		if strings.HasPrefix(contentType, "text/plain") {
-			bodyBytes, _ := io.ReadAll(p.Body)
-			txt := strings.TrimSpace(string(bodyBytes))
-			if txt != "" {
-				parts = append(parts, txt)
-			}
-			continue
-		}
-
-		// text/html
-		if strings.HasPrefix(contentType, "text/html") {
-			bodyBytes, _ := io.ReadAll(p.Body)
-			txt := strings.TrimSpace(extractTextFromHTML(string(bodyBytes)))
-			if txt != "" {
-				parts = append(parts, txt)
-			}
-			continue
-		}
-
-		// 3. Вложенное письмо message/rfc822 (типично для Fwd:)
-		if strings.HasPrefix(contentType, "message/rfc822") {
-			nestedRaw, _ := io.ReadAll(p.Body)
-			// Простой способ: вытащить текст как из HTML
-			nestedText := strings.TrimSpace(extractTextFromHTML(string(nestedRaw)))
-			if nestedText != "" {
-				parts = append(parts, nestedText)
-			}
-			// Более продвинутый вариант — создать новый mail.Reader
-			// и пройтись по нему так же, как по основному письму.
-			continue
-		}
-
-		// Вложения
-		disposition := p.Header.Get("Content-Disposition")
-		if strings.Contains(disposition, "attachment") ||
-			strings.HasPrefix(contentType, "application/") ||
-			strings.HasPrefix(contentType, "image/") {
-
-			name := extractFilename(disposition, contentType)
-			if name == "" {
-				continue
-			}
-
-			att := Attachment{
-				Name: name,
-			}
-			att.Data, _ = io.ReadAll(p.Body)
-			email.Files = append(email.Files, att)
-		}
-	}
-
-	log.Printf("parseBody: UID=%d parts before clean: %d", email.UID, len(parts))
-
-	email.Body = strings.Join(parts, "\n\n")
-	email.Body = cleanBodyText(email.Body)
-	return nil
+    email.Body = cleanBodyText(body)
+    return nil
 }
 
 // чистый текст из HTML
@@ -420,22 +508,79 @@ func extractTextFromHTML(htmlStr string) string {
 		return htmlStr
 	}
 
-	var text strings.Builder
-	var f func(*htmllib.Node)
-	f = func(n *htmllib.Node) {
-		if n.Type == htmllib.TextNode {
-			text.WriteString(strings.TrimSpace(n.Data) + " ")
+	var b strings.Builder
+
+	blockTags := map[string]bool{
+		"p": true, "div": true, "section": true, "article": true,
+		"header": true, "footer": true, "aside": true,
+		"table": true, "thead": true, "tbody": true, "tfoot": true,
+		"tr": true, "td": true, "th": true,
+		"ul": true, "ol": true, "li": true,
+		"blockquote": true, "pre": true,
+		"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
+	}
+
+	skipTags := map[string]bool{
+		"script": true,
+		"style":  true,
+		"noscript": true,
+	}
+
+	var walk func(*htmllib.Node, bool)
+	walk = func(n *htmllib.Node, skip bool) {
+		if n == nil {
+			return
 		}
+
+		if n.Type == htmllib.ElementNode {
+			if skipTags[n.Data] {
+				skip = true
+			}
+
+			if n.Data == "br" {
+				b.WriteString("\n")
+			} else if blockTags[n.Data] {
+				b.WriteString("\n")
+			}
+		}
+
+		if !skip && n.Type == htmllib.TextNode {
+			txt := strings.TrimSpace(n.Data)
+			if txt != "" {
+				b.WriteString(txt)
+				b.WriteString(" ")
+			}
+		}
+
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			f(c)
+			walk(c, skip)
+		}
+
+		if n.Type == htmllib.ElementNode && blockTags[n.Data] {
+			b.WriteString("\n")
 		}
 	}
-	f(doc)
 
-	result := text.String()
+	walk(doc, false)
 
-	result = strings.Join(strings.Fields(result), " ")
-	return result
+	rawLines := strings.Split(b.String(), "\n")
+	cleaned := make([]string, 0, len(rawLines))
+	prevEmpty := false
+
+	for _, line := range rawLines {
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" {
+			if !prevEmpty {
+				cleaned = append(cleaned, "")
+				prevEmpty = true
+			}
+			continue
+		}
+		cleaned = append(cleaned, line)
+		prevEmpty = false
+	}
+
+	return strings.TrimSpace(strings.Join(cleaned, "\n"))
 }
 
 func extractFilename(disposition, contentType string) string {
