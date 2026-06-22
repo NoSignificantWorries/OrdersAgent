@@ -141,56 +141,67 @@ func runUserWorker(
 }
 
 func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *orders.Processor) error {
-	uids, err := imap.FetchUnread()
-	if err != nil {
-		return err
-	}
+    uids, err := imap.FetchUnread()
+    if err != nil {
+        return err
+    }
 
-	if len(uids) == 0 {
-		return nil
-	}
+    log.Printf("ProcessEmails | unread_count=%d uids=%v", len(uids), uids)
 
-	log.Printf("found %d unread emails", len(uids))
+    if len(uids) == 0 {
+        return nil
+    }
 
-	for _, uid := range uids {
-		select {
-		case <-stopChan:
-			log.Printf("interrupt while processing, stopping")
-			return nil
-		default:
-		}
+    for _, uid := range uids {
+        log.Printf("ProcessEmails | start uid=%d", uid)
 
-		fetchCmd, err := imap.FetchMessage(uid)
-		if err != nil {
-			log.Printf("fetch message uid=%d: %v", uid, err)
-			if isReconnectableError(err) {
-				return err
-			}
-			continue
-		}
+        select {
+        case <-stopChan:
+            log.Printf("interrupt while processing, stopping")
+            return nil
+        default:
+        }
 
-		email, err := parser.ParseMessage(uid, fetchCmd)
-		if err != nil {
-			log.Printf("parse uid=%d: %v", uid, err)
-			fetchCmd.Close()
-			continue
-		}
+        fetchCmd, err := imap.FetchMessage(uid)
+        if err != nil {
+            log.Printf("fetch message uid=%d: %v", uid, err)
+            if isReconnectableError(err) {
+                return err
+            }
+            continue
+        }
 
-		if err := processor.ProcessEmail(*email); err != nil {
-			log.Printf("process uid=%d: %v", uid, err)
-		}
+        log.Printf("ProcessEmails | fetched uid=%d", uid)
 
-		fetchCmd.Close()
+        email, err := parser.ParseMessage(uid, fetchCmd)
+        if err != nil {
+            log.Printf("parse uid=%d: %v", uid, err)
+            fetchCmd.Close()
+            continue
+        }
 
-		if err := imap.MarkRead(uid); err != nil {
-			log.Printf("mark read uid=%d: %v", uid, err)
-			if isReconnectableError(err) {
-				return err
-			}
-		}
-	}
+        log.Printf("ProcessEmails | parsed uid=%d subject=%q from=%q attachments=%d",
+            uid, email.Subject, email.From, len(email.Files))
 
-	return nil
+        if err := processor.ProcessEmail(*email); err != nil {
+            log.Printf("process uid=%d: %v", uid, err)
+        } else {
+            log.Printf("ProcessEmails | processed uid=%d", uid)
+        }
+
+        fetchCmd.Close()
+
+        if err := imap.MarkRead(uid); err != nil {
+            log.Printf("mark read uid=%d: %v", uid, err)
+            if isReconnectableError(err) {
+                return err
+            }
+        } else {
+            log.Printf("ProcessEmails | marked read uid=%d", uid)
+        }
+    }
+
+    return nil
 }
 
 func isReconnectableError(err error) bool {

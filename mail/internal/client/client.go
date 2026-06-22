@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"log"
 
 	"mail/internal/config"
 
@@ -43,48 +44,72 @@ func NewOAuth(cfg *config.Config, email, accessToken string) (*Client, error) {
 }
 
 func (c *Client) FetchUnread() ([]imap.UID, error) {
-	criteria := &imap.SearchCriteria{}
-	searchData, err := c.conn.UIDSearch(criteria, nil).Wait()
-	if err != nil {
-		return nil, fmt.Errorf("search: %w", err)
-	}
+    criteria := &imap.SearchCriteria{
+        NotFlag: []imap.Flag{"\\Seen"},
+    }
 
-	allUIDs := searchData.AllUIDs()
-	if len(allUIDs) == 0 {
-		return nil, nil
-	}
+    log.Printf("imap search unread start")
 
-	fetchOptions := &imap.FetchOptions{
-		Flags: true,
-		UID:   true,
-	}
+    searchData, err := c.conn.UIDSearch(criteria, nil).Wait()
+    if err != nil {
+        return nil, fmt.Errorf("search unread: %w", err)
+    }
 
-	fetchCmd := c.conn.Fetch(imap.UIDSetNum(allUIDs...), fetchOptions)
-	defer fetchCmd.Close()
+    uids := searchData.AllUIDs()
+    log.Printf("imap search unread done | count=%d uids=%v", len(uids), uids)
 
-	messages, err := fetchCmd.Collect()
-	if err != nil {
-		return nil, fmt.Errorf("fetch flags: %w", err)
-	}
+    if len(uids) == 0 {
+        return nil, nil
+    }
 
-	var unreadUIDs []imap.UID
-	for _, msg := range messages {
-		hasSeen := false
-		for _, flag := range msg.Flags {
-			if flag == "\\Seen" {
-				hasSeen = true
-				break
-			}
-		}
-		if !hasSeen {
-			unreadUIDs = append(unreadUIDs, msg.UID)
-		}
-	}
-
-	return unreadUIDs, nil
+    return uids, nil
 }
 
+// func (c *Client) FetchUnread() ([]imap.UID, error) {
+// 	criteria := &imap.SearchCriteria{}
+// 	searchData, err := c.conn.UIDSearch(criteria, nil).Wait()
+// 	if err != nil {
+// 		return nil, fmt.Errorf("search: %w", err)
+// 	}
+
+// 	allUIDs := searchData.AllUIDs()
+// 	if len(allUIDs) == 0 {
+// 		return nil, nil
+// 	}
+
+// 	fetchOptions := &imap.FetchOptions{
+// 		Flags: true,
+// 		UID:   true,
+// 	}
+
+// 	fetchCmd := c.conn.Fetch(imap.UIDSetNum(allUIDs...), fetchOptions)
+// 	defer fetchCmd.Close()
+
+// 	messages, err := fetchCmd.Collect()
+// 	if err != nil {
+// 		return nil, fmt.Errorf("fetch flags: %w", err)
+// 	}
+
+// 	var unreadUIDs []imap.UID
+// 	for _, msg := range messages {
+// 		hasSeen := false
+// 		for _, flag := range msg.Flags {
+// 			if flag == "\\Seen" {
+// 				hasSeen = true
+// 				break
+// 			}
+// 		}
+// 		if !hasSeen {
+// 			unreadUIDs = append(unreadUIDs, msg.UID)
+// 		}
+// 	}
+
+// 	return unreadUIDs, nil
+// }
+
 func (c *Client) FetchMessage(uid imap.UID) (*imapclient.FetchCommand, error) {
+	log.Printf("imap fetch message | uid=%d", uid)
+
 	fetchOptions := &imap.FetchOptions{
 		UID:      true,
 		Envelope: true,
