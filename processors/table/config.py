@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from enum import Enum, Flag, auto
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 class CellType(Flag):
     TEXT = auto()
     NUMBER = auto()
+    SIZES = auto()
     SIZE_H = auto()
     LENGTH_H = auto()
     WIDTH_H = auto()
@@ -14,20 +15,6 @@ class CellType(Flag):
     MAT_H = auto()
     BARCODE_H = auto()
     MARKING_H = auto()
-
-
-CellCode = {
-    CellType.TEXT: "t",
-    CellType.NUMBER: "n",
-    CellType.SIZE_H: "S",
-    CellType.LENGTH_H: "L",
-    CellType.WIDTH_H: "W",
-    CellType.HEIGHT_H: "H",
-    CellType.AMOUNT_H: "A",
-    CellType.MAT_H: "R",
-    CellType.BARCODE_H: "B",
-    CellType.MARKING_H: "M",
-}
 
 
 HEADER = (
@@ -44,13 +31,14 @@ HEADER = (
 
 @dataclass
 class CellTypes:
-    regex: Optional[Dict[CellType, List[str]]] = None
+    regex: Optional[Dict[CellType, List[Tuple[str, List[int]]]]] = None
     fuzzy: Optional[Dict[CellType, List[str]]] = None
 
 
 TYPES_CONFIG = CellTypes(
     regex={
-        CellType.NUMBER: ["^[+-]?\\d+(?:[.,]\\d+)?$"],
+        CellType.NUMBER: [(r"^[+-]?\d+(?:[.,]\d+)?$", [])],
+        CellType.SIZES: [(r"^\s*(\d+([.,]\d+)?)\s*[xXхХ]\s*(\d+([.,]\d+)?)\s*$", [1, 3])]
     },
     fuzzy={
         CellType.SIZE_H: [
@@ -80,6 +68,16 @@ TYPES_CONFIG = CellTypes(
     },
 )
 
+COLUMN_RULES = {
+    CellType.MAT_H: CellType.TEXT,
+    CellType.WIDTH_H: CellType.NUMBER,
+    CellType.HEIGHT_H: CellType.NUMBER,
+    CellType.LENGTH_H: CellType.NUMBER,
+    CellType.AMOUNT_H: CellType.NUMBER,
+    CellType.BARCODE_H: CellType.TEXT | CellType.NUMBER,
+    CellType.MARKING_H: CellType.TEXT | CellType.NUMBER,
+    CellType.SIZE_H: CellType.NUMBER | CellType.SIZES
+}
 
 MERGES_CALLCULATION = [
     (43, 1, 46, 1),

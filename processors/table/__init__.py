@@ -1,4 +1,5 @@
 from . import table_processer_v2 as tp2
+from . import functional as func
 from .table_processer import (
     TableParseResults,
     TableWorker,
@@ -12,4 +13,5 @@ __all__ = [
     "make_request_xlsx",
     "make_callculation_xlsx",
     "tp2",
+    "func"
 ]

@@ -13,6 +13,7 @@ from rapidfuzz import fuzz
 from materials import ParseResults
 
 from .config import HEADERS_CALLCULATION, MERGES_CALLCULATION
+from . import functional as func
 
 
 class CellType(Flag):
@@ -79,9 +80,6 @@ TYPES_CONFIG = CellTypes(
 )
 
 
-def fuzzy_match(text: str, pattern: str, threshold: int = 50) -> bool:
-    val = fuzz.ratio(text, pattern)
-    return val >= threshold
 
 
 class Cell:
@@ -163,7 +161,7 @@ class Cell:
         if config.fuzzy is not None:
             for cell_type, patterns in config.fuzzy.items():
                 for pattern in patterns:
-                    if fuzzy_match(value.lower(), pattern, 90):
+                    if func.fuzzy_match(value.lower(), pattern, 90):
                         self._type = cell_type
                         return cell_type
         return self._type
