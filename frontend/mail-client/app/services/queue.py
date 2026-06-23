@@ -88,8 +88,6 @@ async def list_queue_for_user(
     if limit > 1000:
         limit = 1000
 
-    print("QUEUE LIMIT BEFORE SQL =", limit)
-
     async with pool.acquire() as conn:
         sql = f"""
             SELECT

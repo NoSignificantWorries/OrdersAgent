@@ -1,16 +1,17 @@
 package parser
 
 import (
-	"encoding/base64"
+	//"encoding/base64"
 	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"mime"
-	"strconv"
+	//"strconv"
 	"strings"
 	"bufio"
     "net/mail"
+    "unicode/utf8"
 
 	htmllib "golang.org/x/net/html"
 
@@ -43,36 +44,43 @@ func decodeBodyBytes(b []byte, contentType string) string {
     if len(b) == 0 {
         return ""
     }
-
-    // Пытаемся вытащить charset из Content-Type
-    _, params, err := mime.ParseMediaType(contentType)
-    charsetName := ""
-    if err == nil {
-        charsetName = strings.ToLower(strings.TrimSpace(params["charset"]))
-    }
-
-    // По умолчанию считаем UTF-8
-    if charsetName == "" || charsetName == "utf-8" || charsetName == "us-ascii" {
-		return string(b)
-	}
-
-    switch charsetName {
-    case "windows-1251", "cp1251":
-        decoded, err := charmap.Windows1251.NewDecoder().Bytes(b)
-        if err == nil {
-            return string(decoded)
-        }
-    case "koi8-r":
-        decoded, err := charmap.KOI8R.NewDecoder().Bytes(b)
-        if err == nil {
-            return string(decoded)
-        }
-    // при необходимости можно добавить другие чарсеты
-    }
-
-    // Fallback — возвращаем как есть
     return string(b)
 }
+
+// func decodeBodyBytes(b []byte, contentType string) string {
+//     if len(b) == 0 {
+//         return ""
+//     }
+
+//     // Пытаемся вытащить charset из Content-Type
+//     _, params, err := mime.ParseMediaType(contentType)
+//     charsetName := ""
+//     if err == nil {
+//         charsetName = strings.ToLower(strings.TrimSpace(params["charset"]))
+//     }
+
+//     // По умолчанию считаем UTF-8
+//     if charsetName == "" || charsetName == "utf-8" || charsetName == "us-ascii" {
+// 		return string(b)
+// 	}
+
+//     switch charsetName {
+//     case "windows-1251", "cp1251":
+//         decoded, err := charmap.Windows1251.NewDecoder().Bytes(b)
+//         if err == nil {
+//             return string(decoded)
+//         }
+//     case "koi8-r":
+//         decoded, err := charmap.KOI8R.NewDecoder().Bytes(b)
+//         if err == nil {
+//             return string(decoded)
+//         }
+//     // при необходимости можно добавить другие чарсеты
+//     }
+
+//     // Fallback — возвращаем как есть
+//     return string(b)
+// }
 
 func extractNestedMessageText(raw []byte) string {
     r := bytes.NewReader(raw)
@@ -97,12 +105,12 @@ func extractNestedMessageText(raw []byte) string {
         bodyBytes, _ := io.ReadAll(p.Body)
 
         if strings.HasPrefix(ctLower, "text/plain") {
-            txt := strings.TrimSpace(decodeBodyBytes(bodyBytes, contentType))
+            txt := strings.TrimSpace(string(bodyBytes))
             if txt != "" && plainPart == "" {
                 plainPart = txt
             }
         } else if strings.HasPrefix(ctLower, "text/html") {
-            html := decodeBodyBytes(bodyBytes, contentType)
+            html := string(bodyBytes)
             txt := strings.TrimSpace(extractTextFromHTML(html))
             if txt != "" && htmlPart == "" {
                 htmlPart = txt
@@ -165,128 +173,156 @@ func parseHeaderFields(r io.Reader) (messageID, inReplyTo, references, replyTo s
 }
 
 func decodeHeader(s string) string {
-	if s == "" {
-		return s
-	}
+    if s == "" {
+        return s
+    }
 
-	// 1. Стандартный декодер (работает для UTF-8)
-	d := new(mime.WordDecoder)
-	if decoded, err := d.DecodeHeader(s); err == nil && decoded != s {
-		return decoded
-	}
+    d := &mime.WordDecoder{
+        CharsetReader: func(charset string, input io.Reader) (io.Reader, error) {
+            switch strings.ToLower(charset) {
+            case "utf-8", "us-ascii":
+                return input, nil
+            case "windows-1251", "cp1251":
+                return charmap.Windows1251.NewDecoder().Reader(input), nil
+            case "koi8-r":
+                return charmap.KOI8R.NewDecoder().Reader(input), nil
+            default:
+                return nil, fmt.Errorf("unsupported charset: %s", charset)
+            }
+        },
+    }
 
-	// 2. Специальные кодировки
-	if strings.Contains(s, "koi8-r") {
-		return decodeKoi8R(s)
-	}
-	if strings.Contains(s, "windows-1251") {
-		return decodeWindows1251(s)
-	}
+    decoded, err := d.DecodeHeader(s)
+    if err == nil {
+        return decoded
+    }
 
-	return s
+    return s
 }
 
-func decodeWindows1251(s string) string {
-	parts := strings.Fields(s)
-	var result []string
+// func decodeHeader(s string) string {
+// 	if s == "" {
+// 		return s
+// 	}
 
-	for _, p := range parts {
-		// B-кодировка
-		if strings.HasPrefix(p, "=?windows-1251?B?") && strings.HasSuffix(p, "?=") {
-			idxB := strings.Index(p, "?B?")
-			if idxB == -1 {
-				continue
-			}
-			data := p[idxB+3 : len(p)-2]
-			decodedBytes, err := base64.StdEncoding.DecodeString(data)
-			if err != nil {
-				continue
-			}
-			decoded, err := charmap.Windows1251.NewDecoder().String(string(decodedBytes))
-			if err == nil {
-				result = append(result, decoded)
-			}
-			continue
-		}
+// 	// 1. Стандартный декодер (работает для UTF-8)
+// 	d := new(mime.WordDecoder)
+// 	if decoded, err := d.DecodeHeader(s); err == nil && decoded != s {
+// 		return decoded
+// 	}
 
-		// Q-кодировка
-		if strings.HasPrefix(p, "=?windows-1251?Q?") && strings.HasSuffix(p, "?=") {
-			idxQ := strings.Index(p, "?Q?")
-			if idxQ == -1 {
-				continue
-			}
-			data := p[idxQ+3 : len(p)-2]
-			decodedBytes := decodeQuotedPrintable(data)
-			decoded, err := charmap.Windows1251.NewDecoder().String(string(decodedBytes))
-			if err == nil {
-				result = append(result, decoded)
-			}
-			continue
-		}
-	}
+// 	// 2. Специальные кодировки
+// 	if strings.Contains(s, "koi8-r") {
+// 		return decodeKoi8R(s)
+// 	}
+// 	if strings.Contains(s, "windows-1251") {
+// 		return decodeWindows1251(s)
+// 	}
 
-	if len(result) > 0 {
-		return strings.Join(result, " ")
-	}
-	return s
-}
+// 	return s
+// }
 
-func decodeKoi8R(s string) string {
-	parts := strings.Fields(s)
-	var result []string
+// func decodeWindows1251(s string) string {
+// 	parts := strings.Fields(s)
+// 	var result []string
 
-	for _, p := range parts {
-		if !strings.HasPrefix(p, "=?koi8-r?B?") || !strings.HasSuffix(p, "?=") {
-			continue
-		}
+// 	for _, p := range parts {
+// 		// B-кодировка
+// 		if strings.HasPrefix(p, "=?windows-1251?B?") && strings.HasSuffix(p, "?=") {
+// 			idxB := strings.Index(p, "?B?")
+// 			if idxB == -1 {
+// 				continue
+// 			}
+// 			data := p[idxB+3 : len(p)-2]
+// 			decodedBytes, err := base64.StdEncoding.DecodeString(data)
+// 			if err != nil {
+// 				continue
+// 			}
+// 			decoded, err := charmap.Windows1251.NewDecoder().String(string(decodedBytes))
+// 			if err == nil {
+// 				result = append(result, decoded)
+// 			}
+// 			continue
+// 		}
 
-		// Извлекаем base64 данные
-		idxB := strings.Index(p, "?B?")
-		if idxB == -1 {
-			continue
-		}
-		data := p[idxB+3 : len(p)-2]
+// 		// Q-кодировка
+// 		if strings.HasPrefix(p, "=?windows-1251?Q?") && strings.HasSuffix(p, "?=") {
+// 			idxQ := strings.Index(p, "?Q?")
+// 			if idxQ == -1 {
+// 				continue
+// 			}
+// 			data := p[idxQ+3 : len(p)-2]
+// 			decodedBytes := decodeQuotedPrintable(data)
+// 			decoded, err := charmap.Windows1251.NewDecoder().String(string(decodedBytes))
+// 			if err == nil {
+// 				result = append(result, decoded)
+// 			}
+// 			continue
+// 		}
+// 	}
 
-		decodedBytes, err := base64.StdEncoding.DecodeString(data)
-		if err != nil {
-			continue
-		}
+// 	if len(result) > 0 {
+// 		return strings.Join(result, " ")
+// 	}
+// 	return s
+// }
 
-		// KOI8-R в UTF-8
-		decoded, err := charmap.KOI8R.NewDecoder().String(string(decodedBytes))
-		if err == nil {
-			result = append(result, decoded)
-		}
-	}
+// func decodeKoi8R(s string) string {
+// 	parts := strings.Fields(s)
+// 	var result []string
 
-	if len(result) > 0 {
-		return strings.Join(result, " ")
-	}
-	return s
-}
+// 	for _, p := range parts {
+// 		if !strings.HasPrefix(p, "=?koi8-r?B?") || !strings.HasSuffix(p, "?=") {
+// 			continue
+// 		}
+
+// 		// Извлекаем base64 данные
+// 		idxB := strings.Index(p, "?B?")
+// 		if idxB == -1 {
+// 			continue
+// 		}
+// 		data := p[idxB+3 : len(p)-2]
+
+// 		decodedBytes, err := base64.StdEncoding.DecodeString(data)
+// 		if err != nil {
+// 			continue
+// 		}
+
+// 		// KOI8-R в UTF-8
+// 		decoded, err := charmap.KOI8R.NewDecoder().String(string(decodedBytes))
+// 		if err == nil {
+// 			result = append(result, decoded)
+// 		}
+// 	}
+
+// 	if len(result) > 0 {
+// 		return strings.Join(result, " ")
+// 	}
+// 	return s
+// }
 
 // Вспомогательная функция для Quoted-Printable
-func decodeQuotedPrintable(s string) []byte {
-	var result []byte
-	i := 0
-	for i < len(s) {
-		if s[i] == '=' && i+2 < len(s) {
-			if s[i+1] == '\r' && s[i+2] == '\n' {
-				i += 3
-				continue
-			}
-			hex := s[i+1 : i+3]
-			if v, err := strconv.ParseUint("0x"+string(hex), 0, 8); err == nil {
-				result = append(result, byte(v))
-				i += 3
-				continue
-			}
-		}
-		result = append(result, s[i])
-		i++
-	}
-	return result
-}
+// func decodeQuotedPrintable(s string) []byte {
+// 	var result []byte
+// 	i := 0
+// 	for i < len(s) {
+// 		if s[i] == '=' && i+2 < len(s) {
+// 			if s[i+1] == '\r' && s[i+2] == '\n' {
+// 				i += 3
+// 				continue
+// 			}
+// 			hex := s[i+1 : i+3]
+// 			if v, err := strconv.ParseUint("0x"+string(hex), 0, 8); err == nil {
+// 				result = append(result, byte(v))
+// 				i += 3
+// 				continue
+// 			}
+// 		}
+// 		result = append(result, s[i])
+// 		i++
+// 	}
+// 	return result
+// }
 
 func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, error) {
     msg := fetchCmd.Next()
@@ -430,27 +466,25 @@ func parseBody(email *Email, literal io.Reader) error {
         // ---------------- text/plain ----------------
         case strings.HasPrefix(ctLower, "text/plain"):
             bodyBytes, _ := io.ReadAll(p.Body)
-            txt := decodeBodyBytes(bodyBytes, contentType)
-            txt = strings.TrimSpace(txt)
+
+            log.Printf("UID=%d part=%s utf8_valid=%v", email.UID, contentType, utf8.Valid(bodyBytes))
+
+            txt := strings.TrimSpace(string(bodyBytes))
             if txt != "" {
-                // Если уже был plain, второй не добавляем, чтобы не дублировать
                 if plainPart == "" {
                     plainPart = txt
                 } else {
-                    // можно залогировать, что plain дублируется
                     log.Printf("UID=%d: extra text/plain part skipped", email.UID)
                 }
             }
-
         // ---------------- text/html ----------------
         case strings.HasPrefix(ctLower, "text/html"):
             bodyBytes, _ := io.ReadAll(p.Body)
-            html := decodeBodyBytes(bodyBytes, contentType)
+            html := string(bodyBytes)
             txt := strings.TrimSpace(extractTextFromHTML(html))
             if txt != "" && htmlPart == "" {
                 htmlPart = txt
             }
-
         // ---------------- вложенное письмо message/rfc822 ----------------
         case strings.HasPrefix(ctLower, "message/rfc822"):
             nestedBytes, _ := io.ReadAll(p.Body)
@@ -584,28 +618,38 @@ func extractTextFromHTML(htmlStr string) string {
 }
 
 func extractFilename(disposition, contentType string) string {
-	var filename string
+    var filename string
 
-	if idx := strings.Index(disposition, "filename="); idx >= 0 {
-		rawFilename := disposition[idx+9:]
-		rawFilename = strings.Trim(rawFilename, "\"")
+    if disposition != "" {
+        _, params, err := mime.ParseMediaType(disposition)
+        if err == nil {
+            filename = strings.TrimSpace(params["filename"])
+            if filename == "" {
+                filename = strings.TrimSpace(params["filename*"])
+            }
+        }
+    }
 
-		filename = decodeHeader(rawFilename)
-	}
+    if filename == "" && contentType != "" {
+        _, params, err := mime.ParseMediaType(contentType)
+        if err == nil {
+            filename = strings.TrimSpace(params["name"])
+        }
+    }
 
-	// Если имени нет  это мусорное вложение (подпись и т.п.)
-	if filename == "" {
-		return ""
-	}
+    if filename == "" {
+        return ""
+    }
 
-	// Очистка опасных символов
-	filename = strings.Map(func(r rune) rune {
-		switch r {
-		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
-			return '_'
-		}
-		return r
-	}, filename)
+    filename = decodeHeader(filename)
 
-	return filename
+    filename = strings.Map(func(r rune) rune {
+        switch r {
+        case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+            return '_'
+        }
+        return r
+    }, filename)
+
+    return filename
 }
