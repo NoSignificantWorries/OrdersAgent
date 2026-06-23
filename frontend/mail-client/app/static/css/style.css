@@ -684,9 +684,13 @@ body {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    padding-bottom: 25px;
+    padding-bottom: 5px;
+    margin-bottom: 5px;
+}
+
+.email-divider {
     border-bottom: 2px solid #f1f5f9;
-    margin-bottom: 25px;
+    padding-top: 5px;
 }
 
 .email-header-top {
@@ -828,13 +832,12 @@ body {
     min-width: 60px;
     color: #1e293b;
 }
-
 /* ==== ЦЕПОЧКА ==== */
 .email-thread-block {
-    margin: 18px 0 16px;
-    border: 1px solid #e2e8f0;
-    border-radius: 16px;
-    background: #ffffff;
+    margin: 10px 0 12px;
+    border: 1px solid #e5eaf2;
+    border-radius: 12px;
+    background: #fff;
     overflow: hidden;
 }
 
@@ -842,16 +845,16 @@ body {
     width: 100%;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 14px 18px;
+    gap: 8px;
+    padding: 9px 12px;
     border: none;
     background: #f8fafc;
     color: #1e293b;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     text-align: left;
-    transition: background 0.2s ease;
+    transition: background 0.15s ease, color 0.15s ease;
 }
 
 .email-thread-toggle:hover {
@@ -860,19 +863,23 @@ body {
 
 .email-thread-toggle:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 2px rgba(102, 126, 234, 0.22);
+    box-shadow: inset 0 0 0 2px rgba(99, 102, 241, 0.18);
 }
 
 .email-thread-toggle-icon {
-    width: 16px;
-    flex: 0 0 16px;
-    color: #667085;
-    font-size: 13px;
+    width: 14px;
+    flex: 0 0 14px;
+    color: #64748b;
+    font-size: 12px;
     text-align: center;
+    line-height: 1;
 }
 
 .email-thread-toggle-text {
     min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .email-thread-panel[hidden] {
@@ -880,25 +887,25 @@ body {
 }
 
 .email-thread-panel {
-    padding: 2px 18px 16px 18px;
-    background: #ffffff;
+    padding: 0 12px 12px;
+    background: #fff;
 }
 
 .email-thread-timeline {
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-left: 8px;
-    padding-left: 22px;
+    gap: 8px;
+    margin-left: 4px;
+    padding-left: 16px;
 }
 
 .email-thread-timeline::before {
     content: "";
     position: absolute;
-    left: 7px;
-    top: 6px;
-    bottom: 6px;
+    left: 5px;
+    top: 4px;
+    bottom: 4px;
     width: 2px;
     background: #dbe4f0;
     border-radius: 999px;
@@ -908,38 +915,38 @@ body {
     position: relative;
     display: flex;
     align-items: flex-start;
-    gap: 12px;
+    gap: 10px;
     width: 100%;
-    padding: 12px 14px;
+    padding: 9px 10px;
     border: 1px solid #e2e8f0;
-    border-radius: 14px;
-    background: #ffffff;
+    border-radius: 12px;
+    background: #fff;
     text-align: left;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
 .email-thread-item:hover {
     background: #f8fafc;
     border-color: #cbd5e1;
-    transform: translateX(2px);
+    transform: translateX(1px);
 }
 
 .email-thread-item.is-current {
-    background: #eef2ff;
+    background: #f1f5ff;
     border-color: #a5b4fc;
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.10);
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08);
 }
 
 .email-thread-marker {
     position: absolute;
-    left: -22px;
-    top: 18px;
-    width: 12px;
-    height: 12px;
+    left: -18px;
+    top: 14px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     background: #94a3b8;
-    border: 2px solid #ffffff;
+    border: 2px solid #fff;
     box-shadow: 0 0 0 2px #dbe4f0;
 }
 
@@ -951,19 +958,19 @@ body {
 .email-thread-item-main {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
     min-width: 0;
 }
 
 .email-thread-item-top {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex-wrap: wrap;
 }
 
 .email-thread-sender {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
     color: #0f172a;
 }
@@ -971,30 +978,30 @@ body {
 .email-thread-current-badge {
     display: inline-flex;
     align-items: center;
-    min-height: 22px;
-    padding: 0 8px;
+    min-height: 18px;
+    padding: 0 6px;
     border-radius: 999px;
     background: #6366f1;
-    color: #ffffff;
-    font-size: 11px;
+    color: #fff;
+    font-size: 10px;
     font-weight: 700;
 }
 
 .email-thread-item-meta {
-    font-size: 12px;
+    font-size: 11px;
     color: #64748b;
 }
 
 .email-thread-item-subject {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     color: #334155;
     word-break: break-word;
 }
 
 .email-thread-item-preview {
-    font-size: 13px;
-    line-height: 1.45;
+    font-size: 12px;
+    line-height: 1.35;
     color: #64748b;
     word-break: break-word;
 }

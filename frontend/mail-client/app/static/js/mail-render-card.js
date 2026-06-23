@@ -406,6 +406,9 @@
                 </div>
 
                 ${threadBlock}
+
+                <div class="email-divider"></div>
+
                 ${attachmentBlock}
                 ${decisionBlock}
                 ${closeTaskBlock}
