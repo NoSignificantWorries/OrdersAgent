@@ -16,6 +16,16 @@
                 </div>
 
                 <nav class="header-nav" aria-label="Основная навигация">
+                    <button
+                        type="button"
+                        id="compose-open-btn"
+                        class="nav-btn compose-btn"
+                        aria-label="Написать письмо"
+                        title="Написать письмо"
+                    >
+                        Написать
+                    </button>
+
                     <a
                         href="/inbox"
                         class="nav-btn {% if current_page == 'inbox' %}active{% endif %}"
@@ -149,11 +159,22 @@
         </div>
     </div>
 
+    <div id="compose-root"></div>
+
+    <div
+        id="mail-toast"
+        class="mail-toast"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+    ></div>
+
     <script src="/static/js/mail-formatters.js"></script>
     <script src="/static/js/mail-api.js"></script>
     <script src="/static/js/mail-chat.js"></script>
     <script src="/static/js/mail-render-list.js"></script>
     <script src="/static/js/mail-render-card.js"></script>
+    <script src="/static/js/mail-compose.js"></script>
     <script src="/static/js/mail-init.js"></script>
     <script src="/static/js/mail-common.js"></script>
     {% if current_page == 'archived' %}

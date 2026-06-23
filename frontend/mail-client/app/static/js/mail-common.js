@@ -19,6 +19,7 @@ const {
     loadAvailableResultDocuments,
     downloadAvailableResultDocuments,
     loadEmailsFromApi: loadEmailsFromApiFromApiModule,
+    sendNewEmail,
 } = window.MailApi;
 
 const {
@@ -57,6 +58,15 @@ const {
     initMailPage: initMailPageFromModule,
 } = window.MailInit;
 
+const {
+    ensureComposeState: ensureComposeStateFromModule,
+    renderCompose: renderComposeFromModule,
+    openCompose: openComposeFromModule,
+    closeCompose: closeComposeFromModule,
+    isComposeInputProtected: isComposeInputProtectedFromModule,
+    initCompose: initComposeFromModule,
+} = window.MailCompose;
+
 const chatStorage = new Map();
 
 let currentStatusFilter = "all";
@@ -72,6 +82,36 @@ const replyDrafts = new Map();
 let isReplyInputFocused = false;
 let isReplyFileDialogOpen = false;
 const openReplyForms = new Set();
+let composeDraft = {
+    isOpen: false,
+    to: "",
+    subject: "",
+    body: "",
+    files: [],
+    isSending: false,
+    isFocused: false,
+    isComposing: false,
+    isFileDialogOpen: false,
+};
+
+let mailToastTimer = null;
+
+function showMailToast(message) {
+    const toast = document.getElementById("mail-toast");
+    if (!toast) return;
+
+    toast.textContent = message;
+    toast.classList.add("is-visible");
+
+    if (mailToastTimer) {
+        clearTimeout(mailToastTimer);
+    }
+
+    mailToastTimer = setTimeout(() => {
+        toast.classList.remove("is-visible");
+        toast.textContent = "";
+    }, 2800);
+}
 
 // ========== КОНФИГУРАЦИЯ ==========
 const decisionOptions = [
@@ -152,6 +192,7 @@ function normalizeApiItem(item, idx) {
 
     return normalized;
 }
+
 
 // ========== ЗАГРУЗКА ПИСЕМ ИЗ API ==========
 async function loadEmailsFromApi(showLoadingState = true) {
@@ -371,6 +412,40 @@ function isReplyInputProtected(state) {
     );
 }
 
+function getMailComposeState() {
+    return {
+        get composeDraft() {
+            return composeDraft;
+        },
+        set composeDraft(value) {
+            composeDraft = value;
+        },
+        get pendingSilentRefresh() {
+            return pendingSilentRefresh;
+        },
+        set pendingSilentRefresh(value) {
+            pendingSilentRefresh = value;
+        },
+    };
+}
+
+function renderCompose() {
+    return renderComposeFromModule({
+        state: getMailComposeState(),
+    });
+}
+
+function initCompose() {
+    return initComposeFromModule({
+        state: getMailComposeState(),
+        sendNewEmail,
+    });
+}
+
+function isComposeInputProtected() {
+    return isComposeInputProtectedFromModule(getMailComposeState());
+}
+
 function getMailChatDeps() {
     return {
         state: {
@@ -441,6 +516,12 @@ function getMailInitState() {
         chatStorage,
         replyDrafts,
         openReplyForms, 
+        get composeDraft() {
+            return composeDraft;
+        },
+        set composeDraft(value) {
+            composeDraft = value;
+        },
         get currentSearchTerm() {
             return currentSearchTerm;
         },
@@ -518,6 +599,7 @@ function refreshEmailsSilently() {
         isChatTabActive,
         isMaterialInputProtected,
         isReplyInputProtected,
+        isComposeInputProtected,
         loadEmailsFromApi,
         renderEmailList,
         updateUnreadCount,
@@ -535,10 +617,12 @@ function initMailPage(config) {
         updateUnreadCount,
         selectEmail,
         initTabs,
+        initCompose,
         sendChatData,
         isChatTabActive,
         isMaterialInputProtected,
         isReplyInputProtected,
+        isComposeInputProtected,
         highlightSelectedEmail,
         renderChatForEmail,
         renderEmailCard,
@@ -547,4 +631,5 @@ function initMailPage(config) {
 
 window.MailPage = {
     initMailPage,
+    showMailToast,
 };

@@ -176,6 +176,34 @@ body {
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.25);
 }
 
+/* ===== Кнопка отправки ===== */
+.compose-btn {
+    color: #ffffff;
+    background: linear-gradient(135deg, #10b981, #059669);
+    border-color: transparent;
+    box-shadow: 0 6px 16px rgba(16, 185, 129, 0.28);
+}
+
+.compose-btn:hover {
+    background: linear-gradient(135deg, #0ea571, #047857);
+    color: #ffffff;
+    border-color: transparent;
+    box-shadow: 0 8px 18px rgba(5, 150, 105, 0.34);
+    transform: translateY(-1px);
+}
+
+.compose-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 4px 10px rgba(5, 150, 105, 0.24);
+}
+
+.compose-btn:focus-visible {
+    outline: none;
+    box-shadow:
+        0 0 0 3px rgba(16, 185, 129, 0.20),
+        0 8px 18px rgba(5, 150, 105, 0.30);
+}
+
 .header-right {
     display: flex;
     align-items: center;
@@ -1056,6 +1084,336 @@ body {
 .reply-file-remove-btn:focus-visible {
     outline: none;
     box-shadow: 0 0 0 3px rgba(138, 164, 255, 0.22);
+}
+
+/* ===== COMPOSE OVERLAY ===== */
+#compose-root {
+    position: relative;
+    z-index: 300;
+}
+
+.compose-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 400;
+}
+
+.compose-overlay[hidden] {
+    display: none !important;
+}
+
+.compose-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.38);
+    backdrop-filter: blur(2px);
+}
+
+.compose-modal {
+    position: absolute;
+    top: 84px;
+    right: 24px;
+    width: min(680px, calc(100vw - 32px));
+    max-height: calc(100vh - 108px);
+    display: flex;
+    flex-direction: column;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 24px;
+    box-shadow:
+        0 24px 60px rgba(15, 23, 42, 0.20),
+        0 8px 24px rgba(15, 23, 42, 0.10);
+    overflow: hidden;
+}
+
+.compose-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 22px;
+    border-bottom: 1px solid #e2e8f0;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.compose-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.compose-close-btn {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 10px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+
+.compose-close-btn:hover {
+    background: #e2e8f0;
+    color: #1e293b;
+}
+
+.compose-close-btn:active {
+    transform: scale(0.98);
+}
+
+.compose-close-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.compose-body {
+    padding: 20px 22px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: #ffffff;
+}
+
+.compose-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.compose-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #334155;
+}
+
+.compose-input,
+.compose-textarea {
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 14px;
+    background: #ffffff;
+    color: #0f172a;
+    font: inherit;
+    outline: none;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.compose-input {
+    min-height: 46px;
+    padding: 0 14px;
+    font-size: 14px;
+}
+
+.compose-textarea {
+    min-height: 220px;
+    resize: vertical;
+    padding: 14px;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+.compose-input::placeholder,
+.compose-textarea::placeholder {
+    color: #94a3b8;
+}
+
+.compose-input:focus,
+.compose-textarea:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.16);
+}
+
+.compose-input:disabled,
+.compose-textarea:disabled {
+    background: #f8fafc;
+    color: #64748b;
+    cursor: not-allowed;
+}
+
+.compose-attachments-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.compose-attach-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    padding: 0 14px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.compose-attach-btn:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+}
+
+.compose-files-container {
+    margin-top: 4px;
+}
+
+.compose-files-empty {
+    padding: 12px 14px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    color: #94a3b8;
+    font-size: 14px;
+    background: #f8fafc;
+}
+
+.compose-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.compose-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 40px;
+    padding: 8px 10px 8px 12px;
+    border: 1px solid #d7dbe2;
+    border-radius: 12px;
+    background: #f8f9fb;
+}
+
+.compose-file-name {
+    min-width: 0;
+    font-size: 14px;
+    color: #2b2f36;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.compose-file-remove-btn {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border: 1px solid #d7dbe2;
+    border-radius: 8px;
+    background: #fff;
+    color: #5b6575;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.compose-file-remove-btn:hover {
+    background: #f1f4f8;
+    border-color: #bcc6d6;
+    color: #2f3744;
+}
+
+.compose-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 22px 20px;
+    border-top: 1px solid #e2e8f0;
+    background: #fafbfc;
+    flex-wrap: wrap;
+}
+
+.compose-primary-btn,
+.compose-secondary-btn {
+    min-height: 42px;
+    padding: 0 18px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.compose-primary-btn {
+    border: none;
+    color: #ffffff;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    box-shadow: 0 6px 16px rgba(102, 126, 234, 0.25);
+}
+
+.compose-primary-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 20px rgba(102, 126, 234, 0.28);
+}
+
+.compose-secondary-btn {
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #334155;
+}
+
+.compose-secondary-btn:hover {
+    background: #f8fafc;
+    border-color: #94a3b8;
+}
+
+.compose-primary-btn:disabled,
+.compose-secondary-btn:disabled,
+.compose-close-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+    .compose-modal {
+        top: 76px;
+        right: 16px;
+        left: 16px;
+        width: auto;
+        max-height: calc(100vh - 92px);
+    }
+
+    .compose-textarea {
+        min-height: 180px;
+    }
+}
+
+@media (max-width: 600px) {
+    .compose-modal {
+        top: 12px;
+        right: 12px;
+        left: 12px;
+        max-height: calc(100vh - 24px);
+        border-radius: 18px;
+    }
+
+    .compose-header,
+    .compose-body,
+    .compose-footer {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .compose-footer {
+        justify-content: stretch;
+    }
+
+    .compose-primary-btn,
+    .compose-secondary-btn {
+        width: 100%;
+    }
 }
 
 /* Вложения */

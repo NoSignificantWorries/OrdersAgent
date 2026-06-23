@@ -123,24 +123,6 @@
         });
     }
 
-    let toastTimer = null;
-
-    function showToast(message) {
-        const toast = document.getElementById("mail-toast");
-        if (!toast) return;
-
-        toast.textContent = message;
-        toast.classList.add("is-visible");
-
-        if (toastTimer) {
-            clearTimeout(toastTimer);
-        }
-
-        toastTimer = setTimeout(() => {
-            toast.classList.remove("is-visible");
-        }, 2800);
-    }
-
     function renderEmailCard(email, deps) {
         const {
             state,
@@ -568,7 +550,7 @@
                         throw new Error(errorMessage);
                     }
 
-                    showToast("Письмо отправлено");
+                    window.MailPage?.showMailToast?.("Письмо отправлено");
                     state.replyDrafts.delete(realEmailId);
                     state.openReplyForms?.delete(realEmailId);
                     state.isReplyInputFocused = false;
