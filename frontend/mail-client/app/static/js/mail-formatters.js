@@ -24,7 +24,31 @@
     function formatDateTime(dateString) {
         const date = new Date(dateString);
         if (isNaN(date)) return "";
-        return date.toLocaleString("ru-RU");
+        
+        const isEmailDate = dateString.includes('+00:00') && 
+                            dateString.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+        
+        if (isEmailDate) {
+            // Показываем как есть (в UTC)
+            return date.toLocaleString("ru-RU", {
+                timeZone: "UTC",
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+        
+        // Для createdat - конвертируем в Новосибирск
+        return date.toLocaleString("ru-RU", {
+            timeZone: "Asia/Novosibirsk",
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
     }
 
     function escapeHtml(text) {

@@ -57,8 +57,6 @@
     }
 
     function bindReplyInputEvents({ input, email, deps }) {
-        console.log("bindReplyInputEvents state =", deps?.state);
-        console.log("bindReplyInputEvents replyDrafts =", deps?.state?.replyDrafts);
         if (!input) return;
 
         const { state, refreshEmailsSilently } = deps;
@@ -653,22 +651,6 @@
                     for (const file of files) {
                         formData.append("attachments", file, file.name);
                     }
-
-                    
-                    for (const [key, value] of formData.entries()) {
-                        console.log("formData", key, value);
-                    }
-
-                    console.log("reply body:", body);
-                    console.log(
-                        "reply files:",
-                        Array.from(replyFilesInput?.files || []).map((f) => ({
-                            name: f.name,
-                            size: f.size,
-                            type: f.type,
-                        })),
-                    );
-
                     
                     const resp = await fetch(`/api/emails/${realEmailId}/reply`, {
                         method: "POST",
