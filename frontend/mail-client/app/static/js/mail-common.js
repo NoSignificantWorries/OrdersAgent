@@ -6,6 +6,7 @@ let unreadCount = 0;
 const {
     formatDate,
     formatDateTime,
+    formatTimeOnly,
     escapeHtml,
     escapeAttr,
     mapTaskStatusToUiStatus,
@@ -368,6 +369,7 @@ function renderEmailList() {
         state: getMailRenderListState(),
         escapeHtml,
         formatDate,
+        formatTimeOnly,
         getStatusName,
         selectEmail,
     });

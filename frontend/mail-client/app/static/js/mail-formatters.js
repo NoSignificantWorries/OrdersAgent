@@ -51,6 +51,31 @@
         });
     }
 
+    function formatTimeOnly(dateString) {
+        const date = new Date(dateString);
+        if (isNaN(date)) return "";
+        
+        // Проверяем, является ли это emaildate (приходит в UTC)
+        const isEmailDate = dateString.includes('+00:00') && 
+                            dateString.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+        
+        if (isEmailDate) {
+            // Показываем как есть (в UTC)
+            return date.toLocaleString("ru-RU", {
+                timeZone: "UTC",
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+        
+        // Для createdat - конвертируем в Новосибирск
+        return date.toLocaleString("ru-RU", {
+            timeZone: "Asia/Novosibirsk",
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
     function escapeHtml(text) {
         const div = document.createElement("div");
         div.textContent = text ?? "";
@@ -127,6 +152,7 @@
         statusConfig,
         formatDate,
         formatDateTime,
+        formatTimeOnly,
         escapeHtml,
         escapeAttr,
         pluralizeRu,

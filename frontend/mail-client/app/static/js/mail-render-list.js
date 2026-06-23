@@ -23,6 +23,7 @@
             state,
             escapeHtml,
             formatDate,
+            formatTimeOnly,
             getStatusName,
             selectEmail,
         } = deps;
@@ -105,7 +106,10 @@
                             </div>
                         </div>
                         <div class="recipient">Кому: ${escapeHtml(email.mailbox || "")}</div>
-                        <div class="date">${formatDate(email.date)}</div>
+                        <div class="date">
+                            ${formatDate(email.date)}
+                            <span class="email-time">${formatTimeOnly(email.date)}</span>
+                        </div>
                     </div>
                 `;
             })
