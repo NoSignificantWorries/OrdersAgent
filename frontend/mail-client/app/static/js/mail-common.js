@@ -82,6 +82,7 @@ const replyDrafts = new Map();
 let isReplyInputFocused = false;
 let isReplyFileDialogOpen = false;
 const openReplyForms = new Set();
+const expandedThreads = new Set();
 let composeDraft = {
     isOpen: false,
     to: "",
@@ -111,6 +112,85 @@ function showMailToast(message) {
         toast.classList.remove("is-visible");
         toast.textContent = "";
     }, 2800);
+}
+
+function normalizeHeaderValue(value) {
+    return String(value || "").trim();
+}
+
+function normalizeReferences(value) {
+    if (Array.isArray(value)) {
+        return value.map((item) => normalizeHeaderValue(item)).filter(Boolean);
+    }
+
+    return normalizeHeaderValue(value)
+        .split(/\s+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function getEmailMessageId(email) {
+    return normalizeHeaderValue(
+        email?.message_id || email?.messageId || email?.messageid
+    );
+}
+
+function getEmailInReplyTo(email) {
+    return normalizeHeaderValue(
+        email?.in_reply_to || email?.inReplyTo || email?.inreplyto
+    );
+}
+
+function getEmailReferences(email) {
+    return normalizeReferences(
+        email?.references || email?.email_references || email?.refs
+    );
+}
+
+function getThreadMessages(currentEmail) {
+    if (!currentEmail) return [];
+
+    const currentMessageId = getEmailMessageId(currentEmail);
+    const currentInReplyTo = getEmailInReplyTo(currentEmail);
+    const currentReferences = getEmailReferences(currentEmail);
+
+    const threadKeys = new Set(
+        [currentMessageId, currentInReplyTo, ...currentReferences].filter(Boolean)
+    );
+
+    if (!threadKeys.size) {
+        return [currentEmail];
+    }
+
+    const related = emails.filter((email) => {
+        const messageId = getEmailMessageId(email);
+        const inReplyTo = getEmailInReplyTo(email);
+        const refs = getEmailReferences(email);
+
+        if (messageId && threadKeys.has(messageId)) return true;
+        if (inReplyTo && threadKeys.has(inReplyTo)) return true;
+        return refs.some((ref) => threadKeys.has(ref));
+    });
+
+    if (!related.some((email) => email.id === currentEmail.id)) {
+        related.push(currentEmail);
+    }
+
+    related.sort((a, b) => new Date(a.date) - new Date(b.date));
+    return related;
+}
+
+function isThreadExpanded(emailId) {
+    return expandedThreads.has(Number(emailId));
+}
+
+function toggleThreadExpanded(emailId) {
+    const normalizedId = Number(emailId);
+    if (expandedThreads.has(normalizedId)) {
+        expandedThreads.delete(normalizedId);
+    } else {
+        expandedThreads.add(normalizedId);
+    }
 }
 
 // ========== КОНФИГУРАЦИЯ ==========
@@ -149,6 +229,11 @@ function normalizeApiItem(item, idx) {
         date: item.emaildate || item.createdat || new Date().toISOString(),
         content: emailContent,
         preview: emailContent.replace(/\s+/g, " ").trim().slice(0, 140),
+        message_id: item.messageid || item.message_id || null,
+        in_reply_to: item.inreplyto || item.in_reply_to || null,
+        references: Array.isArray(item.references)
+            ? item.references
+            : (item.references || item.emailreferences || ""),
 
         archived: item.archived === true,
         read: item.is_read === true,
@@ -343,6 +428,7 @@ function getMailRenderCardState() {
         replyDrafts,
         chatStorage,
         openReplyForms,
+        expandedThreads,
     };
 }
 
@@ -390,6 +476,9 @@ function renderEmailCard(email) {
         closeOpenedEmail,
         closeAndMarkUnread,
         refreshEmailsSilently,
+        getThreadMessages,
+        isThreadExpanded,
+        toggleThreadExpanded,
     });
 }
 
