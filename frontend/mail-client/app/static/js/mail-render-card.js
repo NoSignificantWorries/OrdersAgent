@@ -526,8 +526,15 @@
         }
 
         if (replyFilesInput && replyFilesList) {
+            if (!state.replyFiles) {
+                state.replyFiles = new Map();
+            }
+            if (!state.replyFiles.has(realEmailId)) {
+                state.replyFiles.set(realEmailId, []);
+            }
+
             const renderReplyFiles = () => {
-                const files = Array.from(replyFilesInput.files || []);
+                const files = state.replyFiles.get(realEmailId) || [];
 
                 replyFilesList.innerHTML = files.length
                     ? files
@@ -554,26 +561,56 @@
             };
 
             const removeReplyFileByIndex = (removeIndex) => {
-                const dt = new DataTransfer();
-                const files = Array.from(replyFilesInput.files || []);
-
-                files.forEach((file, index) => {
-                    if (index !== removeIndex) {
-                        dt.items.add(file);
-                    }
-                });
-
-                replyFilesInput.files = dt.files;
+                const files = state.replyFiles.get(realEmailId) || [];
+                files.splice(removeIndex, 1);
+                state.replyFiles.set(realEmailId, files);
                 renderReplyFiles();
+                
+                updateReplyFilesInput();
             };
 
+            const updateReplyFilesInput = () => {
+                const files = state.replyFiles.get(realEmailId) || [];
+                const dt = new DataTransfer();
+                files.forEach(file => dt.items.add(file));
+                replyFilesInput.files = dt.files;
+            };
+
+            state._replyFilesHandlers = state._replyFilesHandlers || {};
+            state._replyFilesHandlers[realEmailId] = {
+                renderReplyFiles,
+                updateReplyFilesInput,
+                replyFilesInput,
+                replyFilesList,
+                state,
+                realEmailId,
+            };
+            
             replyFilesInput.addEventListener("click", () => {
                 state.isReplyFileDialogOpen = true;
             });
 
-            replyFilesInput.addEventListener("change", () => {
+            replyFilesInput.addEventListener("change", (event) => {
                 state.isReplyFileDialogOpen = false;
+
+                const newFiles = Array.from(event.target.files || []);
+                if (newFiles.length === 0) {
+                    return;
+                }
+
+                const currentFiles = state.replyFiles.get(realEmailId) || [];
+                
+                newFiles.forEach(file => {
+                    const exists = currentFiles.some(f => f.name === file.name && f.size === file.size);
+                    if (!exists) {
+                        currentFiles.push(file);
+                    }
+                });
+                
+                state.replyFiles.set(realEmailId, currentFiles);
+                
                 renderReplyFiles();
+                updateReplyFilesInput();
 
                 if (state.pendingSilentRefresh && !isReplyInputProtected(state)) {
                     state.pendingSilentRefresh = false;
@@ -605,6 +642,14 @@
 
                 removeReplyFileByIndex(removeIndex);
             });
+
+            renderReplyFiles();
+
+            const cleanupReplyFiles = () => {
+                state.replyFiles.set(realEmailId, []);
+                renderReplyFiles();
+                updateReplyFilesInput();
+            };
         }
 
         if (replyToggleBtn && replyFormBlock && replyBodyInput) {
@@ -621,8 +666,23 @@
                 replyFormBlock.hidden = true;
                 if (replyToggleBtn) replyToggleBtn.hidden = false;
                 replyBodyInput.value = "";
-                if (replyFilesInput) replyFilesInput.value = "";
-                if (replyFilesList) replyFilesList.innerHTML = "";
+                
+                const handlers = state._replyFilesHandlers?.[realEmailId];
+                if (handlers) {
+                    state.replyFiles.set(realEmailId, []);
+                    handlers.renderReplyFiles();
+                    handlers.updateReplyFilesInput();
+                    handlers.replyFilesInput.value = "";
+                    handlers.replyFilesList.innerHTML = "";
+                } else {
+                    if (replyFilesInput) {
+                        state.replyFiles.set(realEmailId, []);
+                        const dt = new DataTransfer();
+                        replyFilesInput.files = dt.files;
+                    }
+                    if (replyFilesList) replyFilesList.innerHTML = "";
+                }
+                
                 state.isReplyFileDialogOpen = false;
                 state.isReplyInputFocused = false;
                 state.isReplyInputComposing = false;
@@ -647,7 +707,7 @@
                     const formData = new FormData();
                     formData.append("body", body);
 
-                    const files = Array.from(replyFilesInput?.files || []);
+                    const files = state.replyFiles.get(realEmailId) || [];
                     for (const file of files) {
                         formData.append("attachments", file, file.name);
                     }
@@ -673,8 +733,24 @@
                     state.isReplyInputFocused = false;
                     state.isReplyInputComposing = false;
                     replyBodyInput.value = "";
-                    if (replyFilesInput) replyFilesInput.value = "";
-                    if (replyFilesList) replyFilesList.innerHTML = "";
+
+                    const handlers = state._replyFilesHandlers?.[realEmailId];
+                    if (handlers) {
+                        state.replyFiles.set(realEmailId, []);
+                        handlers.renderReplyFiles();
+                        handlers.updateReplyFilesInput();
+                        handlers.replyFilesInput.value = "";
+                        handlers.replyFilesList.innerHTML = "";
+                    } else {
+                        if (replyFilesInput) {
+                            replyFilesInput.value = "";
+                            state.replyFiles.set(realEmailId, []);
+                            const dt = new DataTransfer();
+                            replyFilesInput.files = dt.files;
+                        }
+                        if (replyFilesList) replyFilesList.innerHTML = "";
+                    }
+
                     state.isReplyFileDialogOpen = false;
                     replyFormBlock.hidden = true;
                     if (replyToggleBtn) replyToggleBtn.hidden = false;
