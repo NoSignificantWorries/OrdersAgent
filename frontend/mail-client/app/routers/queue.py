@@ -274,8 +274,8 @@ async def get_queue(
     if limit is not None:
         if limit < 1:
             limit = 1
-        if limit > 1000:
-            limit = 1000
+        if limit > 2000:
+            limit = 2000
 
     items = await list_queue_for_user(user=user, status=status, limit=limit, archived=archived)
 
