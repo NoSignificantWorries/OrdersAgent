@@ -1,8 +1,9 @@
-import re
+from collections import Counter
 from pathlib import Path
 
-import openpyxl
-import xlrd
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
 
 from materials import DELIMETERS, ParserV2
 from table import TableWorker, make_callculation_xlsx, make_request_xlsx, tp2
@@ -40,6 +41,24 @@ def test_callculation_table():
     wb = make_callculation_xlsx(res, unique_materials_dict)
     if wb is not None:
         wb.save(output)
+
+
+def test_text():
+    input = Path("../private/tables/1249A.xls")
+    output = Path("../private/results/1249A_aricles.xlsx")
+
+    data = tp2.TableLoader.load(None, input)
+    if data is None:
+        print("Wrong table")
+        return
+
+    text = [f"Sheet_{i}\n" + "\n".join(sheet) + "\n" for i, sheet in enumerate(data)]
+
+    for row in data[0]:
+        pattern = tp2.find_pattern_in_one_row(row)
+        if pattern:
+            print(f"<{row}>")
+            print(pattern)
 
 
 def main():
@@ -95,21 +114,38 @@ def main():
         print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
         print(error_files)
 
+
 def mainv2():
     # testfile = Path("../../private/tables/1108A.xls")
     inputs = Path("../private/tables")
-    output = Path("../private/results/tables")
+    output = Path("../private/results/texts")
+    output.mkdir(parents=True, exist_ok=True)
 
     parsed_cnt = 0
     all_cnt = 0
     error_files = []
     for file in inputs.iterdir():
         print("\n\n", file)
-
-        with_metadata = tp2.TableLoader.load(None, file)
-        if with_metadata is not None:
-            parsed_cnt += 1
         all_cnt += 1
+
+        data = tp2.TableLoader.load(None, file)
+        if data is None:
+            continue
+        parsed_cnt += 1
+
+        text = [
+            f"Sheet_{i}\n" + "\n".join(sheet) + "\n" for i, sheet in enumerate(data)
+        ]
+        with open(output / Path(file.stem + ".txt"), "w") as txtfile:
+            txtfile.write("\n".join(text))
+
+        for i, sheet in enumerate(data):
+            print("id:", i)
+            for row in sheet:
+                pattern = tp2.find_pattern_in_one_row(row)
+                if pattern:
+                    print(f"<{row}>")
+                    print(pattern)
         # worker.open_and_clean()
         # if worker.tables is None or not bool(worker.tables):
         #     print("Errors with table")
@@ -150,7 +186,9 @@ def mainv2():
         print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
         print(error_files)
 
+
 if __name__ == "__main__":
     # test_callculation_table()
     # main()
     mainv2()
+    # test_text()

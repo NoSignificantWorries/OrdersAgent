@@ -17,6 +17,21 @@ class CellType(Flag):
     MARKING_H = auto()
 
 
+CellTypeLabel = {
+    CellType.TEXT: "t",
+    CellType.NUMBER: "n",
+    CellType.SIZES: "s",
+    CellType.SIZE_H: "S",
+    CellType.LENGTH_H: "L",
+    CellType.WIDTH_H: "W",
+    CellType.HEIGHT_H: "H",
+    CellType.AMOUNT_H: "A",
+    CellType.MAT_H: "R",
+    CellType.BARCODE_H: "B",
+    CellType.MARKING_H: "M",
+}
+
+
 HEADER = (
     CellType.MAT_H
     | CellType.AMOUNT_H
@@ -38,7 +53,9 @@ class CellTypes:
 TYPES_CONFIG = CellTypes(
     regex={
         CellType.NUMBER: [(r"^[+-]?\d+(?:[.,]\d+)?$", [])],
-        CellType.SIZES: [(r"^\s*(\d+([.,]\d+)?)\s*[xXхХ]\s*(\d+([.,]\d+)?)\s*$", [1, 3])]
+        CellType.SIZES: [
+            (r"^\s*(\d+([.,]\d+)?)\s*[xXхХ]\s*(\d+([.,]\d+)?)\s*$", [1, 3])
+        ],
     },
     fuzzy={
         CellType.SIZE_H: [
@@ -76,7 +93,7 @@ COLUMN_RULES = {
     CellType.AMOUNT_H: CellType.NUMBER,
     CellType.BARCODE_H: CellType.TEXT | CellType.NUMBER,
     CellType.MARKING_H: CellType.TEXT | CellType.NUMBER,
-    CellType.SIZE_H: CellType.NUMBER | CellType.SIZES
+    CellType.SIZE_H: CellType.NUMBER | CellType.SIZES,
 }
 
 MERGES_CALLCULATION = [

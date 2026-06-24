@@ -12,8 +12,8 @@ from rapidfuzz import fuzz
 
 from materials import ParseResults
 
-from .config import HEADERS_CALLCULATION, MERGES_CALLCULATION
 from . import functional as func
+from .config import HEADERS_CALLCULATION, MERGES_CALLCULATION
 
 
 class CellType(Flag):
@@ -78,8 +78,6 @@ TYPES_CONFIG = CellTypes(
         CellType.MARKING_H: ["маркировка"],
     },
 )
-
-
 
 
 class Cell:
@@ -442,7 +440,7 @@ class TableWorker:
                     types = [cl.type for _, cl in row.items()]
                     if len(row) != len(variant) or types != variant:
                         this_variant = False
-                        break
+                        continue
                     indexes = [pos for pos, _ in row.items()]
                     target_indexes[idx] = indexes
                 if this_variant:
