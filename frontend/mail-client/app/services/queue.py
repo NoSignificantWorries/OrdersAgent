@@ -84,9 +84,9 @@ async def list_queue_for_user(
     pool = await get_db_pool()
 
     if not limit or limit < 1:
-        limit = 100
-    if limit > 200:
-        limit = 200
+        limit = 500
+    if limit > 1000:
+        limit = 1000
 
     async with pool.acquire() as conn:
         sql = f"""
@@ -94,6 +94,9 @@ async def list_queue_for_user(
                 e.id AS email_id,
                 e.mailbox,
                 e.email_uid,
+                e.message_id,
+                e.in_reply_to,
+                e.references_header AS references,
                 e.email_from,
                 e.email_subject,
                 e.raw_email,
@@ -205,6 +208,9 @@ async def list_queue_for_user(
                 e.email_subject,
                 e.raw_email,
                 e.email_date,
+                e.message_id,
+                e.in_reply_to,
+                e.references_header,
                 e.archived,
                 e.is_read,
                 e.created_at,
@@ -254,6 +260,9 @@ async def list_queue_for_user(
 
             item: dict = {
                 "emailid": row["email_id"],
+                "messageid": row["message_id"],
+                "inreplyto": row["in_reply_to"],
+                "references": row["references"],
                 "mailbox": row["mailbox"],
                 "emailuid": row["email_uid"],
                 "emailfrom": row["email_from"],

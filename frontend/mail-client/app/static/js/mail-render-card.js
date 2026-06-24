@@ -57,8 +57,6 @@
     }
 
     function bindReplyInputEvents({ input, email, deps }) {
-        console.log("bindReplyInputEvents state =", deps?.state);
-        console.log("bindReplyInputEvents replyDrafts =", deps?.state?.replyDrafts);
         if (!input) return;
 
         const { state, refreshEmailsSilently } = deps;
@@ -123,23 +121,16 @@
         });
     }
 
-    let toastTimer = null;
+    const getThreadCountLabel = (count) => {
+        const mod10 = count % 10;
+        const mod100 = count % 100;
 
-    function showToast(message) {
-        const toast = document.getElementById("mail-toast");
-        if (!toast) return;
-
-        toast.textContent = message;
-        toast.classList.add("is-visible");
-
-        if (toastTimer) {
-            clearTimeout(toastTimer);
+        if (mod10 === 1 && mod100 !== 11) return `${count} письмо`;
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+            return `${count} письма`;
         }
-
-        toastTimer = setTimeout(() => {
-            toast.classList.remove("is-visible");
-        }, 2800);
-    }
+        return `${count} писем`;
+    };
 
     function renderEmailCard(email, deps) {
         const {
@@ -159,6 +150,9 @@
             closeOpenedEmail,
             closeAndMarkUnread,
             refreshEmailsSilently,
+            getThreadMessages,
+            isThreadExpanded,
+            toggleThreadExpanded,
         } = deps;
 
         const cfg = window.MAILPAGECONFIG || {};
@@ -176,6 +170,88 @@
                 .join("") || "<p>...</p>";
 
         const docsWithName = getDisplayDocuments(email);
+
+        const threadMessagesRaw =
+            typeof getThreadMessages === "function" ? getThreadMessages(email) : [email];
+
+        const threadMessages = Array.isArray(threadMessagesRaw) && threadMessagesRaw.length
+            ? threadMessagesRaw
+            : [email];
+
+        const hasThread = threadMessages.length > 1;
+        const threadExpanded =
+            hasThread && typeof isThreadExpanded === "function"
+                ? isThreadExpanded(email.id)
+                : false;
+
+        const threadChevron = threadExpanded ? "▼" : "▶";
+
+        const threadBlock = hasThread
+            ? `
+                <div class="email-thread-block">
+                    <button
+                        type="button"
+                        id="thread-toggle-btn-${email.id}"
+                        class="email-thread-toggle"
+                        aria-expanded="${threadExpanded ? "true" : "false"}"
+                        aria-controls="email-thread-panel-${email.id}"
+                    >
+                        <span class="email-thread-toggle-icon" aria-hidden="true">${threadChevron}</span>
+                        <span class="email-thread-toggle-text">Цепочка: ${getThreadCountLabel(threadMessages.length)}</span>
+                    </button>
+
+                    <div
+                        id="email-thread-panel-${email.id}"
+                        class="email-thread-panel"
+                        ${threadExpanded ? "" : "hidden"}
+                    >
+                        <div class="email-thread-timeline">
+                            ${threadMessages
+                                .map((threadEmail) => {
+                                    const isCurrent = threadEmail.id === email.id;
+                                    const previewSource =
+                                        threadEmail.preview || threadEmail.content || "";
+                                    const preview = escapeHtml(previewSource.slice(0, 180));
+
+                                    return `
+                                        <button
+                                            type="button"
+                                            class="email-thread-item ${isCurrent ? "is-current" : ""}"
+                                            data-thread-email-id="${threadEmail.id}"
+                                        >
+                                            <span class="email-thread-marker" aria-hidden="true"></span>
+
+                                            <span class="email-thread-item-main">
+                                                <span class="email-thread-item-top">
+                                                    <span class="email-thread-sender">${escapeHtml(threadEmail.sender || "Без отправителя")}</span>
+                                                    ${
+                                                        isCurrent
+                                                            ? '<span class="email-thread-current-badge">Текущее</span>'
+                                                            : ""
+                                                    }
+                                                </span>
+
+                                                <span class="email-thread-item-meta">
+                                                    ${formatDateTime(threadEmail.date)}
+                                                </span>
+
+                                                <span class="email-thread-item-subject">
+                                                    ${escapeHtml(threadEmail.subject || "(без темы)")}
+                                                </span>
+
+                                                <span class="email-thread-item-preview">
+                                                    ${preview || "Без текста"}
+                                                </span>
+                                            </span>
+                                        </button>
+                                    `;
+                                })
+                                .join("")}
+                        </div>
+                    </div>
+                </div>
+            `
+            : "";
 
         const attachmentBlock = docsWithName.length
             ? `
@@ -327,6 +403,10 @@
                     </div>
                 </div>
 
+                ${threadBlock}
+
+                <div class="email-divider"></div>
+
                 ${attachmentBlock}
                 ${decisionBlock}
                 ${closeTaskBlock}
@@ -382,7 +462,6 @@
                     </div>
                 </div>
 
-                <div id="mail-toast" class="mail-toast" aria-live="polite" aria-atomic="true"></div>
             </div>
         `;
 
@@ -390,6 +469,42 @@
         if (closeEmailBtn) {
             closeEmailBtn.addEventListener("click", () => {
                 closeOpenedEmail();
+            });
+        }
+
+        const threadToggleBtn = document.getElementById(`thread-toggle-btn-${email.id}`);
+        const threadPanel = document.getElementById(`email-thread-panel-${email.id}`);
+
+        if (threadToggleBtn && threadPanel) {
+            threadToggleBtn.addEventListener("click", () => {
+                if (typeof toggleThreadExpanded === "function") {
+                    toggleThreadExpanded(email.id);
+                }
+
+                const expanded =
+                    typeof isThreadExpanded === "function"
+                        ? isThreadExpanded(email.id)
+                        : false;
+
+                threadToggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+                threadPanel.hidden = !expanded;
+
+                const icon = threadToggleBtn.querySelector(".email-thread-toggle-icon");
+                if (icon) {
+                    icon.textContent = expanded ? "▼" : "▶";
+                }
+            });
+
+            threadPanel.addEventListener("click", (event) => {
+                const target = event.target.closest("[data-thread-email-id]");
+                if (!target) return;
+
+                event.stopPropagation();
+
+                const targetId = Number(target.dataset.threadEmailId);
+                if (Number.isNaN(targetId) || targetId === email.id) return;
+
+                selectEmail(targetId);
             });
         }
 
@@ -536,22 +651,6 @@
                     for (const file of files) {
                         formData.append("attachments", file, file.name);
                     }
-
-                    
-                    for (const [key, value] of formData.entries()) {
-                        console.log("formData", key, value);
-                    }
-
-                    console.log("reply body:", body);
-                    console.log(
-                        "reply files:",
-                        Array.from(replyFilesInput?.files || []).map((f) => ({
-                            name: f.name,
-                            size: f.size,
-                            type: f.type,
-                        })),
-                    );
-
                     
                     const resp = await fetch(`/api/emails/${realEmailId}/reply`, {
                         method: "POST",
@@ -568,7 +667,7 @@
                         throw new Error(errorMessage);
                     }
 
-                    showToast("Письмо отправлено");
+                    window.MailPage?.showMailToast?.("Письмо отправлено");
                     state.replyDrafts.delete(realEmailId);
                     state.openReplyForms?.delete(realEmailId);
                     state.isReplyInputFocused = false;

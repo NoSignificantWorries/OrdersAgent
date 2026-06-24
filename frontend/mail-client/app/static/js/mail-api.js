@@ -174,11 +174,36 @@
         }
     }
 
+    async function sendNewEmail(formData) {
+        const resp = await fetch("/api/emails/send", {
+            method: "POST",
+            credentials: "same-origin",
+            body: formData,
+        });
+
+        if (!resp.ok) {
+            let message = "Не удалось отправить письмо";
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    message = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(message);
+        }
+
+        window.MailPage?.showMailToast?.("Письмо отправлено");
+
+        return resp;
+    }
+
     window.MailApi = {
         downloadBlob,
         downloadEmailAttachments,
         loadAvailableResultDocuments,
         downloadAvailableResultDocuments,
         loadEmailsFromApi,
+        sendNewEmail,
     };
 })();

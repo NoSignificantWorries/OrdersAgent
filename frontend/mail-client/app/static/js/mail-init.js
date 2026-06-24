@@ -51,6 +51,7 @@
             isChatTabActive,
             isMaterialInputProtected,
             isReplyInputProtected = () => false,
+            isComposeInputProtected = () => false,
             loadEmailsFromApi,
             renderEmailList,
             updateUnreadCount,
@@ -64,7 +65,8 @@
 
         const isProtectedBeforeLoad =
             isMaterialInputProtected() ||
-            isReplyInputProtected(state);
+            isReplyInputProtected(state) ||
+            isComposeInputProtected(state);
 
         if (isProtectedBeforeLoad) {
             state.pendingSilentRefresh = true;
@@ -82,7 +84,8 @@
 
         const isProtectedBeforeRender =
             isMaterialInputProtected() ||
-            isReplyInputProtected(state);
+            isReplyInputProtected(state) ||
+            isComposeInputProtected(state);
 
         if (isProtectedBeforeRender) {
             state.pendingSilentRefresh = true;
@@ -129,6 +132,7 @@
             updateUnreadCount,
             selectEmail,
             initTabs,
+            initCompose,
             sendChatData,
         } = deps;
 
@@ -155,6 +159,7 @@
             await loadEmailsFromApi();
             renderEmailList();
             updateUnreadCount();
+            initCompose();
 
             state.selectedEmailId = null;
 

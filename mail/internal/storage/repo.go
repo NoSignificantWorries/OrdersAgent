@@ -63,6 +63,20 @@ type ReplyToEmailRequest struct {
     Attachments []ReplyAttachment
 }
 
+type SendAttachment struct {
+    Filename    string
+    ContentType string
+    Data        []byte
+}
+
+type SendEmailRequest struct {
+    Mailbox     string
+    To          string
+    Subject     string
+    Body        string
+    Attachments []SendAttachment
+}
+
 // DBRepo — пишет метаданные в Postgres и файлы в MinIO.
 type DBRepo struct {
 	db    *api.DB
@@ -98,6 +112,50 @@ func normalizeMessageID(v string) string {
         return v
     }
     return "<" + v + ">"
+}
+
+func parseRecipients(raw string) ([]string, error) {
+    raw = strings.TrimSpace(raw)
+    if raw == "" {
+        return nil, fmt.Errorf("empty recipients")
+    }
+
+    parts := strings.FieldsFunc(raw, func(r rune) bool {
+        return r == ',' || r == ';' || r == '\n'
+    })
+
+    recipients := make([]string, 0, len(parts))
+    seen := make(map[string]struct{})
+
+    for _, part := range parts {
+        part = strings.TrimSpace(part)
+        if part == "" {
+            continue
+        }
+
+        addr, err := mail.ParseAddress(part)
+        if err != nil {
+            return nil, fmt.Errorf("invalid recipient %q: %w", part, err)
+        }
+
+        email := strings.TrimSpace(addr.Address)
+        if email == "" {
+            return nil, fmt.Errorf("empty recipient address")
+        }
+
+        key := strings.ToLower(email)
+        if _, ok := seen[key]; ok {
+            continue
+        }
+        seen[key] = struct{}{}
+        recipients = append(recipients, email)
+    }
+
+    if len(recipients) == 0 {
+        return nil, fmt.Errorf("no valid recipients")
+    }
+
+    return recipients, nil
 }
 
 // NewDBRepo — создаёт репозиторий с Postgres и MinIO.
@@ -151,6 +209,51 @@ func GetUserMailAuth(db *api.DB, userID int64) (*UserMailAuth, error) {
 	}
 
 	return auth, nil
+}
+
+func GetUserMailAuthByEmail(db *api.DB, mailbox string) (*UserMailAuth, error) {
+    row := db.Conn.QueryRow(`
+        SELECT
+            email,
+            mail_access_token,
+            mail_refresh_token,
+            mail_access_expires_at
+        FROM users
+        WHERE lower(email) = lower($1)
+        LIMIT 1
+    `, mailbox)
+
+    var email string
+    var accessToken sql.NullString
+    var refreshToken sql.NullString
+    var accessExpiresAt sql.NullTime
+
+    if err := row.Scan(&email, &accessToken, &refreshToken, &accessExpiresAt); err != nil {
+        if err == sql.ErrNoRows {
+            return nil, fmt.Errorf("user not found for mailbox=%s", mailbox)
+        }
+        return nil, fmt.Errorf("query user mail auth by email: %w", err)
+    }
+
+    if !accessToken.Valid || accessToken.String == "" {
+        return nil, fmt.Errorf("mailbox=%s has no mail_access_token", mailbox)
+    }
+
+    if !accessExpiresAt.Valid {
+        return nil, fmt.Errorf("mailbox=%s has no mail_access_expires_at", mailbox)
+    }
+
+    auth := &UserMailAuth{
+        Email:           email,
+        AccessToken:     accessToken.String,
+        AccessExpiresAt: accessExpiresAt.Time,
+    }
+
+    if refreshToken.Valid {
+        auth.RefreshToken = refreshToken.String
+    }
+
+    return auth, nil
 }
 
 // SaveOrder — сохраняет письмо и вложения в MinIO, а метаданные — в emails/documents/tasks.
@@ -495,4 +598,77 @@ func ReplyToEmail(db *api.DB, smtpClient *mailsmtp.Client, imapCfg *config.Confi
 	}(raw, authData)
 
 	return nil
+}
+
+func SendEmail(db *api.DB, smtpClient *mailsmtp.Client, imapCfg *config.Config, req SendEmailRequest) error {
+    mailbox := strings.TrimSpace(req.Mailbox)
+    if mailbox == "" {
+        return fmt.Errorf("mailbox is empty")
+    }
+
+    authData, err := GetUserMailAuthByEmail(db, mailbox)
+    if err != nil {
+        return fmt.Errorf("get user mail auth by mailbox: %w", err)
+    }
+
+    recipients, err := parseRecipients(req.To)
+    if err != nil {
+        return fmt.Errorf("parse recipients: %w", err)
+    }
+
+    subject := strings.TrimSpace(req.Subject)
+    headers := map[string]string{
+        "From":         authData.Email,
+        "To":           strings.Join(recipients, ", "),
+        "Subject":      subject,
+        "Date":         time.Now().UTC().Format(time.RFC1123Z),
+        "MIME-Version": "1.0",
+        "Content-Type": "text/plain; charset=UTF-8",
+    }
+
+    auth := mailsmtp.AuthXOAuth2(authData.Email, authData.AccessToken)
+
+    var raw []byte
+
+    if len(req.Attachments) == 0 {
+        raw, err = smtpClient.SendPlainText(
+            authData.Email,
+            recipients,
+            headers,
+            req.Body,
+            auth,
+        )
+        if err != nil {
+            return fmt.Errorf("send smtp: %w", err)
+        }
+    } else {
+        smtpAttachments := make([]mailsmtp.Attachment, 0, len(req.Attachments))
+        for _, att := range req.Attachments {
+            smtpAttachments = append(smtpAttachments, mailsmtp.Attachment{
+                Filename:    att.Filename,
+                ContentType: att.ContentType,
+                Data:        att.Data,
+            })
+        }
+
+        raw, err = smtpClient.SendWithAttachments(
+            authData.Email,
+            recipients,
+            headers,
+            req.Body,
+            smtpAttachments,
+            auth,
+        )
+        if err != nil {
+            return fmt.Errorf("send smtp with attachments: %w", err)
+        }
+    }
+
+    go func(rawMsg []byte, auth *UserMailAuth) {
+        if err := appendToSent(rawMsg, auth, imapCfg); err != nil {
+            fmt.Printf("append to Sent failed: %v\n", err)
+        }
+    }(raw, authData)
+
+    return nil
 }

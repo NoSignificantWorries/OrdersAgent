@@ -274,8 +274,8 @@ async def get_queue(
     if limit is not None:
         if limit < 1:
             limit = 1
-        if limit > 200:
-            limit = 200
+        if limit > 1000:
+            limit = 1000
 
     items = await list_queue_for_user(user=user, status=status, limit=limit, archived=archived)
 
@@ -1006,6 +1006,74 @@ async def reply_to_email(
             detail = data.get("detail") or detail
         except Exception:
             pass
+
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+
+    return Response(status_code=204)
+
+@router.post("/emails/send", status_code=204)
+async def send_email(
+    request: Request,
+    to: Annotated[str, Form(...)],
+    body: Annotated[str, Form(...)],
+    subject: Annotated[str, Form()] = "",
+    attachments: Annotated[list[UploadFile] | None, File()] = None,
+):
+    attachments = attachments or []
+
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    to = (to or "").strip()
+    subject = (subject or "").strip()
+    body = body or ""
+
+    if not to:
+        raise HTTPException(status_code=400, detail="to is empty")
+
+    if not body.strip():
+        raise HTTPException(status_code=400, detail="body is empty")
+
+    files = []
+    try:
+        for attachment in attachments:
+            content = await attachment.read()
+            files.append(
+                (
+                    "attachments",
+                    (
+                        attachment.filename or "attachment",
+                        content,
+                        attachment.content_type or "application/octet-stream",
+                    ),
+                )
+            )
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "http://mail:8080/emails/send",
+                data={
+                    "mailbox": user["email"],
+                    "to": to,
+                    "subject": subject,
+                    "body": body,
+                },
+                files=files,
+            )
+
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
+
+    if resp.status_code != 204:
+        detail = "Не удалось отправить письмо"
+        try:
+            data = resp.json()
+            detail = data.get("detail") or detail
+        except Exception:
+            text = (resp.text or "").strip()
+            if text:
+                detail = text
 
         raise HTTPException(status_code=resp.status_code, detail=detail)
 
