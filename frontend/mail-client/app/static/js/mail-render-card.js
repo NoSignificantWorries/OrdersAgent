@@ -814,6 +814,22 @@
         const saveBtn = document.getElementById("decision-save-btn");
         const sel = document.getElementById("decision-select");
 
+        if (sel) {
+            sel.addEventListener("focus", () => {
+                state.isDecisionSelectFocused = true;
+            });
+
+            sel.addEventListener("blur", () => {
+                setTimeout(() => {
+                    state.isDecisionSelectFocused = false;
+                }, 200);
+            });
+
+            sel.addEventListener("change", () => {
+                state.isDecisionSelectFocused = true;
+            });
+        }
+
         if (saveBtn && sel && email.task?.id) {
             saveBtn.onclick = async () => {
                 const newVal = sel.value || null;
@@ -876,9 +892,35 @@
                         email.status = mapTaskStatusToUiStatus(email.task.status);
                     }
 
+                    email.read = false;
+            
+                    state.unreadCount = (state.unreadCount || 0) + 1;
+                    if (typeof updateUnreadCount === 'function') {
+                        updateUnreadCount();
+                    }
+
+                    try {
+                        const realEmailId = email.email_id || email.id;
+                        await fetch(`/api/emails/${realEmailId}/read`, {
+                            method: "PATCH",
+                            headers: {
+                                "Content-Type": "application/json",
+                            },
+                            credentials: "same-origin",
+                            body: JSON.stringify({ is_read: false }),
+                        });
+                    } catch (markError) {
+                        console.error("Не удалось пометить письмо непрочитанным:", markError);
+                    }
+
                     renderEmailList();
                     highlightSelectedEmail(email.id);
                     renderEmailCard(email, deps);
+
+                    if (typeof closeOpenedEmail === 'function') {
+                        closeOpenedEmail();
+                    }
+
 
                 } catch (e) {
                     console.error(e);

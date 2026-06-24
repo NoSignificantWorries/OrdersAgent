@@ -52,6 +52,7 @@
             isMaterialInputProtected,
             isReplyInputProtected = () => false,
             isComposeInputProtected = () => false,
+            isDecisionSelectProtected = () => false,
             loadEmailsFromApi,
             renderEmailList,
             updateUnreadCount,
@@ -66,7 +67,8 @@
         const isProtectedBeforeLoad =
             isMaterialInputProtected() ||
             isReplyInputProtected(state) ||
-            isComposeInputProtected(state);
+            isComposeInputProtected(state) ||
+            isDecisionSelectProtected();
 
         if (isProtectedBeforeLoad) {
             state.pendingSilentRefresh = true;
@@ -181,6 +183,7 @@
                 refreshEmailsSilently({
                     ...deps,
                     state,
+                    isDecisionSelectProtected: () => isDecisionSelectFocused,
                 });
             }, pageConfig.refreshIntervalMs);
 

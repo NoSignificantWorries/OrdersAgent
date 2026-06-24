@@ -82,6 +82,7 @@ let isReplyInputComposing = false;
 const replyDrafts = new Map();
 let isReplyInputFocused = false;
 let isReplyFileDialogOpen = false;
+let isDecisionSelectFocused = false;
 const openReplyForms = new Set();
 const expandedThreads = new Set();
 let composeDraft = {
@@ -421,6 +422,12 @@ function getMailRenderCardState() {
         set isReplyInputFocused(value) {
             isReplyInputFocused = value;
         },
+        get isDecisionSelectFocused() {
+            return isDecisionSelectFocused;
+        },
+        set isDecisionSelectFocused(value) {
+            isDecisionSelectFocused = value;
+        },
         get isReplyFileDialogOpen() {
             return isReplyFileDialogOpen;
         },
@@ -501,6 +508,10 @@ function isReplyInputProtected(state) {
         state.isReplyFileDialogOpen === true ||
         (selectedId != null && state.openReplyForms?.has(selectedId) === true)
     );
+}
+
+function isDecisionSelectProtected() {
+    return isDecisionSelectFocused === true;
 }
 
 function getMailComposeState() {
@@ -667,6 +678,12 @@ function getMailInitState() {
         set isReplyInputFocused(value) {
             isReplyInputFocused = value;
         },
+        get isDecisionSelectFocused() {
+            return isDecisionSelectFocused;
+        },
+        set isDecisionSelectFocused(value) {
+            isDecisionSelectFocused = value;
+        },
         get isReplyFileDialogOpen() {
             return isReplyFileDialogOpen;
         },
@@ -714,6 +731,7 @@ function initMailPage(config) {
         isMaterialInputProtected,
         isReplyInputProtected,
         isComposeInputProtected,
+        isDecisionSelectProtected,
         highlightSelectedEmail,
         renderChatForEmail,
         renderEmailCard,
