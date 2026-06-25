@@ -1,38 +1,137 @@
+-- ============================================
+-- 1. ENUM для статусов задач
+-- ============================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'task_status') THEN
+        CREATE TYPE task_status AS ENUM (
+            'new',
+            'downloaded',
+            'files_saved',
+            'ml_processing',
+            'ml_classified',
+            'question',
+            'ml_review',
+            'materials_review',
+            'manual_review_done',
+            'completed',
+            'error'
+        );
+    END IF;
+END$$;
+
+
+-- ============================================
+-- 2. ТАБЛИЦЫ
+-- ============================================
+
+-- Пользователи
 CREATE TABLE IF NOT EXISTS users (
-  id BIGSERIAL PRIMARY KEY,
-  login VARCHAR(50) UNIQUE NOT NULL,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  pass_hash CHAR(60) NOT NULL,
-  role VARCHAR(20) NOT NULL DEFAULT 'manager',
-  current_load INT DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-/* добавлены поля:
-predicted_class — итоговый класс;
-prob_1 — вероятность класса 1 от модели;
-model_decision — решение модели;
-*/
-CREATE TABLE IF NOT EXISTS process_queue (
-  id BIGSERIAL PRIMARY KEY,
-  assigned_to BIGINT NOT NULL REFERENCES users(id) ON DELETE SET NULL,
-  email_subject VARCHAR(255),
-  email_body TEXT,
-  email_uid BIGINT,
-  document_name VARCHAR(255),
-  document_data BYTEA,
-  result_document_name VARCHAR(255),
-  result_document_data BYTEA,
-  status VARCHAR(20) NOT NULL DEFAULT 'wait',
-  prob_1 double precision,
-  predicted_class smallint,
-  model_decision text,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+    id BIGSERIAL PRIMARY KEY,
+    login VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    pass_hash CHAR(60) NOT NULL,
+    role VARCHAR(20) NOT NULL DEFAULT 'standart',
+    mail_access_token TEXT,
+    mail_refresh_token TEXT,
+    mail_access_expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_queue_status ON process_queue(status);
-CREATE INDEX IF NOT EXISTS idx_queue_created ON process_queue(created_at) WHERE status = 'waiting';
-CREATE INDEX IF NOT EXISTS idx_queue_assigned ON process_queue(assigned_to) WHERE status = 'processing';
-CREATE INDEX IF NOT EXISTS idx_users_role_load ON users(role, current_load) WHERE role = 'manager';
+-- Маппинг материалов
+CREATE TABLE IF NOT EXISTS mappings (
+    source VARCHAR(255) PRIMARY KEY,
+    target VARCHAR(255),
+    article VARCHAR(255),
+    black_list BOOLEAN NOT NULL DEFAULT FALSE
+);
 
-CREATE INDEX IF NOT EXISTS idx_queue_user ON process_queue(user_id) WHERE assigned_to IS NOT NULL;
+-- Письма
+CREATE TABLE IF NOT EXISTS emails (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    mailbox VARCHAR(100) NOT NULL,
+    email_uid BIGINT NOT NULL,
+    message_id TEXT,
+    in_reply_to TEXT,
+    references_header TEXT,
+    email_from TEXT,
+    reply_to TEXT,
+    email_subject VARCHAR(500),
+    raw_email TEXT,
+    email_date TIMESTAMPTZ,
+    prob_1 DOUBLE PRECISION,
+    predicted_class SMALLINT,
+    model_decision TEXT,
+    archived BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    UNIQUE(mailbox, email_uid)
+);
 
+-- Вложения
+CREATE TABLE IF NOT EXISTS documents (
+    id BIGSERIAL PRIMARY KEY,
+    email_id BIGINT NOT NULL REFERENCES emails(id) ON DELETE CASCADE,
+    filename VARCHAR(500),
+    minio_object_key TEXT,
+    content_type VARCHAR(100),
+    size_bytes BIGINT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Задачи
+CREATE TABLE IF NOT EXISTS tasks (
+    id BIGSERIAL PRIMARY KEY,
+    email_id BIGINT NOT NULL REFERENCES emails(id) ON DELETE CASCADE,
+    document_id BIGINT REFERENCES documents(id) ON DELETE SET NULL,
+
+    status task_status NOT NULL DEFAULT 'new',
+
+    -- Результаты ML и парсинга
+    output_data JSONB DEFAULT '{}',
+
+    -- Ручное решение пользователя
+    manual_decision JSONB,
+
+    -- Кто взял задачу (для связи с users)
+    assigned_to BIGINT REFERENCES users(id) ON DELETE SET NULL,
+
+    -- Трекинг ошибок
+    error_message TEXT,
+    retry_count INT DEFAULT 0,
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
+
+
+-- ============================================
+-- 3. ИНДЕКСЫ
+-- ============================================
+
+-- Планировщик: получить задачи на обработку
+CREATE INDEX IF NOT EXISTS idx_tasks_pending
+    ON tasks(status, created_at)
+    WHERE status IN ('new', 'downloaded', 'files_saved', 'manual_review_done');
+
+-- WebUI: задачи, ожидающие ручного вмешательства
+CREATE INDEX IF NOT EXISTS idx_tasks_manual
+    ON tasks(status, created_at)
+    WHERE status IN ('ml_review', 'materials_review');
+
+-- WebUI: задачи конкретного пользователя
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned
+    ON tasks(assigned_to, status, created_at)
+    WHERE assigned_to IS NOT NULL;
+
+-- Поиск задач по письму
+CREATE INDEX IF NOT EXISTS idx_tasks_email_id
+    ON tasks(email_id);
+
+-- Мониторинг зависших задач
+CREATE INDEX IF NOT EXISTS idx_tasks_stale
+    ON tasks(updated_at)
+    WHERE status NOT IN ('completed', 'error');

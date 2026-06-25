@@ -1,0 +1,19 @@
+[project]
+name = "front"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "asyncpg>=0.31.0",
+    "fastapi>=0.136.1",
+    "httpx>=0.28.1",
+    "itsdangerous>=2.2.0",
+    "jinja2>=3.1.6",
+    "minio>=7.2.20",
+    "pydantic-settings>=2.14.1",
+    "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.28",
+    "starlette>=1.0.0",
+    "uvicorn[standard]>=0.46.0",
+]

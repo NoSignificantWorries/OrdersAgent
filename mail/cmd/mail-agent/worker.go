@@ -1,17 +1,22 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"log"
+	"net"
 	"os"
+	"strings"
+	"syscall"
 	"time"
 
-	"OrdersAgent/mail/internal/client"
-	"OrdersAgent/mail/internal/config"
-	"OrdersAgent/mail/internal/orders"
-	"OrdersAgent/mail/internal/parser"
-	"OrdersAgent/mail/internal/storage"
+	"mail/internal/client"
+	"mail/internal/config"
+	"mail/internal/orders"
+	"mail/internal/parser"
+	"mail/internal/storage"
 
-	"OrdersAgent/storage/api"
+	"mail/storage/api"
 )
 
 // Воркер для одного пользователя: управляет токенами, IMAP-клиентом и обработкой писем.
@@ -26,65 +31,108 @@ func runUserWorker(
 	log.Printf("user worker started | user_id=%d", userID)
 	defer onExit(userID)
 
-	mailAuth, err := storage.GetUserMailAuth(db, userID)
-	if err != nil {
-		log.Printf("get user mail auth | user_id=%d err=%v", userID, err)
-		return
-	}
-
-	if mailAuth.AccessToken == "" {
-		log.Printf("empty mail access token | user_id=%d", userID)
-		return
-	}
-
-	// Обновляем access_token, если он скоро истечёт
-	if time.Now().After(mailAuth.AccessExpiresAt.Add(-1 * time.Minute)) {
-		log.Printf("access token expired or about to expire, refreshing | user_id=%d", userID)
-
-		newToken, err := client.RefreshYandexToken(
-			os.Getenv("YANDEX_TOKEN_URL"),
-			os.Getenv("YANDEX_CLIENT_ID"),
-			os.Getenv("YANDEX_CLIENT_SECRET"),
-			mailAuth.RefreshToken,
-		)
-		if err != nil {
-			log.Printf("refresh token | user_id=%d err=%v", userID, err)
-			return
-		}
-
-		mailAuth.AccessToken = newToken.AccessToken
-		mailAuth.RefreshToken = newToken.RefreshToken
-		mailAuth.AccessExpiresAt = newToken.AccessExpiresAt
-
-		if err := storage.UpdateUserMailTokens(db, userID, mailAuth); err != nil {
-			log.Printf("update mail tokens | user_id=%d err=%v", userID, err)
-			return
-		}
-
-		log.Printf("access token refreshed | user_id=%d", userID)
-	}
-
-	// IMAP‑клиент по OAuth/XOAUTH2
-	imapClient, err := client.NewOAuth(cfg, mailAuth.Email, mailAuth.AccessToken)
-	if err != nil {
-		log.Printf("IMAP client | user_id=%d err=%v", userID, err)
-		return
-	}
-	defer imapClient.Close()
-
 	processor := orders.New(repo, userID)
 
-	// Периодический обход писем
+	var imapClient *client.Client
+	defer func() {
+		if imapClient != nil {
+			imapClient.Close()
+		}
+	}()
+
+	getConnectedClient := func() (*client.Client, error) {
+		if imapClient != nil {
+			return imapClient, nil
+		}
+
+		mailAuth, err := storage.GetUserMailAuth(db, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		if mailAuth.AccessToken == "" {
+			return nil, errors.New("empty mail access token")
+		}
+
+		if time.Now().After(mailAuth.AccessExpiresAt.Add(-1 * time.Minute)) {
+			log.Printf("access token expired or about to expire, refreshing | user_id=%d", userID)
+
+			newToken, err := client.RefreshYandexToken(
+				os.Getenv("YANDEX_TOKEN_URL"),
+				os.Getenv("YANDEX_CLIENT_ID"),
+				os.Getenv("YANDEX_CLIENT_SECRET"),
+				mailAuth.RefreshToken,
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			mailAuth.AccessToken = newToken.AccessToken
+			mailAuth.RefreshToken = newToken.RefreshToken
+			mailAuth.AccessExpiresAt = newToken.AccessExpiresAt
+
+			if err := storage.UpdateUserMailTokens(db, userID, mailAuth); err != nil {
+				return nil, err
+			}
+
+			log.Printf("access token refreshed | user_id=%d", userID)
+		}
+
+		c, err := client.NewOAuth(cfg, mailAuth.Email, mailAuth.AccessToken)
+		if err != nil {
+			return nil, err
+		}
+
+		log.Printf("IMAP client connected | user_id=%d", userID)
+		imapClient = c
+		return imapClient, nil
+	}
+
+	resetClient := func(reason error) {
+		if reason != nil {
+			log.Printf("reset IMAP client | user_id=%d err=%v", userID, reason)
+		}
+		if imapClient != nil {
+			imapClient.Close()
+			imapClient = nil
+		}
+	}
+
+	processOnce := func() {
+		c, err := getConnectedClient()
+		if err != nil {
+			log.Printf("get IMAP client | user_id=%d err=%v", userID, err)
+			return
+		}
+
+		err = ProcessEmails(c, stopChan, processor)
+		if err == nil {
+			return
+		}
+
+		log.Printf("process emails | user_id=%d err=%v", userID, err)
+
+		if isReconnectableError(err) {
+			resetClient(err)
+
+			select {
+			case <-stopChan:
+				return
+			case <-time.After(5 * time.Second):
+			}
+			return
+		}
+	}
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	// Первый проход сразу
-	ProcessEmails(imapClient, stopChan, processor)
+	processOnce()
 
 	for {
 		select {
 		case <-ticker.C:
-			ProcessEmails(imapClient, stopChan, processor)
+			processOnce()
 		case <-stopChan:
 			log.Printf("user worker stopped | user_id=%d", userID)
 			return
@@ -92,49 +140,98 @@ func runUserWorker(
 	}
 }
 
-// Обработка всех непрочитанных писем.
-func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *orders.Processor) {
-	uids, err := imap.FetchUnread()
-	if err != nil {
-		log.Printf("fetch unread: %v", err)
-		return
+func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *orders.Processor) error {
+    uids, err := imap.FetchUnread()
+    if err != nil {
+        return err
+    }
+
+    log.Printf("ProcessEmails | unread_count=%d uids=%v", len(uids), uids)
+
+    if len(uids) == 0 {
+        return nil
+    }
+
+    for _, uid := range uids {
+        log.Printf("ProcessEmails | start uid=%d", uid)
+
+        select {
+        case <-stopChan:
+            log.Printf("interrupt while processing, stopping")
+            return nil
+        default:
+        }
+
+        fetchCmd, err := imap.FetchMessage(uid)
+        if err != nil {
+            log.Printf("fetch message uid=%d: %v", uid, err)
+            if isReconnectableError(err) {
+                return err
+            }
+            continue
+        }
+
+        log.Printf("ProcessEmails | fetched uid=%d", uid)
+
+        email, err := parser.ParseMessage(uid, fetchCmd)
+        if err != nil {
+            log.Printf("parse uid=%d: %v", uid, err)
+            fetchCmd.Close()
+            continue
+        }
+
+        log.Printf("ProcessEmails | parsed uid=%d subject=%q from=%q attachments=%d",
+            uid, email.Subject, email.From, len(email.Files))
+
+        if err := processor.ProcessEmail(*email); err != nil {
+            log.Printf("process uid=%d: %v", uid, err)
+        } else {
+            log.Printf("ProcessEmails | processed uid=%d", uid)
+        }
+
+        fetchCmd.Close()
+
+        if err := imap.MarkRead(uid); err != nil {
+            log.Printf("mark read uid=%d: %v", uid, err)
+            if isReconnectableError(err) {
+                return err
+            }
+        } else {
+            log.Printf("ProcessEmails | marked read uid=%d", uid)
+        }
+    }
+
+    return nil
+}
+
+func isReconnectableError(err error) bool {
+	if err == nil {
+		return false
 	}
 
-	if len(uids) == 0 {
-		return
+	msg := strings.ToLower(err.Error())
+
+	if strings.Contains(msg, "use of closed network connection") ||
+		strings.Contains(msg, "connection reset by peer") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "unexpected eof") ||
+		strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "connection refused") {
+		return true
 	}
 
-	log.Printf("found %d unread emails", len(uids))
-
-	for _, uid := range uids {
-		select {
-		case <-stopChan:
-			log.Printf("interrupt while processing, stopping")
-			return
-		default:
-		}
-
-		fetchCmd, err := imap.FetchMessage(uid)
-		if err != nil {
-			log.Printf("fetch message uid=%d: %v", uid, err)
-			continue
-		}
-
-		email, err := parser.ParseMessage(uid, fetchCmd)
-		if err != nil {
-			log.Printf("parse uid=%d: %v", uid, err)
-			fetchCmd.Close()
-			continue
-		}
-
-		if err := processor.ProcessEmail(email); err != nil {
-			log.Printf("process uid=%d: %v", uid, err)
-		}
-
-		fetchCmd.Close()
-
-		if err := imap.MarkRead(uid); err != nil {
-			log.Printf("mark read uid=%d: %v", uid, err)
-		}
+	if errors.Is(err, io.EOF) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) {
+		return true
 	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	return false
 }

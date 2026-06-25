@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Почта - Главная</title>
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="header-left">
+                <div class="brand-block">
+                    <h2>Почта менеджера</h2>
+                </div>
+
+                <nav class="header-nav" aria-label="Основная навигация">
+                    <button
+                        type="button"
+                        id="compose-open-btn"
+                        class="nav-btn compose-btn"
+                        aria-label="Написать письмо"
+                        title="Написать письмо"
+                    >
+                        Написать
+                    </button>
+
+                    <a
+                        href="/inbox"
+                        class="nav-btn {% if current_page == 'inbox' %}active{% endif %}"
+                        {% if current_page == 'inbox' %}aria-current="page"{% endif %}
+                    >
+                        Входящие
+                    </a>
+
+                    <a
+                        href="/archived"
+                        class="nav-btn {% if current_page == 'archived' %}active{% endif %}"
+                        {% if current_page == 'archived' %}aria-current="page"{% endif %}
+                    >
+                        Отработанные
+                    </a>
+                </nav>
+            </div>
+
+            <div class="header-right">
+                <span class="user-email">{{ user.email }}</span>
+                <span class="user-name">{{ user.name }}</span>
+                <a href="/logout" class="logout-btn">Выйти</a>
+            </div>
+        </header>
+
+        <div class="main-layout">
+            <aside class="email-list">
+                <div class="list-header">
+                    <h3>
+                        {% if current_page == 'archived' %}
+                            Отработанные
+                        {% else %}
+                            Входящие
+                        {% endif %}
+                    </h3>
+                    <div class="header-controls">
+                        {% if current_page == 'inbox' %}
+                            <span class="email-count" id="email-count-display">0 непрочитанных</span>
+                        {% endif %}
+                        <button id="filter-toggle-btn" class="filter-toggle" title="Фильтры">
+                            <img src="/static/images/filter-icon.png" alt="Фильтры" class="filter-icon">
+                        </button>
+                    </div>
+                </div>
+
+                <div id="filter-panel" class="filter-panel" style="display: none;">
+                    <div class="filter-group">
+                        <label>Статус:</label>
+                        <select id="status-filter-select">
+                            <option value="all">Все</option>
+                            <option value="waiting">Ожидание</option>
+                            <option value="processing">Обработка</option>
+                            <option value="manual_review">Требуется ручная проверка</option>
+                            <option value="completed">Завершено</option>
+                            <option value="error">Ошибка</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
+                        <label>Класс:</label>
+                        <select id="class-filter-select">
+                            <option value="all">Все классы</option>
+                            <option value="request">Заявка</option>
+                            <option value="calculation">Расчёт</option>
+                            <option value="question">Вопрос</option>
+                            <option value="undefined_only">Не определён</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
+                        <label>Сортировка:</label>
+                        <div class="sort-buttons">
+                            <button id="sort-newest-btn" class="sort-btn active">Новые сверху</button>
+                            <button id="sort-oldest-btn" class="sort-btn">Старые сверху</button>
+                        </div>
+                    </div>
+
+                    <div class="filter-actions">
+                        <button id="apply-filters-btn" class="apply-filters">Применить</button>
+                        <button id="close-filter-panel" class="close-filter">✖</button>
+                    </div>
+                </div>
+
+                <div class="emails-container" id="emailsContainer">
+                    <!-- Список писем будет вставлен сюда -->
+                </div>
+            </aside>
+
+            <main class="email-content">
+                <div class="search-container">
+                    <div class="search-wrapper">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" id="search-input" placeholder="Поиск" autocomplete="off">
+                        <button
+                            type="button"
+                            id="search-clear-btn"
+                            class="search-clear-btn"
+                            aria-label="Очистить поиск"
+                            title="Очистить поиск"
+                            hidden
+                        >
+                            ×
+                        </button>
+                    </div>
+                </div>
+
+                <div class="tabs-container">
+                    <div class="tabs-header">
+                        <button class="tab-button active" data-tab="emails">Письма</button>
+                        <button class="tab-button" data-tab="chat">Чат</button>
+                    </div>
+
+                    <div class="tabs-content">
+                        <div class="tab-pane active" id="tab-emails">
+                            <div class="email-view" id="emailView">
+                                <div class="email-placeholder">👈 Выберите письмо из списка</div>
+                            </div>
+                        </div>
+
+                        <div class="tab-pane" id="tab-chat">
+                            <div class="chat-container">
+                                <div id="chat-rows-container"></div>
+                                <div class="chat-submit">
+                                    <button id="chat-send-btn" class="chat-send-button">Отправить</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div id="compose-root"></div>
+
+    <div
+        id="mail-toast"
+        class="mail-toast"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+    ></div>
+
+    <script src="/static/js/mail-formatters.js"></script>
+    <script src="/static/js/mail-api.js"></script>
+    <script src="/static/js/mail-chat.js"></script>
+    <script src="/static/js/mail-render-list.js"></script>
+    <script src="/static/js/mail-render-card.js"></script>
+    <script src="/static/js/mail-compose.js"></script>
+    <script src="/static/js/mail-init.js"></script>
+    <script src="/static/js/mail-common.js"></script>
+    {% if current_page == 'archived' %}
+        <script src="/static/js/archived-page.js"></script>
+    {% else %}
+        <script src="/static/js/inbox-page.js"></script>
+    {% endif %}
+</body>
+</html>
