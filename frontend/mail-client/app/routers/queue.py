@@ -274,8 +274,8 @@ async def get_queue(
     if limit is not None:
         if limit < 1:
             limit = 1
-        if limit > 1000:
-            limit = 1000
+        if limit > 2000:
+            limit = 2000
 
     items = await list_queue_for_user(user=user, status=status, limit=limit, archived=archived)
 
@@ -1001,11 +1001,20 @@ async def reply_to_email(
         print("mail service text =", resp.text)
 
         detail = "Не удалось отправить ответное письмо"
+        
+        # Сначала пробуем получить JSON
         try:
             data = resp.json()
-            detail = data.get("detail") or detail
+            # Если есть detail в JSON, используем его
+            if data.get("detail"):
+                detail = data["detail"]
+            # Если ответ содержит текст ошибки напрямую
+            elif resp.text and resp.text.strip():
+                detail = resp.text.strip()
         except Exception:
-            pass
+            # Если не JSON, берем текст ответа
+            if resp.text and resp.text.strip():
+                detail = resp.text.strip()
 
         raise HTTPException(status_code=resp.status_code, detail=detail)
 
@@ -1067,13 +1076,19 @@ async def send_email(
 
     if resp.status_code != 204:
         detail = "Не удалось отправить письмо"
+        
         try:
             data = resp.json()
-            detail = data.get("detail") or detail
+            # Если есть detail в JSON, используем его
+            if data.get("detail"):
+                detail = data["detail"]
+            # Если ответ содержит текст ошибки напрямую
+            elif resp.text and resp.text.strip():
+                detail = resp.text.strip()
         except Exception:
-            text = (resp.text or "").strip()
-            if text:
-                detail = text
+            # Если не JSON, берем текст ответа
+            if resp.text and resp.text.strip():
+                detail = resp.text.strip()
 
         raise HTTPException(status_code=resp.status_code, detail=detail)
 

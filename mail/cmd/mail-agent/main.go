@@ -13,6 +13,7 @@ import (
     "strconv"
     "strings"
 	"fmt"
+	"encoding/json"
 
     mailsmtp "mail/internal/smtp"
 
@@ -25,6 +26,14 @@ import (
 	"mail/storage/configdb"
 	minio "worker/minio/minio"
 )
+
+func writeJSONError(w http.ResponseWriter, status int, detail string) {
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.WriteHeader(status)
+    _ = json.NewEncoder(w).Encode(map[string]string{
+        "detail": detail,
+    })
+}
 
 func main() {
 	_ = godotenv.Load(".env")
@@ -94,11 +103,19 @@ func main() {
 			}
 		}
 
-		const maxAttachmentsCount = 5
+		const maxAttachmentsCount = 10
 		const maxAttachmentSize = 10 << 20 // 10 MB
+		const maxTotalAttachmentsSize = 25 << 20 // 25 MB
+
+		const (
+			ErrTooManyFiles        = "много файлов, лимит 10 штук"
+			ErrFileTooLarge        = "вес превышен: файл весит больше 10МБ"
+			ErrTotalSizeExceeded   = "вес превышен: общий вес письма выше 25МБ"
+		)
 
 		readAttachments := func() ([]storage.SendAttachment, error) {
 			var attachments []storage.SendAttachment
+			totalSize := 0
 
 			if r.MultipartForm == nil {
 				return attachments, nil
@@ -106,7 +123,7 @@ func main() {
 
 			files := r.MultipartForm.File["attachments"]
 			if len(files) > maxAttachmentsCount {
-				return nil, fmt.Errorf("too many attachments")
+				return nil, fmt.Errorf(ErrTooManyFiles)
 			}
 
 			attachments = make([]storage.SendAttachment, 0, len(files))
@@ -124,7 +141,12 @@ func main() {
 				}
 
 				if len(data) > maxAttachmentSize {
-					return nil, fmt.Errorf("attachment too large")
+					return nil, fmt.Errorf(ErrFileTooLarge)
+				}
+
+				totalSize += len(data)
+				if totalSize > maxTotalAttachmentsSize {
+					return nil, fmt.Errorf(ErrTotalSizeExceeded)
 				}
 
 				partContentType := strings.TrimSpace(fh.Header.Get("Content-Type"))

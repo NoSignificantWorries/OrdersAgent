@@ -84,9 +84,9 @@ async def list_queue_for_user(
     pool = await get_db_pool()
 
     if not limit or limit < 1:
-        limit = 500
-    if limit > 1000:
-        limit = 1000
+        limit = 1500
+    if limit > 2000:
+        limit = 2000
 
     async with pool.acquire() as conn:
         sql = f"""
