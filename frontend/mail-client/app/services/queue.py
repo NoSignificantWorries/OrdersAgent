@@ -105,6 +105,7 @@ async def list_queue_for_user(
                 e.archived AS email_archived,
                 e.is_read AS email_is_read,
                 e.created_at AS email_created_at,
+                e.is_primary_recipient,
 
                 t.id AS task_id,
                 t.document_id AS task_document_id,
@@ -176,7 +177,14 @@ async def list_queue_for_user(
         print("QUEUE USER ROLE =", user.get("role"))
         print("QUEUE USER EMAIL =", user.get("email"))
 
-        if user.get("role") != "admin":
+        is_admin = user.get("role") == "admin"
+
+        if is_admin:
+            # Админ: показываем ТОЛЬКО основные письма (is_primary_recipient = true)
+            # Это исключает копии (Cc)
+            pass
+        else:
+            # Обычный пользователь: показываем только его письма
             where_clauses.append(f"e.mailbox = ${param_idx}")
             params.append(user["email"])
             param_idx += 1
@@ -214,6 +222,7 @@ async def list_queue_for_user(
                 e.archived,
                 e.is_read,
                 e.created_at,
+                e.is_primary_recipient,
                 t.id,
                 t.status,
                 t.output_data,
@@ -231,9 +240,31 @@ async def list_queue_for_user(
 
         rows = await conn.fetch(sql, *params)
 
+        if is_admin:
+            # Собираем письма в словарь по message_id
+            emails_by_message_id: dict[str, dict] = {}
+            
+            for row in rows:
+                message_id = row["message_id"]
+                if not message_id:
+                    # Если нет message_id, используем email_id как ключ
+                    key = f"no_id_{row['email_id']}"
+                else:
+                    key = message_id
+                
+                # Если письмо с таким message_id уже есть - пропускаем (берем первое)
+                if key not in emails_by_message_id:
+                    emails_by_message_id[key] = row
+            
+            # Используем только уникальные письма
+            unique_rows = list(emails_by_message_id.values())
+        else:
+            # Для обычного пользователя - все письма (они уже отфильтрованы по mailbox)
+            unique_rows = rows
+
         result: list[dict] = []
 
-        for row in rows:
+        for row in unique_rows:
             task_output = row["output_data"]
 
             if task_output is None:
@@ -280,6 +311,7 @@ async def list_queue_for_user(
                 "predictedclass": predicted_class,
                 "modeldecision": model_decision,
                 "documents": documents,
+                "is_primary_recipient": row["is_primary_recipient"],
             }
 
             if row["task_id"]:
