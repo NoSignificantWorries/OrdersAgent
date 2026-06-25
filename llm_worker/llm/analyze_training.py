@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-DEBUG_DIR = Path("debug_lora_v2")
+DEBUG_DIR = Path("debug")
 DEBUG_DIR.mkdir(exist_ok=True)
 
 plt.style.use("seaborn-v0_8-whitegrid")
@@ -99,7 +99,7 @@ def plot_losses(epochs, train_loss, val_loss):
     ax.legend(frameon=True, fontsize=11)
 
     plt.tight_layout()
-    out = DEBUG_DIR / "loss_curves_lora.png"
+    out = DEBUG_DIR / "loss_curves.png"
     plt.savefig(out, dpi=180, bbox_inches="tight")
     plt.close()
     print(f"Saved: {out}")
@@ -141,7 +141,7 @@ def plot_metrics(epochs, val_acc, val_f1):
     ax.legend(frameon=True, fontsize=11)
 
     plt.tight_layout()
-    out = DEBUG_DIR / "val_metrics_lora.png"
+    out = DEBUG_DIR / "val_metrics.png"
     plt.savefig(out, dpi=180, bbox_inches="tight")
     plt.close()
     print(f"Saved: {out}")
@@ -238,7 +238,7 @@ def plot_threshold_histograms(y_true, p1, best_t, best_f1):
     ax.legend(frameon=True, fontsize=11)
 
     plt.tight_layout()
-    out = DEBUG_DIR / "threshold_hist_probs_lora.png"
+    out = DEBUG_DIR / "threshold_hist_probs.png"
     plt.savefig(out, dpi=180, bbox_inches="tight")
     plt.close()
     print(f"Saved: {out}")
@@ -311,7 +311,7 @@ def plot_threshold_curves(y_true, p1, thresholds, stats):
     ax.legend(frameon=True, fontsize=11, ncol=2)
 
     plt.tight_layout()
-    out = DEBUG_DIR / "threshold_curves_lora.png"
+    out = DEBUG_DIR / "threshold_curves.png"
     plt.savefig(out, dpi=180, bbox_inches="tight")
     plt.close()
     print(f"Saved: {out}")
@@ -393,15 +393,15 @@ def plot_threshold_class_counts(y_true, p1, thresholds, stats):
     ax.legend(frameon=True, fontsize=10, ncol=2)
 
     plt.tight_layout()
-    out = DEBUG_DIR / "threshold_class_counts_lora.png"
+    out = DEBUG_DIR / "threshold_class_counts.png"
     plt.savefig(out, dpi=180, bbox_inches="tight")
     plt.close()
     print(f"Saved: {out}")
 
 
 def main():
-    log_path = DEBUG_DIR / "training_log_lora.json"
-    val_pred_path = DEBUG_DIR / "val_predictions_lora.jsonl"
+    log_path = DEBUG_DIR / "training_log.json"
+    val_pred_path = DEBUG_DIR / "val_predictions.jsonl"
 
     if not log_path.exists():
         print(f"No {log_path}, run train.py first")

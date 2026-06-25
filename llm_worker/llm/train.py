@@ -13,10 +13,8 @@ from transformers import (
     TrainingArguments,
 )
 
-from peft import LoraConfig, get_peft_model, TaskType
-
 MODEL_NAME = "DeepPavlov/distilrubert-tiny-cased-conversational-5k"
-DATA_PATH = "dataset/emails2.jsonl"
+DATA_PATH = "table/emails.jsonl"
 NUM_LABELS = 2
 
 
@@ -67,17 +65,6 @@ def main():
         num_labels=NUM_LABELS,
     )
 
-    lora_config = LoraConfig(
-        task_type=TaskType.SEQ_CLS,  # задача: классификация последовательности
-        r=8,                         # rank; 8–16 обычно ок
-        lora_alpha=16,
-        lora_dropout=0.1,
-        bias="none",
-        target_modules=["q_lin", "k_lin", "v_lin", "out_lin"],  # куда встраивать LoRA в attention
-    )
-    model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
-
     def compute_metrics(eval_pred):
         logits, labels = eval_pred
         preds = np.argmax(logits, axis=-1)
@@ -92,11 +79,11 @@ def main():
         output_dir="model_out",
         eval_strategy="epoch",
         save_strategy="epoch",
-        learning_rate=3e-4,
+        learning_rate=3e-5,
         per_device_train_batch_size=8,
         per_device_eval_batch_size=8,
-        num_train_epochs=8,
-        weight_decay=0.0,
+        num_train_epochs=10,
+        weight_decay=0.01,
         load_best_model_at_end=True,
         metric_for_best_model="eval_f1",
         greater_is_better=True,
@@ -115,10 +102,10 @@ def main():
 
     trainer.train()
 
-    debug_dir = Path("debug_lora_v2")
+    debug_dir = Path("debug")
     debug_dir.mkdir(exist_ok=True)
 
-    with open(debug_dir / "training_log_lora.json", "w", encoding="utf-8") as f:
+    with open(debug_dir / "training_log.json", "w", encoding="utf-8") as f:
         json.dump(trainer.state.log_history, f, ensure_ascii=False, indent=2)
 
     pred = trainer.predict(val_ds)
@@ -139,18 +126,18 @@ def main():
             "logits": logits[i].tolist(),
         })
 
-    with open(debug_dir / "val_predictions_lora.jsonl", "w", encoding="utf-8") as f:
+    with open(debug_dir / "val_predictions.jsonl", "w", encoding="utf-8") as f:
         for record in val_records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     errors = [record for record in val_records if record["true_label"] != record["pred_label"]]
 
-    with open(debug_dir / "misclassified_val_lora.jsonl", "w", encoding="utf-8") as f:
+    with open(debug_dir / "misclassified_val.jsonl", "w", encoding="utf-8") as f:
         for error in errors:
             f.write(json.dumps(error, ensure_ascii=False) + "\n")
 
-    trainer.save_model("model_out/final_lora")
-    tokenizer.save_pretrained("model_out/final_lora")
+    trainer.save_model("model_out/final")
+    tokenizer.save_pretrained("model_out/final")
 
 
 if __name__ == "__main__":
