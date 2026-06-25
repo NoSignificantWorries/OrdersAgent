@@ -264,20 +264,27 @@ async def download_all_result_documents(task_id: int, request: Request):
 async def get_queue(
     request: Request,
     status: str = "",
-    limit: int | None = None,
+    limit: int = 100,           # фиксированный размер страницы
+    offset: int = 0,            # смещение
     archived: bool | None = None,
 ):
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    if limit is not None:
-        if limit < 1:
-            limit = 1
-        if limit > 2000:
-            limit = 2000
+    # Защита от некорректных значений
+    if limit < 1:
+        limit = 100
+    if limit > 500:             # максимум 500 (можно оставить 100, но пусть будет запас)
+        limit = 500
 
-    items = await list_queue_for_user(user=user, status=status, limit=limit, archived=archived)
+    items, total = await list_queue_for_user(
+        user=user,
+        status=status,
+        limit=limit,
+        offset=offset,
+        archived=archived,
+    )
 
     return {
         "user": {
@@ -285,8 +292,11 @@ async def get_queue(
             "email": user["email"],
             "role": user.get("role"),
         },
-        "count": len(items),
         "items": items,
+        "total": total,          # общее количество записей (для пагинации)
+        "offset": offset,
+        "limit": limit,
+        "count": len(items),     # оставляем для обратной совместимости (опционально)
     }
 
 async def _download_document_by_id(

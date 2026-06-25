@@ -79,16 +79,32 @@ async def list_queue_for_user(
     user: dict,
     status: str = "",
     limit: int | None = None,
+    offset: int = 0,
     archived: bool | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], int]:
+    """
+    Возвращает список писем для пользователя с учётом пагинации.
+
+    Параметры:
+        user: словарь с данными пользователя (обязательно содержит 'email' и 'role')
+        status: фильтр по статусу задачи (строка с разделителями-запятыми)
+        limit: количество записей на страницу (по умолчанию 100, максимум 500)
+        offset: смещение (сколько записей пропустить)
+        archived: фильтр по archived (True/False/None)
+
+    Возвращает:
+        кортеж (список писем, общее количество записей без учёта пагинации)
+    """
     pool = await get_db_pool()
 
-    if not limit or limit < 1:
-        limit = 1500
-    if limit > 2000:
-        limit = 2000
+    # Устанавливаем лимит страницы (фиксированно 100, максимум 500)
+    if limit is None or limit < 1:
+        limit = 100
+    if limit > 500:
+        limit = 500
 
     async with pool.acquire() as conn:
+        # ===== ОСНОВНОЙ ЗАПРОС (с OFFSET и LIMIT) =====
         sql = f"""
             SELECT
                 e.id AS email_id,
@@ -172,15 +188,13 @@ async def list_queue_for_user(
         params: list[object] = []
         param_idx = 1
 
-        print("QUEUE USER =", user)
-        print("QUEUE USER ROLE =", user.get("role"))
-        print("QUEUE USER EMAIL =", user.get("email"))
-
+        # Фильтр по пользователю
         if user.get("role") != "admin":
             where_clauses.append(f"e.mailbox = ${param_idx}")
             params.append(user["email"])
             param_idx += 1
 
+        # Фильтр по статусу
         if status:
             statuses = [s.strip() for s in status.split(",") if s.strip()]
             if statuses:
@@ -190,6 +204,7 @@ async def list_queue_for_user(
                 params.append(statuses)
                 param_idx += 1
 
+        # Фильтр по архиву
         if archived is not None:
             where_clauses.append(f"e.archived = ${param_idx}")
             params.append(archived)
@@ -198,6 +213,7 @@ async def list_queue_for_user(
         if where_clauses:
             sql += "\nWHERE " + "\n  AND ".join(where_clauses)
 
+        # GROUP BY, ORDER BY, OFFSET и LIMIT
         sql += f"""
             GROUP BY
                 e.id,
@@ -225,12 +241,55 @@ async def list_queue_for_user(
             ORDER BY
                 COALESCE(t.created_at, e.created_at) DESC,
                 e.id DESC
-            LIMIT ${param_idx}
+            OFFSET ${param_idx}
+            LIMIT ${param_idx + 1}
         """
+        params.append(offset)
         params.append(limit)
 
         rows = await conn.fetch(sql, *params)
 
+        # ===== ЗАПРОС ДЛЯ ОБЩЕГО КОЛИЧЕСТВА (total) =====
+        count_sql = f"""
+            SELECT COUNT(*) AS total
+            FROM emails e
+            LEFT JOIN LATERAL (
+                SELECT
+                    tt.id,
+                    tt.status
+                FROM tasks tt
+                WHERE tt.email_id = e.id
+                ORDER BY
+                    {_task_status_order_sql()},
+                    tt.created_at DESC
+                LIMIT 1
+            ) t ON TRUE
+        """
+        count_params: list[object] = []
+        count_idx = 1
+
+        # Повторяем условия WHERE (без OFFSET/LIMIT)
+        if user.get("role") != "admin":
+            count_sql += f" WHERE e.mailbox = ${count_idx}"
+            count_params.append(user["email"])
+            count_idx += 1
+
+        if status:
+            statuses = [s.strip() for s in status.split(",") if s.strip()]
+            if statuses:
+                count_sql += f" AND t.status = ANY(${count_idx}::task_status[])"
+                count_params.append(statuses)
+                count_idx += 1
+
+        if archived is not None:
+            count_sql += f" AND e.archived = ${count_idx}"
+            count_params.append(archived)
+            count_idx += 1
+
+        total_row = await conn.fetchrow(count_sql, *count_params)
+        total = total_row["total"] if total_row else 0
+
+        # ===== ФОРМИРОВАНИЕ РЕЗУЛЬТАТА (без изменений) =====
         result: list[dict] = []
 
         for row in rows:
@@ -286,7 +345,7 @@ async def list_queue_for_user(
                 item.update(
                     {
                         "id": row["task_id"],
-                        "documentid":row["task_document_id"],
+                        "documentid": row["task_document_id"],
                         "type": row["task_type"],
                         "status": row["task_status"],
                         "priority": row["task_priority"],
@@ -311,7 +370,7 @@ async def list_queue_for_user(
                 item.update(
                     {
                         "id": row["email_id"],
-                        "documentid":None,
+                        "documentid": None,
                         "type": None,
                         "status": None,
                         "priority": 100,
@@ -329,4 +388,4 @@ async def list_queue_for_user(
 
             result.append(item)
 
-        return result
+        return result, total
