@@ -192,6 +192,13 @@ def process_request_excel(
                 p: (m["target"], m["article"], m["black-list"])
                 for p, m in task.manual_decision.items()
             }
+            for part, mat_match in matches.items():
+                if mat_match is None:
+                    local_questions[part] = {
+                        "black-list": False,
+                        "target": None,
+                        "article": None,
+                    }
         else:
             matches = material_repo.batch_find(unique_parts)
             for part, mat_match in matches.items():
@@ -352,6 +359,13 @@ def process_calculation_excel(
                 p: (m["target"], m["article"], m["black-list"])
                 for p, m in task.manual_decision.items()
             }
+            for part, mat_match in matches.items():
+                if mat_match is None:
+                    local_questions[part] = {
+                        "black-list": False,
+                        "target": None,
+                        "article": None,
+                    }
         else:
             matches = material_repo.batch_find(unique_parts)
             for part, mat_match in matches.items():
