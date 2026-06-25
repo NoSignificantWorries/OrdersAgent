@@ -1,0 +1,852 @@
+/* ===== ОБЩИЕ СТИЛИ ===== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    height: 100vh;
+    color: #1e293b;
+}
+
+/* ===== СТРАНИЦА ВХОДА (LOGIN) ===== */
+.login-container {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 20px;
+}
+
+.login-box {
+    background: white;
+    padding: 50px 40px;
+    border-radius: 24px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.3);
+    text-align: center;
+    width: 100%;
+    max-width: 440px;
+    transition: transform 0.3s ease;
+}
+
+.login-box:hover {
+    transform: translateY(-5px);
+}
+
+.login-box h1 {
+    margin-bottom: 15px;
+    color: #1e293b;
+    font-size: 32px;
+    font-weight: 600;
+}
+
+.login-box p {
+    color: #64748b;
+    margin-bottom: 35px;
+    font-size: 16px;
+    line-height: 1.5;
+}
+
+.yandex-login {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: #fc3f1d;
+    color: white;
+    padding: 16px 40px;
+    border-radius: 50px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 18px;
+    transition: all 0.3s ease;
+    border: none;
+    cursor: pointer;
+    width: 100%;
+    box-shadow: 0 8px 20px rgba(252, 63, 29, 0.3);
+}
+
+.yandex-login:hover {
+    background: #e63514;
+    transform: scale(1.02);
+    box-shadow: 0 12px 28px rgba(252, 63, 29, 0.4);
+}
+
+.yandex-icon {
+    width: 28px;
+    height: 28px;
+}
+
+.demo-note {
+    margin-top: 35px;
+    font-size: 14px;
+    color: #94a3b8;
+    line-height: 1.6;
+}
+
+.demo-note small {
+    font-size: 12px;
+    color: #cbd5e1;
+}
+
+/* ===== ГЛАВНАЯ СТРАНИЦА ===== */
+.app-container {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #f1f5f9;
+}
+
+/* Шапка */
+.app-header {
+    background: white;
+    padding: 0 30px;
+    height: 70px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #e2e8f0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.header-left h2 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #1e293b;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.user-email {
+    color: #475569;
+    font-size: 14px;
+    background: #f1f5f9;
+    padding: 6px 12px;
+    border-radius: 20px;
+}
+
+.user-name {
+    font-weight: 600;
+    color: #1e293b;
+    font-size: 15px;
+}
+
+.logout-btn {
+    color: #ef4444;
+    text-decoration: none;
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1.5px solid #ef4444;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.logout-btn:hover {
+    background: #ef4444;
+    color: white;
+}
+
+/* Основной макет (2 колонки) */
+.main-layout {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    overflow: hidden;
+    gap: 1px;
+    background: #e2e8f0;
+}
+
+/* ===== ЛЕВАЯ ПАНЕЛЬ - СПИСОК ПИСЕМ ===== */
+.email-list {
+    background: white;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+}
+
+.list-header {
+    padding: 22px;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #fafbfc;
+}
+
+.list-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.list-header h3::before {
+    content: "📬";
+    font-size: 20px;
+}
+
+.header-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.email-count {
+    background: #e2e8f0;
+    padding: 4px 12px;
+    border-radius: 30px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.emails-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+/* Карточка письма в списке */
+.email-item {
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid transparent;
+    background: #ffffff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+}
+
+.email-item:hover {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.email-item.selected {
+    background: #f1f5f9;
+    border-color: #667eea;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+}
+
+.email-item .subject {
+    font-size: 16px;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 6px;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.3;
+}
+
+.email-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+
+.email-item .sender {
+    font-size: 13px;
+    font-weight: 500;
+    color: #475569;
+    margin-bottom: 0;
+}
+
+.email-item .date {
+    font-size: 11px;
+    color: #94a3b8;
+    text-align: right;
+    font-weight: 500;
+}
+
+/* ===== ПАНЕЛЬ ФИЛЬТРОВ (выпадающая) ===== */
+.filter-panel {
+    position: absolute;
+    right: 16px;
+    top: 70px;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    padding: 16px;
+    width: 260px;
+    z-index: 100;
+}
+
+.filter-group {
+    margin-bottom: 16px;
+}
+
+.filter-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #1e293b;
+}
+
+.filter-group select {
+    width: 100%;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid #cbd5e1;
+}
+
+.sort-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.sort-btn {
+    flex: 1;
+    background: #f1f5f9;
+    border: none;
+    padding: 6px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 13px;
+    text-align: center;
+}
+.sort-btn.active {
+    background: #667eea;
+    color: white;
+}
+
+.filter-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 12px;
+}
+.apply-filters {
+    background: #05965792;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 15px;
+    cursor: pointer;
+    flex: 1;
+}
+.close-filter {
+    background: #92939286;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 15px;
+    cursor: pointer;
+}
+
+/* Кнопка фильтра (шестерёнка / иконка) */
+.filter-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.filter-toggle:hover {
+    background: #e2e8f0;
+}
+.filter-icon {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    display: block;
+}
+
+/* ===== ПРАВАЯ ОБЛАСТЬ ===== */
+.email-content {
+    background: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+}
+
+/* Строка поиска */
+.search-container {
+    padding: 19px;
+    background: white;
+    border-bottom: 1px solid #e2e8f0;
+}
+.search-wrapper {
+    position: relative;
+    width: 100%;
+}
+.search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+    color: #94a3b8;
+    pointer-events: none;
+}
+#search-input {
+    width: 100%;
+    padding: 10px 12px 10px 36px;
+    border-radius: 40px;
+    border: 1px solid #cbd5e1;
+    font-size: 14px;
+    outline: none;
+}
+#search-input:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+
+/* Вкладки */
+.tabs-container {
+    background: white;
+    border-radius: 0;
+    overflow: hidden;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+.tabs-header {
+    display: flex;
+    gap: 8px;
+    padding: 8px 20px 0 20px;
+    background: white;
+    border-bottom: 1px solid #e2e8f0;
+}
+.tab-button {
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #64748b;
+    background: none;
+    border: none;
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    transition: all 0.2s;
+}
+.tab-button:hover {
+    background: #f1f5f9;
+    color: #1e293b;
+}
+.tab-button.active {
+    color: #667eea;
+    background: #f8fafc;
+    border-bottom: 2px solid #667eea;
+}
+.tabs-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+}
+.tab-pane {
+    display: none;
+    height: 100%;
+}
+.tab-pane.active {
+    display: block;
+}
+
+/* Карточка письма */
+.email-view {
+    background: white;
+    border-radius: 24px;
+    padding: 20px;
+    min-height: 100%;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
+}
+
+.email-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 400px;
+    color: #94a3b8;
+    font-size: 20px;
+    border: 2px dashed #e2e8f0;
+    border-radius: 20px;
+    background: #fafbfc;
+}
+
+.email-card .email-header {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-bottom: 25px;
+    border-bottom: 2px solid #f1f5f9;
+    margin-bottom: 25px;
+}
+.email-header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+}
+.email-subject {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    color: #0f172a;
+    line-height: 1.3;
+}
+
+.status-block {
+    flex-shrink: 0;
+}
+.status-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.status-label {
+    font-size: 13px;
+    color: #64748b;
+    font-weight: 500;
+}
+.status-display {
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    display: inline-block;
+    border: 2px solid transparent;
+    white-space: nowrap;
+}
+
+.email-meta {
+    background: #f8fafc;
+    padding: 16px 20px;
+    border-radius: 16px;
+    color: #475569;
+    font-size: 14px;
+    line-height: 1.8;
+    border: 1px solid #e2e8f0;
+}
+.email-meta div {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.email-meta strong {
+    min-width: 60px;
+    color: #1e293b;
+}
+
+.email-body {
+    font-size: 16px;
+    line-height: 1.4;
+    color: #1e293b;
+    white-space: pre-wrap;
+    padding: 5px 0;
+}
+
+/* Вложения */
+.email-attachments {
+    margin: 16px 0;
+    padding: 16px 20px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+}
+.email-attachments strong {
+    display: block;
+    margin-bottom: 10px;
+    color: #1e293b;
+    font-size: 14px;
+}
+.email-attachments ul {
+    list-style: none;
+    padding-left: 0;
+}
+.email-attachments li {
+    position: relative;
+    padding-left: 18px;
+    margin-bottom: 6px;
+    color: #475569;
+    font-size: 14px;
+}
+.email-attachments li::before {
+    content: "📎";
+    position: absolute;
+    left: 0;
+    top: 0;
+}
+
+/* Блок выбора класса */
+.decision-block {
+    margin: 20px 0;
+    padding: 16px 20px;
+    background: #f8fafc;
+    border-radius: 16px;
+    border: 1px solid #e2e8f0;
+}
+.decision-label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+}
+.decision-select {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    font-size: 14px;
+    color: #0f172a;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.decision-select:focus {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+.decision-save-btn {
+    margin-top: 12px;
+    min-height: 40px;
+    padding: 0 18px;
+    border-radius: 999px;
+    border: none;
+    background: #6366f1;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+.decision-save-btn:hover {
+    background: #4f46e5;
+    box-shadow: 0 6px 16px rgba(79, 70, 229, 0.4);
+    transform: translateY(-1px);
+}
+.decision-save-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(79, 70, 229, 0.25);
+}
+
+/* Статусы (цвета) */
+.status-waiting {
+    color: #d97706;
+    background: #fef3c7;
+    border-color: #f59e0b;
+}
+.status-processing {
+    color: #2563eb;
+    background: #dbeafe;
+    border-color: #3b82f6;
+}
+.status-clarification {
+    color: #0891b2;
+    background: #cffafe;
+    border-color: #06b6d4;
+}
+.status-review {
+    color: #a855f7;
+    background: #f3e8ff;
+    border-color: #c084fc;
+}
+.status-completed {
+    color: #16a34a;
+    background: #dcfce7;
+    border-color: #22c55e;
+}
+
+/* Badge статуса в списке */
+.status-badge {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    border: 1px solid transparent;
+}
+
+/* Чат */
+.chat-container {
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+.chat-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+.material-name {
+    min-width: 100px;
+    font-weight: 600;
+    color: #1e293b;
+}
+.answer-input {
+    width: 500px;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    font-size: 14px;
+}
+.blacklist-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    color: #ef4444;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.chat-placeholder {
+    padding: 40px;
+    text-align: center;
+    color: #94a3b8;
+}
+.chat-send-button {
+    background: #10b981;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 40px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.chat-send-button:hover {
+    background: #059669;
+    transform: scale(1.02);
+}
+
+/* Индикатор загрузки */
+.loading {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #e2e8f0;
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+.email-loading-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 300px;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Скроллбары */
+::-webkit-scrollbar {
+    width: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* Адаптивность */
+@media (max-width: 900px) {
+    .main-layout {
+        grid-template-columns: 300px 1fr;
+    }
+    .email-card .email-subject {
+        font-size: 22px;
+    }
+    .login-box {
+        padding: 30px 20px;
+    }
+}
+@media (max-width: 600px) {
+    .main-layout {
+        grid-template-columns: 1fr;
+    }
+    .email-list {
+        display: none;
+    }
+    .app-header {
+        padding: 0 15px;
+    }
+    .user-name, .user-email {
+        display: none;
+    }
+    .login-box h1 {
+        font-size: 24px;
+    }
+    .yandex-login {
+        padding: 12px 20px;
+        font-size: 16px;
+    }
+    .sort-buttons {
+        flex-direction: column;
+    }
+    .chat-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .answer-input {
+        width: 100%;
+    }
+}
+
+/* Кнопки "Сохранить все" (во вложениях и в результатах чата) - серая гамма */
+.save-all-attachments-btn, .save-all-results-btn {
+    margin-top: 12px;
+    min-height: 36px;
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+.save-all-attachments-btn:hover, .save-all-results-btn:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+    transform: translateY(-1px);
+}
+.save-all-attachments-btn:active, .save-all-results-btn:active {
+    transform: translateY(0);
+    background: #cbd5e1;
+}
