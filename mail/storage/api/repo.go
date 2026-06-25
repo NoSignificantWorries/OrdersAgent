@@ -21,6 +21,15 @@ type EmailRecord struct {
     RawEmail         string    `json:"rawemail,omitempty"`
     EmailDate        time.Time `json:"emaildate,omitempty"`
     CreatedAt        time.Time `json:"createdat"`
+    ToHeader           string
+    CcHeader           string
+    DeliveredTo        string
+    XOriginalTo        string
+    EnvelopeTo         string
+    XEnvelopeTo        string
+    RecipientEmail     string
+    RecipientSource    string
+    IsPrimaryRecipient bool
 }
 
 type DocumentRecord struct {
@@ -80,6 +89,15 @@ type EmailForReply struct {
     EmailSubject     string
     RawEmail         string
     EmailDate        sql.NullTime
+    ToHeader             string
+    CcHeader             string
+    DeliveredTo          string
+    XOriginalTo          string
+    EnvelopeTo           string
+    XEnvelopeTo          string
+    RecipientEmail       string
+    RecipientSource      string
+    IsPrimaryRecipient   bool
 }
 
 
@@ -96,9 +114,18 @@ func (db DB) UpsertEmail(ctx context.Context, rec EmailRecord) (int64, error) {
             references_header,
             email_subject,
             raw_email,
-            email_date
+            email_date,
+            to_header,
+            cc_header,
+            delivered_to,
+            x_original_to,
+            envelope_to,
+            x_envelope_to,
+            recipient_email,
+            recipient_source,
+            is_primary_recipient
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         ON CONFLICT (mailbox, email_uid) DO UPDATE SET
             user_id = EXCLUDED.user_id,
             email_from = EXCLUDED.email_from,
@@ -108,7 +135,16 @@ func (db DB) UpsertEmail(ctx context.Context, rec EmailRecord) (int64, error) {
             references_header = EXCLUDED.references_header,
             email_subject = EXCLUDED.email_subject,
             raw_email = EXCLUDED.raw_email,
-            email_date = EXCLUDED.email_date
+            email_date = EXCLUDED.email_date,
+            to_header = EXCLUDED.to_header,
+            cc_header = EXCLUDED.cc_header,
+            delivered_to = EXCLUDED.delivered_to,
+            x_original_to = EXCLUDED.x_original_to,
+            envelope_to = EXCLUDED.envelope_to,
+            x_envelope_to = EXCLUDED.x_envelope_to,
+            recipient_email = EXCLUDED.recipient_email,
+            recipient_source = EXCLUDED.recipient_source,
+            is_primary_recipient = EXCLUDED.is_primary_recipient
         RETURNING id
     `
 
@@ -127,6 +163,15 @@ func (db DB) UpsertEmail(ctx context.Context, rec EmailRecord) (int64, error) {
         rec.EmailSubject,
         rec.RawEmail,
         rec.EmailDate,
+        rec.ToHeader,
+        rec.CcHeader,
+        rec.DeliveredTo,
+        rec.XOriginalTo,
+        rec.EnvelopeTo,
+        rec.XEnvelopeTo,
+        rec.RecipientEmail,
+        rec.RecipientSource,
+        rec.IsPrimaryRecipient,
     ).Scan(&id)
     if err != nil {
         return 0, err
@@ -148,9 +193,18 @@ func (db DB) UpsertEmailTx(ctx context.Context, tx *sql.Tx, rec EmailRecord) (in
             references_header,
             email_subject,
             raw_email,
-            email_date
+            email_date,
+            to_header,
+            cc_header,
+            delivered_to,
+            x_original_to,
+            envelope_to,
+            x_envelope_to,
+            recipient_email,
+            recipient_source,
+            is_primary_recipient
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         ON CONFLICT (mailbox, email_uid) DO UPDATE SET
             user_id = EXCLUDED.user_id,
             email_from = EXCLUDED.email_from,
@@ -160,7 +214,16 @@ func (db DB) UpsertEmailTx(ctx context.Context, tx *sql.Tx, rec EmailRecord) (in
             references_header = EXCLUDED.references_header,
             email_subject = EXCLUDED.email_subject,
             raw_email = EXCLUDED.raw_email,
-            email_date = EXCLUDED.email_date
+            email_date = EXCLUDED.email_date,
+            to_header = EXCLUDED.to_header,
+            cc_header = EXCLUDED.cc_header,
+            delivered_to = EXCLUDED.delivered_to,
+            x_original_to = EXCLUDED.x_original_to,
+            envelope_to = EXCLUDED.envelope_to,
+            x_envelope_to = EXCLUDED.x_envelope_to,
+            recipient_email = EXCLUDED.recipient_email,
+            recipient_source = EXCLUDED.recipient_source,
+            is_primary_recipient = EXCLUDED.is_primary_recipient
         RETURNING id
     `
 
@@ -179,6 +242,15 @@ func (db DB) UpsertEmailTx(ctx context.Context, tx *sql.Tx, rec EmailRecord) (in
         rec.EmailSubject,
         rec.RawEmail,
         rec.EmailDate,
+        rec.ToHeader,
+        rec.CcHeader,
+        rec.DeliveredTo,
+        rec.XOriginalTo,
+        rec.EnvelopeTo,
+        rec.XEnvelopeTo,
+        rec.RecipientEmail,
+        rec.RecipientSource,
+        rec.IsPrimaryRecipient,
     ).Scan(&id)
     if err != nil {
         return 0, err
@@ -361,8 +433,8 @@ func (db DB) HasEmail(ctx context.Context, mailbox string, emailUID int64) (bool
     return true, nil
 }
 
-func (db DB) ListQueueEmails(ctx context.Context, limit int) ([]QueueEmailItem, error) {
-    const q = `
+func (db DB) ListQueueEmails(ctx context.Context, limit int, showCopies bool) ([]QueueEmailItem, error) {
+    baseQuery := `
         SELECT
             t.id,
             t.status,
@@ -385,6 +457,15 @@ func (db DB) ListQueueEmails(ctx context.Context, limit int) ([]QueueEmailItem, 
         FROM tasks t
         JOIN emails e ON e.id = t.email_id
         LEFT JOIN documents d ON d.email_id = e.id
+        WHERE 1=1
+    `
+
+    q := baseQuery
+    if !showCopies {
+        q += " AND e.is_primary_recipient = true"
+    }
+    
+    q += `
         GROUP BY
             t.id, t.status, t.assigned_to, t.output_data, t.error_message,
             e.id, e.mailbox, e.email_uid, e.email_from, e.email_subject, e.raw_email, e.email_date,
@@ -473,8 +554,8 @@ func (db DB) ListQueueEmails(ctx context.Context, limit int) ([]QueueEmailItem, 
     return items, rows.Err()
 }
 
-func (db DB) ListQueueEmailsByStatuses(ctx context.Context, statuses []string, limit int) ([]QueueEmailItem, error) {
-    const q = `
+func (db DB) ListQueueEmailsByStatuses(ctx context.Context, statuses []string, limit int, showCopies bool) ([]QueueEmailItem, error) {
+    baseQuery := `
         SELECT
             t.id,
             t.status,
@@ -498,6 +579,14 @@ func (db DB) ListQueueEmailsByStatuses(ctx context.Context, statuses []string, l
         JOIN emails e ON e.id = t.email_id
         LEFT JOIN documents d ON d.email_id = e.id
         WHERE t.status = ANY($1::task_status[])
+    `
+
+    q := baseQuery
+    if !showCopies {
+        q += " AND e.is_primary_recipient = true"
+    }
+    
+    q += `
         GROUP BY
             t.id, t.status, t.assigned_to, t.output_data, t.error_message,
             e.id, e.mailbox, e.email_uid, e.email_from, e.email_subject, e.raw_email, e.email_date,
@@ -699,7 +788,16 @@ func (db DB) GetEmailForReply(ctx context.Context, id int64) (*EmailForReply, er
             COALESCE(references_header, ''),
             COALESCE(email_subject, ''),
             COALESCE(raw_email, ''),
-            email_date
+            email_date,
+            COALESCE(to_header, ''),
+            COALESCE(cc_header, ''),
+            COALESCE(delivered_to, ''),
+            COALESCE(x_original_to, ''),
+            COALESCE(envelope_to, ''),
+            COALESCE(x_envelope_to, ''),
+            COALESCE(recipient_email, ''),
+            COALESCE(recipient_source, ''),
+            COALESCE(is_primary_recipient, false)
         FROM emails
         WHERE id = $1
     `
@@ -718,6 +816,15 @@ func (db DB) GetEmailForReply(ctx context.Context, id int64) (*EmailForReply, er
         &rec.EmailSubject,
         &rec.RawEmail,
         &rec.EmailDate,
+        &rec.ToHeader,
+        &rec.CcHeader,
+        &rec.DeliveredTo,
+        &rec.XOriginalTo,
+        &rec.EnvelopeTo,
+        &rec.XEnvelopeTo,
+        &rec.RecipientEmail,
+        &rec.RecipientSource,
+        &rec.IsPrimaryRecipient,
     )
     if err != nil {
         return nil, err

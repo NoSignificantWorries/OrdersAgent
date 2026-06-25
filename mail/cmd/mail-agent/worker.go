@@ -31,6 +31,13 @@ func runUserWorker(
 	log.Printf("user worker started | user_id=%d", userID)
 	defer onExit(userID)
 
+	mailAuth, err := storage.GetUserMailAuth(db, userID)
+    if err != nil {
+        log.Printf("get user mail auth: %v", err)
+        return
+    }
+    userEmail := mailAuth.Email
+
 	processor := orders.New(repo, userID)
 
 	var imapClient *client.Client
@@ -105,7 +112,7 @@ func runUserWorker(
 			return
 		}
 
-		err = ProcessEmails(c, stopChan, processor)
+		err = ProcessEmails(c, stopChan, processor, userEmail)
 		if err == nil {
 			return
 		}
@@ -140,7 +147,7 @@ func runUserWorker(
 	}
 }
 
-func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *orders.Processor) error {
+func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *orders.Processor, userEmail string) error {
     uids, err := imap.FetchUnread()
     if err != nil {
         return err
@@ -173,7 +180,7 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
 
         log.Printf("ProcessEmails | fetched uid=%d", uid)
 
-        email, err := parser.ParseMessage(uid, fetchCmd)
+        email, err := parser.ParseMessage(uid, fetchCmd, userEmail)
         if err != nil {
             log.Printf("parse uid=%d: %v", uid, err)
             fetchCmd.Close()
