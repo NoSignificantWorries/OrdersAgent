@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 
 class CellType(Flag):
+    EMPTY = auto()
     TEXT = auto()
     NUMBER = auto()
     SIZES = auto()
@@ -17,7 +18,21 @@ class CellType(Flag):
     MARKING_H = auto()
 
 
+HEADERS = [
+    CellType.AMOUNT_H,
+    CellType.BARCODE_H,
+    CellType.HEIGHT_H,
+    CellType.WIDTH_H,
+    CellType.LENGTH_H,
+    CellType.MARKING_H,
+    CellType.MAT_H,
+    CellType.SIZE_H,
+]
+
+HeadersLabels = "ABHWLMRS"
+
 CellTypeLabel = {
+    CellType.EMPTY: ".",
     CellType.TEXT: "t",
     CellType.NUMBER: "n",
     CellType.SIZES: "s",
@@ -73,6 +88,7 @@ TYPES_CONFIG = CellTypes(
             "наименование",
             "обозначение",
             "имя",
+            "имя:",
             "номенклатура",
             "артикул",
             "типпакета",

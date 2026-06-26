@@ -126,26 +126,28 @@ def mainv2():
     error_files = []
     for file in inputs.iterdir():
         print("\n\n", file)
+
+        try:
+            data = tp2.TableLoader.load(None, file)
+        except BaseException:
+            print("ERROR: Wrong file!")
+            continue
         all_cnt += 1
 
-        data = tp2.TableLoader.load(None, file)
         if data is None:
             continue
         parsed_cnt += 1
 
         text = [
-            f"Sheet_{i}\n" + "\n".join(sheet) + "\n" for i, sheet in enumerate(data)
+            f"Sheet_{i}\n" + "\n".join(sheet.get_text()) + "\n"
+            for i, sheet in enumerate(data)
         ]
         with open(output / Path(file.stem + ".txt"), "w") as txtfile:
             txtfile.write("\n".join(text))
 
         for i, sheet in enumerate(data):
             print("id:", i)
-            for row in sheet:
-                pattern = tp2.find_pattern_in_one_row(row)
-                if pattern:
-                    print(f"<{row}>")
-                    print(pattern)
+            tp2.parser(sheet.get_text(), sheet.cells)
         # worker.open_and_clean()
         # if worker.tables is None or not bool(worker.tables):
         #     print("Errors with table")

@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
@@ -7,10 +8,12 @@ import xlrd
 
 from . import config as conf
 from . import functional as func
-from .config import CellType
+from .config import CellType, HeadersLabels
 
 
-def cell_classify(value: str):
+def cell_classify(value: Optional[str]):
+    if value is None or value == "":
+        return conf.CellType.EMPTY
     if conf.TYPES_CONFIG.regex is not None:
         for cell_type, patterns in conf.TYPES_CONFIG.regex.items():
             for pattern, groups in patterns:
@@ -19,119 +22,253 @@ def cell_classify(value: str):
     if conf.TYPES_CONFIG.fuzzy is not None:
         for cell_type, patterns in conf.TYPES_CONFIG.fuzzy.items():
             for pattern in patterns:
-                if func.fuzzy_match(value.lower(), pattern, 90):
+                if func.fuzzy_match(value.lower(), pattern, 70):
                     return cell_type
     return conf.CellType.TEXT
 
 
-class SparseTable:
+class Table:
     def __init__(self) -> None:
-        self.cells: Dict[Tuple[int, int], Dict[str, conf.CellType | str | int]] = {}
-        self.rows = set()
-        self.cols = set()
+        self.cells: List[List[Dict[str, Any]]] = []
+
+        self._current_row = 0
+        self._text_row = ""
+        self.text_table = []
 
     @property
     def ncols(self):
-        return max(self.cols) + 1 if self.cols else 0
+        return len(self.cells[0]) if len(self.cells) > 0 else 0
 
     @property
     def nrows(self):
-        return max(self.rows) + 1 if self.rows else 0
+        return len(self.cells)
 
     def __repr__(self) -> str:
-        cells_info = [f"({r} {c}) -> {cell}" for (r, c), cell in self.cells.items()]
-        return f"SparseTable:\n{'\n'.join(cells_info)}"
+        return "\n".join(self.text_table)
 
     def __str__(self) -> str:
         return self.__repr__()
 
-    def add(self, row, col, value):
-        value = func.clean(str(value))
+    def add(self, row, col, value: Optional[str], is_merged=False):
+        if row > self._current_row:
+            self._current_row = row
+            self.text_table.append(self._text_row)
+            self._text_row = ""
+            self.cells.append([])
+
+        if len(self.cells) == 0:
+            self.cells.append([])
+
         cell_type = cell_classify(value)
-        self.rows.add(row)
-        self.cols.add(col)
-        self.cells[(row, col)] = {
-            "type": cell_type,
-            "value": value,
-            "row": row,
-            "col": col,
-        }
+        self.cells[-1].append(
+            {
+                "type": cell_type,
+                "value": value,
+                "row": row,
+                "col": col,
+                "is_merged": is_merged,
+            }
+        )
+        if value == "" or value is None:
+            if is_merged:
+                self._text_row += "*"
+            else:
+                self._text_row += "."
+        else:
+            self._text_row += conf.CellTypeLabel[cell_type]
+
+    def finish(self):
+        self.text_table.append(self._text_row)
+        self._text_row = ""
 
     def get(self, row, col):
-        return self.cells.get((row, col), None)
+        try:
+            return self.cells[row][col]
+        except Exception:
+            return None
+
+    def sparce(self):
+        empty_columns = [True for _ in range(self.ncols)]
+        empty_rows = [True for _ in range(self.nrows)]
+        for irow, row in enumerate(self.text_table):
+            for icol, cell in enumerate(row):
+                if cell not in ".*":
+                    empty_columns[icol] = False
+                    empty_rows[irow] = False
+        return [i for i, flag in enumerate(empty_rows) if flag], [
+            i for i, flag in enumerate(empty_columns) if flag
+        ]
+
+    def delete_rows(self, rows: List[int]):
+        for irow in rows[::-1]:
+            del self.cells[irow]
+            del self.text_table[irow]
+
+    def delete_cols(self, cols: List[int]):
+        for irow in range(self.nrows):
+            for icol in cols[::-1]:
+                del self.cells[irow][icol]
+                self.text_table[irow] = (
+                    self.text_table[irow][:icol] + self.text_table[irow][icol + 1 :]
+                )
 
     def get_text(self):
-        rows = []
-        for ri in range(self.nrows):
-            row = ""
-            for ci in range(self.ncols):
-                cell = self.get(ri, ci)
-                if cell:
-                    row += conf.CellTypeLabel[cell["type"]]
-                else:
-                    row += "."
-            rows.append(row)
-        return rows
+        return self.text_table
 
 
-def find_pattern_in_one_row(row: str):
-    basic_headers = [
-        CellType.AMOUNT_H,
-        CellType.BARCODE_H,
-        CellType.HEIGHT_H,
-        CellType.WIDTH_H,
-        CellType.LENGTH_H,
-        CellType.MARKING_H,
-        CellType.MAT_H,
-        CellType.SIZE_H,
-    ]
+@dataclass
+class ParseResults:
+    unique_materials: List[str] = field(default_factory=list)
+    materials: List[Optional[int]] = field(default_factory=list)
+    x: List[Optional[int]] = field(default_factory=list)
+    y: List[Optional[int]] = field(default_factory=list)
+    amount: List[Optional[int]] = field(default_factory=list)
 
-    def get_labels(types_list):
-        res = {}
-        for tp in types_list:
-            label = conf.CellTypeLabel[tp]
-            res[label] = res.get(label, 0) + 1
-        return res
 
-    basic_labels = get_labels(basic_headers)
-    counts = {}
-    for label in basic_labels:
-        counts[label] = row.count(label)
+class PatternsGroup:
+    def __init__(self) -> None:
+        self.patterns: Dict[str, Dict[str, int]]
+        self.current_window: Optional[List[List[Dict]]] = None
+        self.current_data_header: Optional[Dict[int, str]] = None
+        self.results: ParseResults = ParseResults()
 
-    required_patterns = {
-        "simple1": {"A": 1, "R": 1, "S": 0, "W": 1, "H": 1, "L": 0},
-        "simple2": {"A": 1, "R": 1, "S": 0, "W": 1, "H": 0, "L": 1},
-        "simple3": {"A": 1, "R": 1, "S": 0, "W": 0, "H": 1, "L": 1},
-        "sized": {"A": 1, "R": 1, "S": 2, "W": 0, "H": 0, "L": 0},
-        "sized_uno_duo": {"A": 1, "R": 1, "S": 1, "W": 0, "H": 0, "L": 0},
-    }
+    def _get_label_counts(
+        self, text: str, labels: List[str] | str = conf.HeadersLabels
+    ) -> Dict[str, int]:
+        counts = {label: 0 for label in labels}
+        for label in labels:
+            counts[label] += text.count(label)
+        return counts
 
-    correct_pattern = None
-    for name, rp in required_patterns.items():
-        all_correct = True
-        for label, cnt in rp.items():
-            if counts[label] != cnt:
-                all_correct = False
+    def _pull_header_indexes(self, row: str, pattern: Dict[str, int]) -> Dict[int, str]:
+        columns = {}
+        for i, symbol in enumerate(row):
+            if symbol in pattern:
+                columns[i] = symbol
+        return columns
+
+    def _pull_data_by_header(self, header_pattern: Dict[int, str]) -> Dict[str, Dict]:
+        results = {}
+        for i, label in header_pattern.items():
+            results[label] = self.current_window[1][i]
+        return results
+
+    def _check_counts(self, pattern: Dict[str, int], data: Dict[str, int]) -> bool:
+        for label, count in pattern.items():
+            data_count = data.get(label, 0)
+            if data_count != count:
+                return False
+        return True
+
+    def _check_patterns(
+        self, counts: Dict[str, int]
+    ) -> Optional[Tuple[str, Dict[str, int]]]:
+        matched_pattern = None
+        for name, pattern in self.patterns.items():
+            check_result = self._check_counts(pattern, counts)
+            if check_result:
+                matched_pattern = (name, pattern)
                 break
-        if all_correct:
-            correct_pattern = name
-            break
 
-    if correct_pattern is None:
-        return None
+        return matched_pattern
 
-    target_columns = []
-    target_indexes = []
-    for i, elem in enumerate(row):
-        if elem in basic_labels:
-            target_columns.append(elem)
-            target_indexes.append(i)
-            if correct_pattern == "sized_uno_duo" and elem == ".":
-                if i > 0 and row[i - 1] == "S":
-                    target_columns.append("S")
-                    target_indexes.append(i)
+    def _check_headers(
+        self, text: str, headers: List[str] | str = conf.HeadersLabels
+    ) -> bool:
+        return bool(set(text) & set(headers))
 
-    return (target_columns, target_indexes)
+    def parse_window(self, window: Tuple[List[str], List[List[Dict]]]):
+        raise NotImplementedError("Not implemented method for data window parsing")
+
+
+class BasicPatterns(PatternsGroup):
+    def __init__(self) -> None:
+        super().__init__()
+        self.patterns = {
+            "simple1": {"A": 1, "R": 1, "S": 0, "W": 1, "H": 1, "L": 0},
+            "simple2": {"A": 1, "R": 1, "S": 0, "W": 1, "H": 0, "L": 1},
+            "simple3": {"A": 1, "R": 1, "S": 0, "W": 0, "H": 1, "L": 1},
+            "sized": {"A": 1, "R": 1, "S": 2, "W": 0, "H": 0, "L": 0},
+            "sized_uno_duo": {"A": 1, "R": 1, "S": 1, "W": 0, "H": 0, "L": 0},
+        }
+
+    def parse_window(self, window: Tuple[List[str], List[List[Dict]]]):
+        text_window, data_window = window
+        self.current_window = data_window
+        if self._check_headers(text_window[1]):
+            center_counts = self._get_label_counts(text_window[1])
+            matched_pattern = self._check_patterns(center_counts)
+            if matched_pattern is None:
+                if self._check_headers(text_window[0]):
+                    top_counts = self._get_label_counts(text_window[0])
+                    matched_top = self._check_patterns(top_counts)
+                    print(matched_top)
+                return
+
+            self.current_data_header = self._pull_header_indexes(
+                text_window[1], matched_pattern[1]
+            )
+            print(matched_pattern[0], text_window, center_counts)
+        else:
+            if self.current_data_header is not None:
+                data = self._pull_data_by_header(self.current_data_header)
+                print(data)
+
+
+class OKNAPatterns(PatternsGroup):
+    def __init__(self) -> None:
+        super().__init__()
+        self.patterns = {
+            "data": {"A": 1, "R": 0, "S": 0, "W": 0, "H": 1, "L": 1},
+            "material": {"A": 0, "R": 1, "S": 0, "W": 0, "H": 0, "L": 0},
+        }
+        self._current_material = None
+
+    def _parse_material_row(self, row: str):
+        if "t" in row:
+            idx = row.index("t")
+            material = self.current_window[1][idx]
+            self._current_material = material
+
+    def parse_window(self, window: Tuple[List[str], List[List[Dict]]]):
+        text_window, data_window = window
+        self.current_window = data_window
+        if self._check_headers(text_window[1]):
+            center_counts = self._get_label_counts(text_window[1])
+            matched_pattern = self._check_patterns(center_counts)
+
+            if matched_pattern is None:
+                return
+
+            if matched_pattern[0] == "material":
+                self._parse_material_row(text_window[1])
+
+            self.current_data_header = self._pull_header_indexes(
+                text_window[1], matched_pattern[1]
+            )
+            print(matched_pattern[0], text_window, center_counts)
+        else:
+            if self.current_data_header is not None:
+                data = self._pull_data_by_header(self.current_data_header)
+                print(self._current_material, data)
+
+
+def parser(rows: List[str], data: List[List[Dict]]):
+    patterns_list = [BasicPatterns(), OKNAPatterns()]
+
+    for i in range(len(rows)):
+        if i == 0:
+            window = ["." * len(rows[i])] + rows[i : i + 2]
+            data_window = [[]] + data[i : i + 2]
+        elif i == len(rows) - 1:
+            window = rows[i - 1 :] + ["." * len(rows[i])]
+            data_window = data[i - 1 :] + [[]]
+        else:
+            window = rows[i - 1 : i + 2]
+            data_window = data[i - 1 : i + 2]
+
+        for pattern_strategy in patterns_list:
+            pattern_strategy.parse_window((window, data_window))
 
 
 class TableLoader:
@@ -187,7 +324,7 @@ class TableLoader:
                 print(f"File opening errors: {first_step_error} {err}")
                 return None
 
-        sheet_texts = []
+        sheet_tables = []
         sheets = wb.sheet_names()
         for sheetname in sheets:
             sheet = wb[sheetname]
@@ -204,17 +341,12 @@ class TableLoader:
                         }
                     )
 
-            st = SparseTable()
+            st = Table()
             cells = []
             for row in range(sheet.nrows):
                 for col in range(sheet.ncols):
                     value = sheet.cell_value(row, col)
-                    if value is None:
-                        continue
-                    clean_value = func.clean(str(value))
-                    if clean_value == "":
-                        continue
-
+                    clean_value = func.to_text(value)
                     metadata = {
                         "value": clean_value,
                         "row": row,
@@ -223,7 +355,6 @@ class TableLoader:
                         "is_merged": False,
                         "merged_info": None,
                     }
-
                     for mr in merged_ranges:
                         if (mr["min_row"] <= metadata["row"] <= mr["max_row"]) and (
                             mr["min_col"] <= metadata["col"] <= mr["max_col"]
@@ -234,8 +365,12 @@ class TableLoader:
 
                     st.add(row, col, clean_value)
                     cells.append(metadata)
-            sheet_texts.append(st.get_text())
-        return sheet_texts
+            st.finish()
+            deleted_rows, deleted_cols = st.sparce()
+            st.delete_rows(deleted_rows)
+            st.delete_cols(deleted_cols)
+            sheet_tables.append(st)
+        return sheet_tables
 
     @staticmethod
     def _load_xlsx_data(
@@ -264,7 +399,7 @@ class TableLoader:
                 print(f"File opening errors: {first_step_error} {err}")
                 return None
 
-        sheet_texts = []
+        sheet_tables = []
         sheets = wb.sheetnames
         for sheetname in sheets:
             sheet = wb[sheetname]
@@ -281,15 +416,11 @@ class TableLoader:
                         }
                     )
 
-            st = SparseTable()
+            st = Table()
             cells = []
             for row in sheet.iter_rows():
                 for cell in row:
-                    if cell.value is None:
-                        continue
-                    clean_value = func.clean(str(cell.value))
-                    if clean_value == "":
-                        continue
+                    clean_value = func.to_text(cell.value)
 
                     metadata = {
                         "value": clean_value,
@@ -309,9 +440,18 @@ class TableLoader:
                             metadata["merged_info"] = mr
                             break
 
-                    st.add(cell.row - 1, cell.column - 1, clean_value)
+                    st.add(
+                        cell.row - 1,
+                        cell.column - 1,
+                        clean_value,
+                        is_merged=metadata["is_merged"],
+                    )
                     cells.append(metadata)
-            # print(st)
-            sheet_texts.append(st.get_text())
 
-        return sheet_texts
+            st.finish()
+            deleted_rows, deleted_cols = st.sparce()
+            st.delete_rows(deleted_rows)
+            st.delete_cols(deleted_cols)
+            sheet_tables.append(st)
+
+        return sheet_tables
