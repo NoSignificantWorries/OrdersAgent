@@ -79,32 +79,16 @@ async def list_queue_for_user(
     user: dict,
     status: str = "",
     limit: int | None = None,
-    offset: int = 0,
     archived: bool | None = None,
-) -> tuple[list[dict], int]:
-    """
-    Возвращает список писем для пользователя с учётом пагинации.
-
-    Параметры:
-        user: словарь с данными пользователя (обязательно содержит 'email' и 'role')
-        status: фильтр по статусу задачи (строка с разделителями-запятыми)
-        limit: количество записей на страницу (по умолчанию 100, максимум 500)
-        offset: смещение (сколько записей пропустить)
-        archived: фильтр по archived (True/False/None)
-
-    Возвращает:
-        кортеж (список писем, общее количество записей без учёта пагинации)
-    """
+) -> list[dict]:
     pool = await get_db_pool()
 
-    # Устанавливаем лимит страницы (фиксированно 100, максимум 500)
-    if limit is None or limit < 1:
-        limit = 100
-    if limit > 500:
-        limit = 500
+    if not limit or limit < 1:
+        limit = 1500
+    if limit > 2000:
+        limit = 2000
 
     async with pool.acquire() as conn:
-        # ===== ОСНОВНОЙ ЗАПРОС (с OFFSET и LIMIT) =====
         sql = f"""
             SELECT
                 e.id AS email_id,
@@ -121,6 +105,7 @@ async def list_queue_for_user(
                 e.archived AS email_archived,
                 e.is_read AS email_is_read,
                 e.created_at AS email_created_at,
+                e.is_primary_recipient,
 
                 t.id AS task_id,
                 t.document_id AS task_document_id,
@@ -188,13 +173,22 @@ async def list_queue_for_user(
         params: list[object] = []
         param_idx = 1
 
-        # Фильтр по пользователю
-        if user.get("role") != "admin":
+        print("QUEUE USER =", user)
+        print("QUEUE USER ROLE =", user.get("role"))
+        print("QUEUE USER EMAIL =", user.get("email"))
+
+        is_admin = user.get("role") == "admin"
+
+        if is_admin:
+            # Админ: показываем ТОЛЬКО основные письма (is_primary_recipient = true)
+            # Это исключает копии (Cc)
+            pass
+        else:
+            # Обычный пользователь: показываем только его письма
             where_clauses.append(f"e.mailbox = ${param_idx}")
             params.append(user["email"])
             param_idx += 1
 
-        # Фильтр по статусу
         if status:
             statuses = [s.strip() for s in status.split(",") if s.strip()]
             if statuses:
@@ -204,7 +198,6 @@ async def list_queue_for_user(
                 params.append(statuses)
                 param_idx += 1
 
-        # Фильтр по архиву
         if archived is not None:
             where_clauses.append(f"e.archived = ${param_idx}")
             params.append(archived)
@@ -213,7 +206,6 @@ async def list_queue_for_user(
         if where_clauses:
             sql += "\nWHERE " + "\n  AND ".join(where_clauses)
 
-        # GROUP BY, ORDER BY, OFFSET и LIMIT
         sql += f"""
             GROUP BY
                 e.id,
@@ -230,6 +222,7 @@ async def list_queue_for_user(
                 e.archived,
                 e.is_read,
                 e.created_at,
+                e.is_primary_recipient,
                 t.id,
                 t.status,
                 t.output_data,
@@ -241,58 +234,37 @@ async def list_queue_for_user(
             ORDER BY
                 COALESCE(t.created_at, e.created_at) DESC,
                 e.id DESC
-            OFFSET ${param_idx}
-            LIMIT ${param_idx + 1}
+            LIMIT ${param_idx}
         """
-        params.append(offset)
         params.append(limit)
 
         rows = await conn.fetch(sql, *params)
 
-        # ===== ЗАПРОС ДЛЯ ОБЩЕГО КОЛИЧЕСТВА (total) =====
-        count_sql = f"""
-            SELECT COUNT(*) AS total
-            FROM emails e
-            LEFT JOIN LATERAL (
-                SELECT
-                    tt.id,
-                    tt.status
-                FROM tasks tt
-                WHERE tt.email_id = e.id
-                ORDER BY
-                    {_task_status_order_sql()},
-                    tt.created_at DESC
-                LIMIT 1
-            ) t ON TRUE
-        """
-        count_params: list[object] = []
-        count_idx = 1
+        if is_admin:
+            # Собираем письма в словарь по message_id
+            emails_by_message_id: dict[str, dict] = {}
+            
+            for row in rows:
+                message_id = row["message_id"]
+                if not message_id:
+                    # Если нет message_id, используем email_id как ключ
+                    key = f"no_id_{row['email_id']}"
+                else:
+                    key = message_id
+                
+                # Если письмо с таким message_id уже есть - пропускаем (берем первое)
+                if key not in emails_by_message_id:
+                    emails_by_message_id[key] = row
+            
+            # Используем только уникальные письма
+            unique_rows = list(emails_by_message_id.values())
+        else:
+            # Для обычного пользователя - все письма (они уже отфильтрованы по mailbox)
+            unique_rows = rows
 
-        # Повторяем условия WHERE (без OFFSET/LIMIT)
-        if user.get("role") != "admin":
-            count_sql += f" WHERE e.mailbox = ${count_idx}"
-            count_params.append(user["email"])
-            count_idx += 1
-
-        if status:
-            statuses = [s.strip() for s in status.split(",") if s.strip()]
-            if statuses:
-                count_sql += f" AND t.status = ANY(${count_idx}::task_status[])"
-                count_params.append(statuses)
-                count_idx += 1
-
-        if archived is not None:
-            count_sql += f" AND e.archived = ${count_idx}"
-            count_params.append(archived)
-            count_idx += 1
-
-        total_row = await conn.fetchrow(count_sql, *count_params)
-        total = total_row["total"] if total_row else 0
-
-        # ===== ФОРМИРОВАНИЕ РЕЗУЛЬТАТА (без изменений) =====
         result: list[dict] = []
 
-        for row in rows:
+        for row in unique_rows:
             task_output = row["output_data"]
 
             if task_output is None:
@@ -339,13 +311,14 @@ async def list_queue_for_user(
                 "predictedclass": predicted_class,
                 "modeldecision": model_decision,
                 "documents": documents,
+                "is_primary_recipient": row["is_primary_recipient"],
             }
 
             if row["task_id"]:
                 item.update(
                     {
                         "id": row["task_id"],
-                        "documentid": row["task_document_id"],
+                        "documentid":row["task_document_id"],
                         "type": row["task_type"],
                         "status": row["task_status"],
                         "priority": row["task_priority"],
@@ -370,7 +343,7 @@ async def list_queue_for_user(
                 item.update(
                     {
                         "id": row["email_id"],
-                        "documentid": None,
+                        "documentid":None,
                         "type": None,
                         "status": None,
                         "priority": 100,
@@ -388,4 +361,4 @@ async def list_queue_for_user(
 
             result.append(item)
 
-        return result, total
+        return result

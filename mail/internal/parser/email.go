@@ -12,6 +12,7 @@ import (
 	"bufio"
     "net/mail"
     "unicode/utf8"
+    "regexp"
 
 	htmllib "golang.org/x/net/html"
 
@@ -24,6 +25,7 @@ import (
 
 type Email struct {
 	UID     imap.UID
+    Mailbox string
 	From    string
 	Subject string
 	Date    string
@@ -33,6 +35,15 @@ type Email struct {
 	InReplyTo        string
 	ReferencesHeader string
 	ReplyTo          string
+    To                 string
+    Cc                 string
+    DeliveredTo        string
+    XOriginalTo        string
+    EnvelopeTo         string
+    XEnvelopeTo        string
+    RecipientEmail     string
+    RecipientSource    string
+    IsPrimaryRecipient bool
 }
 
 type Attachment struct {
@@ -156,10 +167,11 @@ func firstAddress(addrs []imap.Address) string {
     return ""
 }
 
-func parseHeaderFields(r io.Reader) (messageID, inReplyTo, references, replyTo string, err error) {
+func parseHeaderFields(r io.Reader) (messageID, inReplyTo, references, replyTo string, to, cc, 
+    deliveredTo, xOriginalTo, envelopeTo, xEnvelopeTo string, err error) {
     mr, err := mail.ReadMessage(bufio.NewReader(r))
     if err != nil {
-        return "", "", "", "", err
+        return "", "", "", "", "", "", "", "", "", "", err
     }
 
     h := mr.Header
@@ -168,8 +180,14 @@ func parseHeaderFields(r io.Reader) (messageID, inReplyTo, references, replyTo s
     inReplyTo = strings.TrimSpace(h.Get("In-Reply-To"))
     references = strings.TrimSpace(h.Get("References"))
     replyTo = strings.TrimSpace(h.Get("Reply-To"))
+    to = strings.TrimSpace(h.Get("To"))
+    cc = strings.TrimSpace(h.Get("Cc"))
+    deliveredTo = strings.TrimSpace(h.Get("Delivered-To"))
+    xOriginalTo = strings.TrimSpace(h.Get("X-Original-To"))
+    envelopeTo = strings.TrimSpace(h.Get("Envelope-To"))
+    xEnvelopeTo = strings.TrimSpace(h.Get("X-Envelope-To"))
 
-    return messageID, inReplyTo, references, replyTo, nil
+    return messageID, inReplyTo, references, replyTo, to, cc, deliveredTo, xOriginalTo, envelopeTo, xEnvelopeTo, nil
 }
 
 func decodeHeader(s string) string {
@@ -200,131 +218,106 @@ func decodeHeader(s string) string {
     return s
 }
 
-// func decodeHeader(s string) string {
-// 	if s == "" {
-// 		return s
-// 	}
+func resolveRecipient(email *Email, mailbox string) {
+    // Приоритет: Delivered-To > X-Original-To > Envelope-To > X-Envelope-To > To > Cc
+    
+    if email.DeliveredTo != "" {
+        addresses := parseAddressesFromHeader(email.DeliveredTo)
+        for _, addr := range addresses {
+            if strings.EqualFold(addr, mailbox) {
+                email.RecipientEmail = addr
+                email.RecipientSource = "Delivered-To"
+                email.IsPrimaryRecipient = true
+                return
+            }
+        }
+    }
+    
+    if email.XOriginalTo != "" {
+        addresses := parseAddressesFromHeader(email.XOriginalTo)
+        for _, addr := range addresses {
+            if strings.EqualFold(addr, mailbox) {
+                email.RecipientEmail = addr
+                email.RecipientSource = "X-Original-To"
+                email.IsPrimaryRecipient = true
+                return
+            }
+        }
+    }
+    
+    if email.EnvelopeTo != "" {
+        addresses := parseAddressesFromHeader(email.EnvelopeTo)
+        for _, addr := range addresses {
+            if strings.EqualFold(addr, mailbox) {
+                email.RecipientEmail = addr
+                email.RecipientSource = "Envelope-To"
+                email.IsPrimaryRecipient = true
+                return
+            }
+        }
+    }
+    
+    if email.To != "" {
+        addresses := parseAddressesFromHeader(email.To)
+        for _, addr := range addresses {
+            if strings.EqualFold(addr, mailbox) {
+                email.RecipientEmail = addr
+                email.RecipientSource = "To"
+                email.IsPrimaryRecipient = true
+                return
+            }
+        }
+    }
+    
+    if email.Cc != "" {
+        addresses := parseAddressesFromHeader(email.Cc)
+        for _, addr := range addresses {
+            if strings.EqualFold(addr, mailbox) {
+                email.RecipientEmail = addr
+                email.RecipientSource = "Cc"
+                email.IsPrimaryRecipient = false
+                return
+            }
+        }
+    }
+    
+    email.IsPrimaryRecipient = false
+    email.RecipientSource = "unknown"
+}
 
-// 	// 1. Стандартный декодер (работает для UTF-8)
-// 	d := new(mime.WordDecoder)
-// 	if decoded, err := d.DecodeHeader(s); err == nil && decoded != s {
-// 		return decoded
-// 	}
+func parseAddressesFromHeader(header string) []string {
+    if header == "" {
+        return nil
+    }
+    
+    var addresses []string
+    parts := strings.Split(header, ",")
+    for _, part := range parts {
+        part = strings.TrimSpace(part)
+        if part == "" {
+            continue
+        }
+        
+        addr, err := mail.ParseAddress(part)
+        if err != nil {
+            if email := extractEmailFromString(part); email != "" {
+                addresses = append(addresses, email)
+            }
+            continue
+        }
+        addresses = append(addresses, strings.ToLower(strings.TrimSpace(addr.Address)))
+    }
+    
+    return addresses
+}
 
-// 	// 2. Специальные кодировки
-// 	if strings.Contains(s, "koi8-r") {
-// 		return decodeKoi8R(s)
-// 	}
-// 	if strings.Contains(s, "windows-1251") {
-// 		return decodeWindows1251(s)
-// 	}
+func extractEmailFromString(s string) string {
+    re := regexp.MustCompile(`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)
+    match := re.FindString(s)
+    return strings.ToLower(match)
+}
 
-// 	return s
-// }
-
-// func decodeWindows1251(s string) string {
-// 	parts := strings.Fields(s)
-// 	var result []string
-
-// 	for _, p := range parts {
-// 		// B-кодировка
-// 		if strings.HasPrefix(p, "=?windows-1251?B?") && strings.HasSuffix(p, "?=") {
-// 			idxB := strings.Index(p, "?B?")
-// 			if idxB == -1 {
-// 				continue
-// 			}
-// 			data := p[idxB+3 : len(p)-2]
-// 			decodedBytes, err := base64.StdEncoding.DecodeString(data)
-// 			if err != nil {
-// 				continue
-// 			}
-// 			decoded, err := charmap.Windows1251.NewDecoder().String(string(decodedBytes))
-// 			if err == nil {
-// 				result = append(result, decoded)
-// 			}
-// 			continue
-// 		}
-
-// 		// Q-кодировка
-// 		if strings.HasPrefix(p, "=?windows-1251?Q?") && strings.HasSuffix(p, "?=") {
-// 			idxQ := strings.Index(p, "?Q?")
-// 			if idxQ == -1 {
-// 				continue
-// 			}
-// 			data := p[idxQ+3 : len(p)-2]
-// 			decodedBytes := decodeQuotedPrintable(data)
-// 			decoded, err := charmap.Windows1251.NewDecoder().String(string(decodedBytes))
-// 			if err == nil {
-// 				result = append(result, decoded)
-// 			}
-// 			continue
-// 		}
-// 	}
-
-// 	if len(result) > 0 {
-// 		return strings.Join(result, " ")
-// 	}
-// 	return s
-// }
-
-// func decodeKoi8R(s string) string {
-// 	parts := strings.Fields(s)
-// 	var result []string
-
-// 	for _, p := range parts {
-// 		if !strings.HasPrefix(p, "=?koi8-r?B?") || !strings.HasSuffix(p, "?=") {
-// 			continue
-// 		}
-
-// 		// Извлекаем base64 данные
-// 		idxB := strings.Index(p, "?B?")
-// 		if idxB == -1 {
-// 			continue
-// 		}
-// 		data := p[idxB+3 : len(p)-2]
-
-// 		decodedBytes, err := base64.StdEncoding.DecodeString(data)
-// 		if err != nil {
-// 			continue
-// 		}
-
-// 		// KOI8-R в UTF-8
-// 		decoded, err := charmap.KOI8R.NewDecoder().String(string(decodedBytes))
-// 		if err == nil {
-// 			result = append(result, decoded)
-// 		}
-// 	}
-
-// 	if len(result) > 0 {
-// 		return strings.Join(result, " ")
-// 	}
-// 	return s
-// }
-
-// Вспомогательная функция для Quoted-Printable
-// func decodeQuotedPrintable(s string) []byte {
-// 	var result []byte
-// 	i := 0
-// 	for i < len(s) {
-// 		if s[i] == '=' && i+2 < len(s) {
-// 			if s[i+1] == '\r' && s[i+2] == '\n' {
-// 				i += 3
-// 				continue
-// 			}
-// 			hex := s[i+1 : i+3]
-// 			if v, err := strconv.ParseUint("0x"+string(hex), 0, 8); err == nil {
-// 				result = append(result, byte(v))
-// 				i += 3
-// 				continue
-// 			}
-// 		}
-// 		result = append(result, s[i])
-// 		i++
-// 	}
-// 	return result
-// }
-
-func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, error) {
+func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand, mailbox string) (*Email, error) {
     msg := fetchCmd.Next()
     if msg == nil {
         return nil, fmt.Errorf("no message")
@@ -332,6 +325,7 @@ func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, erro
 
     email := &Email{
         UID: uid,
+        Mailbox: mailbox,
     }
 
     var bodyError error
@@ -363,7 +357,8 @@ func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, erro
             section := bodyData.Section
 
             if section != nil && section.Specifier == imap.PartSpecifierHeader {
-                msgID, inReplyTo, refs, replyTo, err := parseHeaderFields(bodyData.Literal)
+                msgID, inReplyTo, refs, replyTo, to, cc, deliveredTo, 
+                xOriginalTo, envelopeTo, xEnvelopeTo, err := parseHeaderFields(bodyData.Literal)
                 if err != nil {
                     log.Printf("parseHeaderFields: UID=%d err=%v", email.UID, err)
                     continue
@@ -384,6 +379,20 @@ func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand) (*Email, erro
                     email.ReplyTo = replyTo
                 }
 				log.Printf("ReplyTo: %s", email.ReplyTo)
+                email.To = to
+                email.Cc = cc
+                email.DeliveredTo = deliveredTo
+                email.XOriginalTo = xOriginalTo
+                email.EnvelopeTo = envelopeTo
+                email.XEnvelopeTo = xEnvelopeTo
+                
+                log.Printf("To: %s", email.To)
+                log.Printf("Cc: %s", email.Cc)
+                log.Printf("Delivered-To: %s", email.DeliveredTo)
+
+                resolveRecipient(email, email.Mailbox)
+                log.Printf("RecipientEmail: %s, Source: %s, IsPrimary: %v", 
+                    email.RecipientEmail, email.RecipientSource, email.IsPrimaryRecipient)
 
                 continue
             }

@@ -135,3 +135,22 @@ CREATE INDEX IF NOT EXISTS idx_tasks_email_id
 CREATE INDEX IF NOT EXISTS idx_tasks_stale
     ON tasks(updated_at)
     WHERE status NOT IN ('completed', 'error');
+
+-- Поля для определения основного получателя
+ALTER TABLE emails ADD COLUMN IF NOT EXISTS to_header TEXT;
+ALTER TABLE emails ADD COLUMN IF NOT EXISTS cc_header TEXT;
+ALTER TABLE emails ADD COLUMN IF NOT EXISTS delivered_to TEXT;
+ALTER TABLE emails ADD COLUMN IF NOT EXISTS x_original_to TEXT;
+ALTER TABLE emails ADD COLUMN IF NOT EXISTS envelope_to TEXT;
+ALTER TABLE emails ADD COLUMN IF NOT EXISTS x_envelope_to TEXT;
+ALTER TABLE emails ADD COLUMN IF NOT EXISTS recipient_email TEXT;
+ALTER TABLE emails ADD COLUMN IF NOT EXISTS recipient_source TEXT;
+ALTER TABLE emails ADD COLUMN IF NOT EXISTS is_primary_recipient BOOLEAN DEFAULT FALSE;
+
+-- Индекс для быстрой фильтрации
+CREATE INDEX IF NOT EXISTS idx_emails_primary_recipient 
+    ON emails(user_id, is_primary_recipient, created_at) 
+    WHERE is_primary_recipient = TRUE;
+
+-- Индекс для группировки по message_id
+CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);

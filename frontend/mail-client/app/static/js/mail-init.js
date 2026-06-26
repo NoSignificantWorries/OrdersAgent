@@ -160,7 +160,6 @@
 
             await loadEmailsFromApi();
             renderEmailList();
-            renderPagination();   // <-- добавить
             updateUnreadCount();
             initCompose();
 
@@ -206,7 +205,6 @@
             if (searchInput) {
                 searchInput.addEventListener("input", (e) => {
                     state.currentSearchTerm = e.target.value;
-                    currentPage = 0;           // <-- добавить
                     renderEmailList();
                     updateSearchClearButton();
                 });
@@ -263,13 +261,8 @@
                     state.sortNewestFirst = sortNewestBtn.classList.contains("active");
                 }
 
-                // Сброс пагинации и перезагрузка с сервера
-                currentPage = 0;
-                loadEmailsFromApi(true).then(() => {
-                    renderEmailList();
-                    renderPagination();   // обновить пагинацию
-                    closeFilterPanelFn();
-                });
+                renderEmailList();
+                closeFilterPanelFn();
             }
 
             if (filterToggle) {
