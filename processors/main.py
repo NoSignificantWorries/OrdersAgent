@@ -187,27 +187,16 @@ def process_request_excel(
 
         # searching materials
         local_questions = dict()
+        matches = material_repo.batch_find(unique_parts)
         if task.manual_decision is not None:
-            matches = {
+            user_matches = {
                 p: (m["target"], m["article"], m["black-list"])
                 for p, m in task.manual_decision.items()
             }
-            for part, mat_match in matches.items():
-                if mat_match is None:
-                    local_questions[part] = {
-                        "black-list": False,
-                        "target": None,
-                        "article": None,
-                    }
+            matches.update(user_matches)
         else:
-            matches = material_repo.batch_find(unique_parts)
             for part, mat_match in matches.items():
                 if mat_match is None:
-                    local_questions[part] = {
-                        "black-list": False,
-                        "target": None,
-                        "article": None,
-                    }
                     continue
                 _, _, bl = mat_match
                 if bl:
@@ -216,6 +205,13 @@ def process_request_excel(
                         "target": None,
                         "article": None,
                     }
+        for part, mat_match in matches.items():
+            if mat_match is None:
+                local_questions[part] = {
+                    "black-list": False,
+                    "target": None,
+                    "article": None,
+                }
 
         if bool(local_questions):
             # task_repo.update_status(task.id, "materials_review", output_data=questions)
@@ -354,27 +350,16 @@ def process_calculation_excel(
 
         # searching materials
         local_questions = dict()
+        matches = material_repo.batch_find(unique_parts)
         if task.manual_decision is not None:
-            matches = {
+            user_matches = {
                 p: (m["target"], m["article"], m["black-list"])
                 for p, m in task.manual_decision.items()
             }
-            for part, mat_match in matches.items():
-                if mat_match is None:
-                    local_questions[part] = {
-                        "black-list": False,
-                        "target": None,
-                        "article": None,
-                    }
+            matches.update(user_matches)
         else:
-            matches = material_repo.batch_find(unique_parts)
             for part, mat_match in matches.items():
                 if mat_match is None:
-                    local_questions[part] = {
-                        "black-list": False,
-                        "target": None,
-                        "article": None,
-                    }
                     continue
                 _, _, bl = mat_match
                 if bl:
@@ -383,6 +368,13 @@ def process_calculation_excel(
                         "target": None,
                         "article": None,
                     }
+        for part, mat_match in matches.items():
+            if mat_match is None:
+                local_questions[part] = {
+                    "black-list": False,
+                    "target": None,
+                    "article": None,
+                }
 
         if bool(local_questions):
             # task_repo.update_status(task.id, "materials_review", output_data=questions)
@@ -393,8 +385,10 @@ def process_calculation_excel(
             continue
 
         # matching materials
+        print(matches)
         for material, material_obj in unique_materials_dict.items():
             for part in material_obj.parts:
+                print(part)
                 ms = matches[part]
                 material_obj.matches.append(ms)
 
