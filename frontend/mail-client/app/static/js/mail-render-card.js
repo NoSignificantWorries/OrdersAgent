@@ -430,7 +430,7 @@
                         <button
                             type="button"
                             id="forward-toggle-btn"
-                            class="reply-btn reply-btn-secondary"
+                            class="reply-btn reply-btn-primary"
                         >
                             Переслать
                         </button>
