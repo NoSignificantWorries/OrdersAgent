@@ -251,7 +251,6 @@ body {
     background: #e2e8f0;
 }
 
-
 /* ===== ЛЕВАЯ ПАНЕЛЬ - СПИСОК ПИСЕМ ===== */
 .email-list {
     background: white;
@@ -414,7 +413,6 @@ body {
     font-weight: 500;
 }
 
-
 /* ===== ПАНЕЛЬ ФИЛЬТРОВ ===== */
 .filter-panel {
     position: absolute;
@@ -517,7 +515,6 @@ body {
     object-fit: contain;
     display: block;
 }
-
 
 /* ===== ПРАВАЯ ОБЛАСТЬ ===== */
 .email-content {
@@ -657,7 +654,6 @@ body {
 .tab-pane.active {
     display: block;
 }
-
 
 /* Карточка письма */
 .email-view {
@@ -1042,7 +1038,6 @@ body {
 }
 
 /* === СТИЛИ ДЛЯ ФОРМЫ ОТВЕТА === */
-
 .reply-block {
     margin-top: 16px;
     padding: 0;
@@ -1593,6 +1588,104 @@ body {
     }
 }
 
+/* ===== КНОПКИ ОТВЕТА / ПЕРЕСЫЛКИ ===== */
+.reply-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+#forward-toggle-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+/* ===== FORWARD: ВЛОЖЕНИЯ ИСХОДНОГО ПИСЬМА ===== */
+.compose-source-files-container {
+    margin-top: 4px;
+}
+
+.compose-source-files-empty {
+    padding: 12px 14px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    color: #94a3b8;
+    font-size: 14px;
+    background: #f8fafc;
+}
+
+.compose-source-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.compose-source-file-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid #d7dbe2;
+    border-radius: 12px;
+    background: #f8f9fb;
+    cursor: pointer;
+    transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.compose-source-file-item:hover {
+    background: #f1f5f9;
+    border-color: #bcc6d6;
+}
+
+.compose-source-file-checkbox {
+    margin-top: 2px;
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    accent-color: #667eea;
+    cursor: pointer;
+}
+
+.compose-source-file-meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.compose-source-file-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1e293b;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.compose-source-file-details {
+    font-size: 12px;
+    color: #64748b;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.compose-source-file-checkbox:disabled,
+.compose-source-file-item:has(.compose-source-file-checkbox:disabled) {
+    cursor: not-allowed;
+}
+
+.compose-source-file-item:has(.compose-source-file-checkbox:checked) {
+    border-color: #a5b4fc;
+    background: #eef2ff;
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.10);
+}
+
+/* ===== READONLY ПОЛЕ ТЕМЫ В FORWARD ===== */
+.compose-input[readonly] {
+    background: #f8fafc;
+    color: #64748b;
+}
+
 /* Вложения */
 .email-attachments {
     margin: 16px 0;
@@ -1628,7 +1721,6 @@ body {
     left: 0;
     top: 0;
 }
-
 
 /* Блок выбора класса */
 .decision-block {
@@ -1714,7 +1806,6 @@ body {
     color: #64748b;
     line-height: 1.5;
 }
-
 
 /* Статусы */
 .status-waiting {
@@ -1829,7 +1920,6 @@ body {
     z-index: 999999;
 }
 
-
 /* Чат */
 .chat-container {
     padding: 24px;
@@ -1881,8 +1971,6 @@ body {
     box-sizing: border-box;
 }
 
-
-
 .blacklist-label {
     display: flex;
     align-items: center;
@@ -1916,7 +2004,6 @@ body {
     transform: scale(1.02);
 }
 
-
 /* Индикатор загрузки */
 .loading {
     display: inline-block;
@@ -1941,7 +2028,6 @@ body {
     }
 }
 
-
 /* Скроллбары */
 ::-webkit-scrollbar {
     width: 8px;
@@ -1959,7 +2045,6 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: #94a3b8;
 }
-
 
 /* Адаптивность */
 @media (max-width: 900px) {
@@ -2017,7 +2102,6 @@ body {
     }
 }
 
-
 /* Кнопки "Сохранить все" */
 .save-all-attachments-btn,
 .save-all-results-btn {
@@ -2051,7 +2135,6 @@ body {
 }
 
 /* Кнопка удаления письма*/
-
 .danger-zone {
   margin-top: 20px;
   padding: 16px 20px;
@@ -2092,4 +2175,3 @@ body {
   cursor: not-allowed;
   box-shadow: none;
 }
-

@@ -417,14 +417,24 @@
                 </div>
 
                 <div class="reply-block">
-                    <button
-                        type="button"
-                        id="reply-toggle-btn"
-                        class="reply-btn reply-btn-primary"
-                        ${shouldShowReplyForm ? "hidden" : ""}
-                    >
-                        Ответить
-                    </button>
+                    <div class="reply-toolbar">
+                        <button
+                            type="button"
+                            id="reply-toggle-btn"
+                            class="reply-btn reply-btn-primary"
+                            ${shouldShowReplyForm ? "hidden" : ""}
+                        >
+                            Ответить
+                        </button>
+
+                        <button
+                            type="button"
+                            id="forward-toggle-btn"
+                            class="reply-btn reply-btn-secondary"
+                        >
+                            Переслать
+                        </button>
+                    </div>
 
                     <div
                         id="reply-form-block"
@@ -509,6 +519,7 @@
         }
 
         const replyToggleBtn = document.getElementById("reply-toggle-btn");
+        const forwardToggleBtn = document.getElementById("forward-toggle-btn");
         const replyFormBlock = document.getElementById("reply-form-block");
         const replyBodyInput = document.getElementById("reply-body-input");
         const replySendBtn = document.getElementById("reply-send-btn");
@@ -658,6 +669,29 @@
                 replyFormBlock.hidden = false;
                 replyToggleBtn.hidden = true;
                 replyBodyInput.focus();
+            });
+        }
+
+        if (forwardToggleBtn) {
+            forwardToggleBtn.addEventListener("click", async () => {
+                if (state.pendingSilentRefresh === true) {
+                    state.pendingSilentRefresh = false;
+                }
+
+                forwardToggleBtn.disabled = true;
+
+                try {
+                    if (typeof window.MailPage?.openForwardCompose !== "function") {
+                        throw new Error("Форма пересылки не подключена");
+                    }
+
+                    await window.MailPage.openForwardCompose({ emailId: realEmailId });
+                } catch (e) {
+                    console.error(e);
+                    alert(e.message || "Не удалось открыть форму пересылки");
+                } finally {
+                    forwardToggleBtn.disabled = false;
+                }
             });
         }
 

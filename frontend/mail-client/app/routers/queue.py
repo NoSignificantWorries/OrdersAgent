@@ -4,7 +4,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from urllib.parse import quote
 import httpx
 
-from typing import Annotated
+from typing import Annotated, Any
 from fastapi import APIRouter, Request, HTTPException, Form, File, UploadFile
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field, ConfigDict
@@ -37,6 +37,22 @@ class MaterialsManualDecisionUpdate(BaseModel):
 
 class EmailReadUpdate(BaseModel):
     is_read: bool
+
+class ForwardAttachmentItem(BaseModel):
+    document_id: int
+    filename: str
+    content_type: str | None = None
+    size_bytes: int | None = None
+    selected: bool = True
+
+
+class ForwardDraftResponse(BaseModel):
+    email_id: int
+    mailbox: str
+    to: str = ""
+    subject: str = ""
+    body: str = ""
+    attachments: list[ForwardAttachmentItem] = Field(default_factory=list)
 
 async def _load_document_bytes_from_storage(bucket_name: str, object_key: str) -> bytes:
     client = MinIOClient.get_client()
@@ -1013,6 +1029,179 @@ async def reply_to_email(
                 detail = resp.text.strip()
         except Exception:
             # Если не JSON, берем текст ответа
+            if resp.text and resp.text.strip():
+                detail = resp.text.strip()
+
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+
+    return Response(status_code=204)
+
+@router.get("/emails/{email_id}/forward-draft", response_model=ForwardDraftResponse)
+async def get_forward_draft(email_id: int, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            row = await conn.fetchrow(
+                """
+                SELECT id, mailbox
+                FROM emails
+                WHERE id = $1
+                LIMIT 1
+                """,
+                email_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                SELECT id, mailbox
+                FROM emails
+                WHERE id = $1
+                  AND mailbox = $2
+                LIMIT 1
+                """,
+                email_id,
+                user["email"],
+            )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+    mail_service_url = f"http://mail:8080/emails/{email_id}/forward-draft"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(mail_service_url)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
+
+    if resp.status_code >= 400:
+        detail = "Не удалось получить черновик пересылки"
+
+        try:
+            data = resp.json()
+            if isinstance(data, dict) and data.get("detail"):
+                detail = data["detail"]
+            elif resp.text and resp.text.strip():
+                detail = resp.text.strip()
+        except Exception:
+            if resp.text and resp.text.strip():
+                detail = resp.text.strip()
+
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+
+    try:
+        payload = resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Некорректный ответ mail service: {e}") from e
+
+    return payload
+
+@router.post("/emails/{email_id}/forward", status_code=204)
+async def forward_email(
+    email_id: int,
+    request: Request,
+    to: Annotated[str, Form(...)],
+    body: Annotated[str, Form(...)],
+    include_document_ids: Annotated[list[int] | None, Form()] = None,
+    attachments: Annotated[list[UploadFile] | None, File()] = None,
+):
+    attachments = attachments or []
+    include_document_ids = include_document_ids or []
+
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    to = (to or "").strip()
+    body = body or ""
+
+    if not to:
+        raise HTTPException(status_code=400, detail="to is empty")
+
+    if not body.strip():
+        raise HTTPException(status_code=400, detail="body is empty")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            row = await conn.fetchrow(
+                """
+                SELECT id, mailbox
+                FROM emails
+                WHERE id = $1
+                LIMIT 1
+                """,
+                email_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                SELECT id, mailbox
+                FROM emails
+                WHERE id = $1
+                  AND mailbox = $2
+                LIMIT 1
+                """,
+                email_id,
+                user["email"],
+            )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+    mail_service_url = f"http://mail:8080/emails/{email_id}/forward"
+
+    files: list[tuple[str, tuple[str, bytes, str]]] = []
+    data = {
+        "to": to,
+        "body": body,
+        "include_document_ids": [str(document_id) for document_id in include_document_ids],
+    }
+
+    try:
+        for attachment in attachments:
+            content = await attachment.read()
+            files.append(
+                (
+                    "attachments",
+                    (
+                        attachment.filename or "attachment",
+                        content,
+                        attachment.content_type or "application/octet-stream",
+                    ),
+                )
+            )
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            request_kwargs = {
+                "data": data,
+            }
+            if files:
+                request_kwargs["files"] = files
+
+            resp = await client.post(
+                mail_service_url,
+                **request_kwargs,
+            )
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
+
+    if resp.status_code != 204:
+        detail = "Не удалось переслать письмо"
+
+        try:
+            data = resp.json()
+            if isinstance(data, dict) and data.get("detail"):
+                detail = data["detail"]
+            elif resp.text and resp.text.strip():
+                detail = resp.text.strip()
+        except Exception:
             if resp.text and resp.text.strip():
                 detail = resp.text.strip()
 

@@ -833,6 +833,100 @@ func (db DB) GetEmailForReply(ctx context.Context, id int64) (*EmailForReply, er
     return &rec, nil
 }
 
+func (db DB) ListDocumentsByEmailID(ctx context.Context, emailID int64) ([]DocumentRecord, error) {
+	const q = `
+		SELECT
+			id,
+			email_id,
+			COALESCE(filename, ''),
+			COALESCE(minio_object_key, ''),
+			COALESCE(content_type, ''),
+			COALESCE(size_bytes, 0),
+			created_at
+		FROM documents
+		WHERE email_id = $1
+		ORDER BY id
+	`
+
+	rows, err := db.Conn.QueryContext(ctx, q, emailID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []DocumentRecord
+	for rows.Next() {
+		var rec DocumentRecord
+		if err := rows.Scan(
+			&rec.ID,
+			&rec.EmailID,
+			&rec.Filename,
+			&rec.MinioObjectKey,
+			&rec.ContentType,
+			&rec.SizeBytes,
+			&rec.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func (db DB) ListDocumentsByIDsForEmail(ctx context.Context, emailID int64, ids []int64) ([]DocumentRecord, error) {
+	if len(ids) == 0 {
+		return []DocumentRecord{}, nil
+	}
+
+	const q = `
+		SELECT
+			id,
+			email_id,
+			COALESCE(filename, ''),
+			COALESCE(minio_object_key, ''),
+			COALESCE(content_type, ''),
+			COALESCE(size_bytes, 0),
+			created_at
+		FROM documents
+		WHERE email_id = $1
+		  AND id = ANY($2)
+		ORDER BY id
+	`
+
+	rows, err := db.Conn.QueryContext(ctx, q, emailID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []DocumentRecord
+	for rows.Next() {
+		var rec DocumentRecord
+		if err := rows.Scan(
+			&rec.ID,
+			&rec.EmailID,
+			&rec.Filename,
+			&rec.MinioObjectKey,
+			&rec.ContentType,
+			&rec.SizeBytes,
+			&rec.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
 
 func (db DB) UpdateTaskStatus(ctx context.Context, taskID int64, status string, errorMessage *string) error {
     const q = `

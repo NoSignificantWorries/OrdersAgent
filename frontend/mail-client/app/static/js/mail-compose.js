@@ -1,5 +1,9 @@
 (function () {
-    const { sendNewEmail } = window.MailApi || {};
+    const {
+        sendNewEmail,
+        loadForwardDraft,
+        sendForwardEmail,
+    } = window.MailApi || {};
 
     function ensureComposeState(state) {
         if (!state.composeDraft || typeof state.composeDraft !== "object") {
@@ -7,11 +11,21 @@
         }
 
         state.composeDraft.isOpen = state.composeDraft.isOpen === true;
+        state.composeDraft.mode =
+            state.composeDraft.mode === "forward" ? "forward" : "new";
+        state.composeDraft.emailId =
+            state.composeDraft.emailId == null ? null : Number(state.composeDraft.emailId);
         state.composeDraft.to = state.composeDraft.to || "";
         state.composeDraft.subject = state.composeDraft.subject || "";
         state.composeDraft.body = state.composeDraft.body || "";
         state.composeDraft.files = Array.isArray(state.composeDraft.files)
             ? state.composeDraft.files
+            : [];
+        state.composeDraft.sourceAttachments = Array.isArray(state.composeDraft.sourceAttachments)
+            ? state.composeDraft.sourceAttachments
+            : [];
+        state.composeDraft.selectedDocumentIds = Array.isArray(state.composeDraft.selectedDocumentIds)
+            ? state.composeDraft.selectedDocumentIds.map((id) => Number(id)).filter((id) => !Number.isNaN(id))
             : [];
         state.composeDraft.isSending = state.composeDraft.isSending === true;
         state.composeDraft.isFocused = state.composeDraft.isFocused === true;
@@ -31,10 +45,14 @@
 
     function resetComposeDraft(state) {
         ensureComposeState(state);
+        state.composeDraft.mode = "new";
+        state.composeDraft.emailId = null;
         state.composeDraft.to = "";
         state.composeDraft.subject = "";
         state.composeDraft.body = "";
         state.composeDraft.files = [];
+        state.composeDraft.sourceAttachments = [];
+        state.composeDraft.selectedDocumentIds = [];
         state.composeDraft.isSending = false;
         state.composeDraft.isFocused = false;
         state.composeDraft.isComposing = false;
@@ -75,6 +93,58 @@
         `;
     }
 
+    function renderForwardSourceAttachments(state) {
+        ensureComposeState(state);
+
+        const docs = state.composeDraft.sourceAttachments || [];
+        if (!docs.length) {
+            return `
+                <div class="compose-source-files-empty">
+                    У исходного письма нет доступных вложений для пересылки
+                </div>
+            `;
+        }
+
+        const selectedIds = new Set(state.composeDraft.selectedDocumentIds || []);
+
+        return `
+            <div class="compose-source-files-list">
+                ${docs
+                    .map((doc, index) => {
+                        const documentId = Number(doc.document_id ?? doc.id);
+                        const checked = selectedIds.has(documentId);
+                        const filename = escapeComposeHtml(
+                            doc.filename || doc.document_name || `document-${index + 1}`
+                        );
+                        const contentType = escapeComposeHtml(doc.content_type || "");
+                        const sizeBytes = Number(doc.size_bytes ?? 0);
+
+                        return `
+                            <label class="compose-source-file-item">
+                                <input
+                                    type="checkbox"
+                                    class="compose-source-file-checkbox"
+                                    data-compose-source-doc-id="${documentId}"
+                                    ${checked ? "checked" : ""}
+                                    ${state.composeDraft.isSending ? "disabled" : ""}
+                                />
+                                <span class="compose-source-file-meta">
+                                    <span class="compose-source-file-name" title="${filename}">
+                                        ${filename}
+                                    </span>
+                                    <span class="compose-source-file-details">
+                                        ${contentType ? `${contentType}` : ""}
+                                        ${sizeBytes > 0 ? `${contentType ? " • " : ""}${sizeBytes} байт` : ""}
+                                    </span>
+                                </span>
+                            </label>
+                        `;
+                    })
+                    .join("")}
+            </div>
+        `;
+    }
+
     function renderCompose(deps) {
         const { state } = deps;
         ensureComposeState(state);
@@ -84,6 +154,12 @@
 
         const draft = state.composeDraft;
         const isVisible = draft.isOpen === true;
+
+        const isForwardMode = draft.mode === "forward";
+        const titleText = isForwardMode ? "Переслать письмо" : "Новое письмо";
+        const submitText = draft.isSending
+            ? (isForwardMode ? "Пересылка..." : "Отправка...")
+            : (isForwardMode ? "Переслать" : "Отправить");
 
         root.innerHTML = `
             <div class="compose-overlay ${isVisible ? "is-open" : ""}" ${isVisible ? "" : "hidden"}>
@@ -95,7 +171,7 @@
                     aria-labelledby="compose-title"
                 >
                     <div class="compose-header">
-                        <h2 id="compose-title" class="compose-title">Новое письмо</h2>
+                        <h2 id="compose-title" class="compose-title">${titleText}</h2>
                         <button
                             type="button"
                             class="compose-close-btn"
@@ -132,6 +208,7 @@
                                 placeholder="Тема письма"
                                 value="${escapeComposeHtml(draft.subject)}"
                                 ${draft.isSending ? "disabled" : ""}
+                                ${isForwardMode ? "readonly" : ""}
                             />
                         </label>
 
@@ -145,6 +222,22 @@
                                 ${draft.isSending ? "disabled" : ""}
                             >${escapeComposeHtml(draft.body)}</textarea>
                         </label>
+
+                        ${
+                            isForwardMode
+                                ? `
+                                    <div class="compose-field">
+                                        <div class="compose-attachments-header">
+                                            <span class="compose-label">Вложения исходного письма</span>
+                                        </div>
+
+                                        <div class="compose-source-files-container">
+                                            ${renderForwardSourceAttachments(state)}
+                                        </div>
+                                    </div>
+                                `
+                                : ""
+                        }
 
                         <div class="compose-field">
                             <div class="compose-attachments-header">
@@ -183,7 +276,7 @@
                             class="compose-primary-btn"
                             ${draft.isSending ? "disabled" : ""}
                         >
-                            ${draft.isSending ? "Отправка..." : "Отправить"}
+                            ${submitText}
                         </button>
                     </div>
                 </div>
@@ -197,7 +290,10 @@
         const { state } = deps;
         ensureComposeState(state);
 
+        resetComposeDraft(state);
+
         state.composeDraft.isOpen = true;
+        state.composeDraft.mode = "new";
 
         if (typeof preset.to === "string") {
             state.composeDraft.to = preset.to;
@@ -208,6 +304,53 @@
         if (typeof preset.body === "string") {
             state.composeDraft.body = preset.body;
         }
+
+        renderCompose(deps);
+
+        const toInput = document.getElementById("compose-to-input");
+        if (toInput) {
+            toInput.focus();
+        }
+    }
+
+    async function openForwardCompose(deps, payload = {}) {
+        const { state } = deps;
+        ensureComposeState(state);
+
+        const emailId = Number(payload?.emailId);
+        if (Number.isNaN(emailId)) {
+            throw new Error("Некорректный идентификатор письма");
+        }
+
+        const loader =
+            payload.loadForwardDraft ||
+            deps.loadForwardDraft ||
+            loadForwardDraft;
+
+        if (typeof loader !== "function") {
+            throw new Error("Метод загрузки черновика пересылки не подключен");
+        }
+
+        const draftData = await loader(emailId);
+        const attachments = Array.isArray(draftData?.attachments)
+            ? draftData.attachments
+            : [];
+
+        resetComposeDraft(state);
+
+        state.composeDraft.isOpen = true;
+        state.composeDraft.mode = "forward";
+        state.composeDraft.emailId = emailId;
+        state.composeDraft.to = typeof draftData?.to === "string" ? draftData.to : "";
+        state.composeDraft.subject =
+            typeof draftData?.subject === "string" ? draftData.subject : "";
+        state.composeDraft.body = typeof draftData?.body === "string" ? draftData.body : "";
+        state.composeDraft.files = [];
+        state.composeDraft.sourceAttachments = attachments;
+        state.composeDraft.selectedDocumentIds = attachments
+            .filter((item) => item?.selected !== false)
+            .map((item) => Number(item.document_id ?? item.id))
+            .filter((id) => !Number.isNaN(id));
 
         renderCompose(deps);
 
@@ -271,6 +414,24 @@
         renderCompose(deps);
     }
 
+    function toggleForwardSourceAttachment(documentId, checked, deps) {
+        const { state } = deps;
+        ensureComposeState(state);
+
+        const normalizedId = Number(documentId);
+        if (Number.isNaN(normalizedId)) return;
+
+        const selected = new Set(state.composeDraft.selectedDocumentIds || []);
+
+        if (checked) {
+            selected.add(normalizedId);
+        } else {
+            selected.delete(normalizedId);
+        }
+
+        state.composeDraft.selectedDocumentIds = Array.from(selected);
+    }
+
     function parseRecipients(value) {
         return String(value || "")
             .split(",")
@@ -291,21 +452,45 @@
         }
 
         return {
+            mode: state.composeDraft.mode === "forward" ? "forward" : "new",
+            emailId:
+                state.composeDraft.emailId == null
+                    ? null
+                    : Number(state.composeDraft.emailId),
             recipients,
             subject: String(state.composeDraft.subject || "").trim(),
             body: String(state.composeDraft.body || "").trim(),
+            selectedDocumentIds: Array.isArray(state.composeDraft.selectedDocumentIds)
+                ? state.composeDraft.selectedDocumentIds
+                      .map((id) => Number(id))
+                      .filter((id) => !Number.isNaN(id))
+                : [],
         };
     }
 
     function buildComposeFormData(state) {
         ensureComposeState(state);
 
-        const { recipients, subject, body } = validateComposeDraft(state);
+        const { mode, emailId, recipients, subject, body, selectedDocumentIds } =
+            validateComposeDraft(state);
 
         const formData = new FormData();
         formData.append("to", recipients.join(","));
-        formData.append("subject", subject);
         formData.append("body", body);
+
+        if (mode === "new") {
+            formData.append("subject", subject);
+        }
+
+        if (mode === "forward") {
+            if (emailId == null || Number.isNaN(Number(emailId))) {
+                throw new Error("Не удалось определить письмо для пересылки");
+            }
+
+            selectedDocumentIds.forEach((documentId) => {
+                formData.append("include_document_ids", String(documentId));
+            });
+        }
 
         for (const file of state.composeDraft.files) {
             formData.append("attachments", file, file.name);
@@ -321,17 +506,33 @@
         if (state.composeDraft.isSending) return;
 
         try {
-            if (typeof sendNewEmail !== "function") {
-                throw new Error("Метод отправки письма не подключен");
-            }
-
-            buildComposeFormData(state);
+            const draftMeta = validateComposeDraft(state);
+            const formData = buildComposeFormData(state);
 
             state.composeDraft.isSending = true;
             renderCompose(deps);
 
-            const formData = buildComposeFormData(state);
-            await sendNewEmail(formData);
+            if (draftMeta.mode === "forward") {
+                const sender =
+                    deps.sendForwardEmail ||
+                    sendForwardEmail;
+
+                if (typeof sender !== "function") {
+                    throw new Error("Метод пересылки письма не подключен");
+                }
+
+                await sender(draftMeta.emailId, formData);
+            } else {
+                const sender =
+                    deps.sendNewEmail ||
+                    sendNewEmail;
+
+                if (typeof sender !== "function") {
+                    throw new Error("Метод отправки письма не подключен");
+                }
+
+                await sender(formData);
+            }
 
             closeCompose(deps, { clear: true });
         } catch (e) {
@@ -448,6 +649,17 @@
 
                 removeComposeFile(index, deps);
             });
+
+            overlay.addEventListener("change", (event) => {
+                const checkbox = event.target.closest("[data-compose-source-doc-id]");
+                if (!checkbox) return;
+                if (state.composeDraft.isSending) return;
+
+                const documentId = Number(checkbox.dataset.composeSourceDocId);
+                if (Number.isNaN(documentId)) return;
+
+                toggleForwardSourceAttachment(documentId, checkbox.checked, deps);
+            });
         }
     }
 
@@ -475,10 +687,12 @@
         ensureComposeState,
         renderCompose,
         openCompose,
+        openForwardCompose,
         closeCompose,
         resetComposeDraft,
         addComposeFiles,
         removeComposeFile,
+        toggleForwardSourceAttachment,
         validateComposeDraft,
         buildComposeFormData,
         submitCompose,

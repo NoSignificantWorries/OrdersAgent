@@ -198,6 +198,68 @@
         return resp;
     }
 
+    async function loadForwardDraft(emailId) {
+        const resp = await fetch(`/api/emails/${emailId}/forward-draft`, {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            credentials: "same-origin",
+        });
+
+        if (!resp.ok) {
+            let message = "Не удалось получить черновик пересылки";
+
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    message = data.detail;
+                }
+            } catch (_) {
+                try {
+                    const text = await resp.text();
+                    if (text?.trim()) {
+                        message = text.trim();
+                    }
+                } catch (_) {}
+            }
+
+            throw new Error(message);
+        }
+
+        return await resp.json();
+    }
+
+    async function sendForwardEmail(emailId, formData) {
+        const resp = await fetch(`/api/emails/${emailId}/forward`, {
+            method: "POST",
+            credentials: "same-origin",
+            body: formData,
+        });
+
+        if (!resp.ok) {
+            let message = "Не удалось переслать письмо";
+
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    message = data.detail;
+                }
+            } catch (_) {
+                try {
+                    const text = await resp.text();
+                    if (text?.trim()) {
+                        message = text.trim();
+                    }
+                } catch (_) {}
+            }
+
+            throw new Error(message);
+        }
+
+        window.MailPage?.showMailToast?.("Письмо переслано");
+
+        return resp;
+    }
+
     window.MailApi = {
         downloadBlob,
         downloadEmailAttachments,
@@ -205,5 +267,7 @@
         downloadAvailableResultDocuments,
         loadEmailsFromApi,
         sendNewEmail,
+        loadForwardDraft,
+        sendForwardEmail,
     };
 })();

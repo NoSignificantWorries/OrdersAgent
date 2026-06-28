@@ -21,6 +21,8 @@ const {
     downloadAvailableResultDocuments,
     loadEmailsFromApi: loadEmailsFromApiFromApiModule,
     sendNewEmail,
+    loadForwardDraft,
+    sendForwardEmail,
 } = window.MailApi;
 
 const {
@@ -63,6 +65,7 @@ const {
     ensureComposeState: ensureComposeStateFromModule,
     renderCompose: renderComposeFromModule,
     openCompose: openComposeFromModule,
+    openForwardCompose: openForwardComposeFromModule,
     closeCompose: closeComposeFromModule,
     isComposeInputProtected: isComposeInputProtectedFromModule,
     initCompose: initComposeFromModule,
@@ -87,10 +90,14 @@ const openReplyForms = new Set();
 const expandedThreads = new Set();
 let composeDraft = {
     isOpen: false,
+    mode: "new",
+    emailId: null,
     to: "",
     subject: "",
     body: "",
     files: [],
+    sourceAttachments: [],
+    selectedDocumentIds: [],
     isSending: false,
     isFocused: false,
     isComposing: false,
@@ -537,10 +544,23 @@ function renderCompose() {
     });
 }
 
+async function openForwardCompose(payload) {
+    return openForwardComposeFromModule(
+        {
+            state: getMailComposeState(),
+            loadForwardDraft,
+            renderCompose,
+        },
+        payload,
+    );
+}
+
 function initCompose() {
     return initComposeFromModule({
         state: getMailComposeState(),
         sendNewEmail,
+        loadForwardDraft,
+        sendForwardEmail,
     });
 }
 
@@ -741,4 +761,5 @@ function initMailPage(config) {
 window.MailPage = {
     initMailPage,
     showMailToast,
+    openForwardCompose,
 };

@@ -77,6 +77,31 @@ type SendEmailRequest struct {
     Attachments []SendAttachment
 }
 
+type ForwardAttachment struct {
+	DocumentID  int64  `json:"document_id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	SizeBytes   int64  `json:"size_bytes"`
+	Selected    bool   `json:"selected"`
+}
+
+type ForwardDraft struct {
+	EmailID     int64               `json:"email_id"`
+	Mailbox     string              `json:"mailbox"`
+	To          string              `json:"to"`
+	Subject     string              `json:"subject"`
+	Body        string              `json:"body"`
+	Attachments []ForwardAttachment `json:"attachments"`
+}
+
+type ForwardEmailRequest struct {
+	EmailID            int64
+	To                 string
+	Body               string
+	IncludeDocumentIDs []int64
+	Attachments        []SendAttachment
+}
+
 // DBRepo — пишет метаданные в Postgres и файлы в MinIO.
 type DBRepo struct {
 	db    *api.DB
@@ -156,6 +181,50 @@ func parseRecipients(raw string) ([]string, error) {
     }
 
     return recipients, nil
+}
+
+func buildForwardSubject(subject string) string {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return "Fwd:"
+	}
+	if strings.HasPrefix(strings.ToLower(subject), "fwd:") {
+		return subject
+	}
+	return "Fwd: " + subject
+}
+
+func buildForwardBody(ctx *EmailReplyContext) string {
+	var sb strings.Builder
+
+	sb.WriteString("\n\n")
+	sb.WriteString("---------- Пересылаемое сообщение ----------\n")
+
+	if strings.TrimSpace(ctx.EmailFrom) != "" {
+		sb.WriteString("От: ")
+		sb.WriteString(strings.TrimSpace(ctx.EmailFrom))
+		sb.WriteString("\n")
+	}
+
+	if !ctx.EmailDate.IsZero() {
+		sb.WriteString("Дата: ")
+		sb.WriteString(ctx.EmailDate.Format(time.RFC1123Z))
+		sb.WriteString("\n")
+	}
+
+	if strings.TrimSpace(ctx.EmailSubject) != "" {
+		sb.WriteString("Тема: ")
+		sb.WriteString(strings.TrimSpace(ctx.EmailSubject))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+
+	rawBody := strings.ReplaceAll(ctx.RawEmail, "\r\n", "\n")
+	rawBody = strings.ReplaceAll(rawBody, "\r", "\n")
+	sb.WriteString(rawBody)
+
+	return sb.String()
 }
 
 // NewDBRepo — создаёт репозиторий с Postgres и MinIO.
@@ -545,6 +614,45 @@ func GetEmailReplyContext(db *api.DB, emailID int64) (*EmailReplyContext, error)
     }, nil
 }
 
+func BuildForwardDraft(db *api.DB, emailID int64) (*ForwardDraft, error) {
+	ctx, err := GetEmailReplyContext(db, emailID)
+	if err != nil {
+		return nil, err
+	}
+
+	docs, err := db.ListDocumentsByEmailID(context.Background(), emailID)
+	if err != nil {
+		return nil, fmt.Errorf("list documents by email: %w", err)
+	}
+
+	attachments := make([]ForwardAttachment, 0, len(docs))
+	for _, doc := range docs {
+		attachments = append(attachments, ForwardAttachment{
+			DocumentID:  doc.ID,
+			Filename:    doc.Filename,
+			ContentType: doc.ContentType,
+			SizeBytes:   doc.SizeBytes,
+			Selected:    true,
+		})
+	}
+
+	return &ForwardDraft{
+		EmailID:     ctx.EmailID,
+		Mailbox:     ctx.Mailbox,
+		To:          "",
+		Subject:     buildForwardSubject(ctx.EmailSubject),
+		Body:        buildForwardBody(ctx),
+		Attachments: attachments,
+	}, nil
+}
+
+func sumSMTPAttachmentsSize(items []mailsmtp.Attachment) int {
+	total := 0
+	for _, item := range items {
+		total += len(item.Data)
+	}
+	return total
+}
 
 // ReplyToEmail — формирует и отправляет ответ на письмо через SMTP.
 func ReplyToEmail(db *api.DB, smtpClient *mailsmtp.Client, imapCfg *config.Config, req ReplyToEmailRequest) error {
@@ -719,4 +827,119 @@ func SendEmail(db *api.DB, smtpClient *mailsmtp.Client, imapCfg *config.Config, 
     }(raw, authData)
 
     return nil
+}
+
+func ForwardEmail(db *api.DB, repo *DBRepo, smtpClient *mailsmtp.Client, imapCfg *config.Config, req ForwardEmailRequest) error {
+	if repo == nil {
+		return fmt.Errorf("repo is nil")
+	}
+	if req.EmailID <= 0 {
+		return fmt.Errorf("email id is invalid")
+	}
+
+	toRaw := strings.TrimSpace(req.To)
+	if toRaw == "" {
+		return fmt.Errorf("to is empty")
+	}
+
+	body := strings.TrimSpace(req.Body)
+	if body == "" {
+		return fmt.Errorf("body is empty")
+	}
+
+	ctx, err := GetEmailReplyContext(db, req.EmailID)
+	if err != nil {
+		return err
+	}
+
+	authData, err := GetUserMailAuth(db, ctx.UserID)
+	if err != nil {
+		return fmt.Errorf("get user mail auth: %w", err)
+	}
+
+	recipients, err := parseRecipients(toRaw)
+	if err != nil {
+		return fmt.Errorf("parse recipients: %w", err)
+	}
+
+	subject := buildForwardSubject(ctx.EmailSubject)
+
+	selectedDocs, err := db.ListDocumentsByIDsForEmail(context.Background(), req.EmailID, req.IncludeDocumentIDs)
+	if err != nil {
+		return fmt.Errorf("list selected documents: %w", err)
+	}
+
+	smtpAttachments := make([]mailsmtp.Attachment, 0, len(selectedDocs)+len(req.Attachments))
+
+	for _, doc := range selectedDocs {
+		data, err := repo.store.Download(context.Background(), doc.MinioObjectKey)
+		if err != nil {
+			return fmt.Errorf("download attachment document_id=%d: %w", doc.ID, err)
+		}
+
+		smtpAttachments = append(smtpAttachments, mailsmtp.Attachment{
+			Filename:    doc.Filename,
+			ContentType: doc.ContentType,
+			Data:        data,
+		})
+	}
+
+	for _, att := range req.Attachments {
+		smtpAttachments = append(smtpAttachments, mailsmtp.Attachment{
+			Filename:    att.Filename,
+			ContentType: att.ContentType,
+			Data:        att.Data,
+		})
+	}
+
+	const maxTotalAttachmentsSize = 25 << 20 // 25 MB
+	if sumSMTPAttachmentsSize(smtpAttachments) > maxTotalAttachmentsSize {
+		return fmt.Errorf("вес превышен: общий вес письма выше 25МБ")
+	}
+
+	headers := map[string]string{
+		"From":         authData.Email,
+		"To":           strings.Join(recipients, ", "),
+		"Subject":      subject,
+		"Date":         time.Now().UTC().Format(time.RFC1123Z),
+		"MIME-Version": "1.0",
+		"Content-Type": "text/plain; charset=UTF-8",
+	}
+
+	auth := mailsmtp.AuthXOAuth2(authData.Email, authData.AccessToken)
+
+	var raw []byte
+
+	if len(smtpAttachments) == 0 {
+		raw, err = smtpClient.SendPlainText(
+			authData.Email,
+			recipients,
+			headers,
+			body,
+			auth,
+		)
+		if err != nil {
+			return fmt.Errorf("send forward smtp: %w", err)
+		}
+	} else {
+		raw, err = smtpClient.SendWithAttachments(
+			authData.Email,
+			recipients,
+			headers,
+			body,
+			smtpAttachments,
+			auth,
+		)
+		if err != nil {
+			return fmt.Errorf("send forward smtp with attachments: %w", err)
+		}
+	}
+
+	go func(rawMsg []byte, auth *UserMailAuth) {
+		if err := appendToSent(rawMsg, auth, imapCfg); err != nil {
+			fmt.Printf("append to Sent failed: %v\n", err)
+		}
+	}(raw, authData)
+
+	return nil
 }

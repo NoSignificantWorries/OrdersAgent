@@ -62,6 +62,10 @@ func main() {
 	}
 
 	repo := storage.NewDBRepo(db, store)
+	dbRepo, ok := repo.(*storage.DBRepo)
+	if !ok {
+		log.Fatalf("repo type assertion to *storage.DBRepo failed")
+	}
 
 	smtpClient := mailsmtp.NewClient(mailsmtp.Config{
 		Host: "smtp.yandex.ru",
@@ -81,27 +85,61 @@ func main() {
 	})
 
 	replyMux.HandleFunc("/emails/", func(w http.ResponseWriter, r *http.Request) {
+		// if r.Method != http.MethodPost {
+		// 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		// 	return
+		// }
+
+		path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/emails/"), "/")
+        parts := strings.Split(path, "/")
+
+        const maxRequestBodySize = 30 << 20 // 30 MB
+        r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+        contentType := r.Header.Get("Content-Type")
+
+		if len(parts) == 2 && parts[1] == "forward-draft" {
+            if r.Method != http.MethodGet && r.Method != http.MethodPost {
+                http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+                return
+            }
+
+            emailID, err := strconv.ParseInt(parts[0], 10, 64)
+            if err != nil || emailID <= 0 {
+                writeJSONError(w, http.StatusBadRequest, "invalid email id")
+                return
+            }
+
+            draft, err := storage.BuildForwardDraft(db, emailID)
+            if err != nil {
+                log.Printf("forward draft failed | email_id=%d err=%v", emailID, err)
+                writeJSONError(w, http.StatusInternalServerError, "failed to build forward draft")
+                return
+            }
+
+            w.Header().Set("Content-Type", "application/json; charset=utf-8")
+            if err := json.NewEncoder(w).Encode(draft); err != nil {
+                log.Printf("forward draft encode failed | email_id=%d err=%v", emailID, err)
+            }
+            return
+        }
+
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
 
-		path := strings.TrimPrefix(r.URL.Path, "/emails/")
-		parts := strings.Split(path, "/")
-
-		contentType := r.Header.Get("Content-Type")
-
-		if strings.HasPrefix(contentType, "multipart/form-data") {
-			if err := r.ParseMultipartForm(25 << 20); err != nil {
-				http.Error(w, "invalid multipart form", http.StatusBadRequest)
-				return
-			}
-		} else {
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "invalid form", http.StatusBadRequest)
-				return
-			}
-		}
+        if strings.HasPrefix(contentType, "multipart/form-data") {
+            if err := r.ParseMultipartForm(25 << 20); err != nil {
+                http.Error(w, "invalid multipart form", http.StatusBadRequest)
+                return
+            }
+        } else {
+            if err := r.ParseForm(); err != nil {
+                http.Error(w, "invalid form", http.StatusBadRequest)
+                return
+            }
+        }
 
 		const maxAttachmentsCount = 10
 		const maxAttachmentSize = 10 << 20 // 10 MB
@@ -162,6 +200,36 @@ func main() {
 			}
 
 			return attachments, nil
+		}
+
+		readIncludeDocumentIDs := func() ([]int64, error) {
+			rawValues := r.Form["include_document_ids"]
+			if len(rawValues) == 0 {
+				return []int64{}, nil
+			}
+
+			ids := make([]int64, 0, len(rawValues))
+			seen := make(map[int64]struct{})
+
+			for _, raw := range rawValues {
+				raw = strings.TrimSpace(raw)
+				if raw == "" {
+					continue
+				}
+
+				id, err := strconv.ParseInt(raw, 10, 64)
+				if err != nil || id <= 0 {
+					return nil, fmt.Errorf("invalid include_document_ids")
+				}
+
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				seen[id] = struct{}{}
+				ids = append(ids, id)
+			}
+
+			return ids, nil
 		}
 
 		if len(parts) == 1 && parts[0] == "send" {
@@ -246,6 +314,61 @@ func main() {
 			}); err != nil {
 				log.Printf("reply send failed | email_id=%d err=%v", emailID, err)
 				http.Error(w, "failed to send reply", http.StatusInternalServerError)
+				return
+			}
+
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		if len(parts) == 2 && parts[1] == "forward" {
+			emailID, err := strconv.ParseInt(parts[0], 10, 64)
+			if err != nil || emailID <= 0 {
+				http.Error(w, "invalid email id", http.StatusBadRequest)
+				return
+			}
+
+			to := strings.TrimSpace(r.FormValue("to"))
+			body := strings.TrimSpace(r.FormValue("body"))
+
+			if to == "" {
+				http.Error(w, "to is empty", http.StatusBadRequest)
+				return
+			}
+			if body == "" {
+				http.Error(w, "body is empty", http.StatusBadRequest)
+				return
+			}
+
+			includeDocumentIDs, err := readIncludeDocumentIDs()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			attachments, err := readAttachments()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			log.Printf(
+				"forward send start | email_id=%d to=%q include_docs=%d new_attachments=%d",
+				emailID,
+				to,
+				len(includeDocumentIDs),
+				len(attachments),
+			)
+
+			if err := storage.ForwardEmail(db, dbRepo, smtpClient, imapCfg, storage.ForwardEmailRequest{
+				EmailID:            emailID,
+				To:                 to,
+				Body:               body,
+				IncludeDocumentIDs: includeDocumentIDs,
+				Attachments:        attachments,
+			}); err != nil {
+				log.Printf("forward send failed | email_id=%d err=%v", emailID, err)
+				http.Error(w, "failed to forward email", http.StatusInternalServerError)
 				return
 			}
 
