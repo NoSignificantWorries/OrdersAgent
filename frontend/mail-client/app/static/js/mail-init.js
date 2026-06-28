@@ -150,6 +150,18 @@
         document.addEventListener("DOMContentLoaded", async () => {
             window.MAILPAGECONFIG = pageConfig;
 
+            // ===== ЕДИНСТВЕННОЕ ОБЪЯВЛЕНИЕ ПЕРЕМЕННЫХ =====
+            const statusSelect = document.getElementById("status-filter-select");
+            const classSelect = document.getElementById("class-filter-select");
+            const sortNewestBtn = document.getElementById("sort-newest-btn");
+            const sortOldestBtn = document.getElementById("sort-oldest-btn");
+            // =============================================
+
+            // Загружаем фильтры из localStorage и применяем к селектам
+            loadFilters();
+            if (statusSelect) statusSelect.value = currentStatusFilter;
+            if (classSelect) classSelect.value = currentClassFilter;
+
             state.selectedEmailId = null;
 
             const emailView = document.getElementById("emailView");
@@ -160,6 +172,7 @@
 
             await loadEmailsFromApi();
             renderEmailList();
+            renderPagination();
             updateUnreadCount();
             initCompose();
 
@@ -205,6 +218,7 @@
             if (searchInput) {
                 searchInput.addEventListener("input", (e) => {
                     state.currentSearchTerm = e.target.value;
+                    currentPage = 0;
                     renderEmailList();
                     updateSearchClearButton();
                 });
@@ -226,10 +240,6 @@
             const filterPanel = document.getElementById("filter-panel");
             const applyBtn = document.getElementById("apply-filters-btn");
             const closeFilter = document.getElementById("close-filter-panel");
-            const statusSelect = document.getElementById("status-filter-select");
-            const classSelect = document.getElementById("class-filter-select");
-            const sortNewestBtn = document.getElementById("sort-newest-btn");
-            const sortOldestBtn = document.getElementById("sort-oldest-btn");
 
             function openFilterPanel() {
                 if (!filterPanel) return;
@@ -261,8 +271,14 @@
                     state.sortNewestFirst = sortNewestBtn.classList.contains("active");
                 }
 
-                renderEmailList();
-                closeFilterPanelFn();
+                saveFilters();
+
+                currentPage = 0;
+                loadEmailsFromApi(true).then(() => {
+                    renderEmailList();
+                    renderPagination();
+                    closeFilterPanelFn();
+                });
             }
 
             if (filterToggle) {

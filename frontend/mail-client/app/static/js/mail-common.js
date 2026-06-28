@@ -3,6 +3,11 @@ let emails = [];
 let selectedEmailId = null;
 let unreadCount = 0;
 
+// ========== ПАГИНАЦИЯ ==========
+const PAGE_SIZE = 100;         // фиксированный размер страницы
+let currentPage = 0;
+let totalEmails = 0;
+
 const {
     formatDate,
     formatDateTime,
@@ -74,6 +79,64 @@ let currentStatusFilter = "all";
 let currentClassFilter = "all";
 let sortNewestFirst = true;
 let currentSearchTerm = "";
+
+// ========== СОХРАНЕНИЕ ФИЛЬТРОВ ==========
+function saveFilters() {
+    localStorage.setItem('mail_filters', JSON.stringify({
+        status: currentStatusFilter,
+        class: currentClassFilter
+    }));
+    updateUrlFilters();
+}
+
+function loadFilters() {
+    // Сначала пытаемся прочитать из URL
+    const urlFilters = getFiltersFromUrl();
+    if (urlFilters.status !== 'all' || urlFilters.classFilter !== 'all') {
+        currentStatusFilter = urlFilters.status;
+        currentClassFilter = urlFilters.classFilter;
+        saveFilters();
+        return;
+    }
+
+    // Если в URL нет параметров, читаем из localStorage
+    const saved = localStorage.getItem('mail_filters');
+    if (saved) {
+        try {
+            const filters = JSON.parse(saved);
+            currentStatusFilter = filters.status || 'all';
+            currentClassFilter = filters.class || 'all';
+        } catch (e) {
+            console.warn('Не удалось загрузить фильтры', e);
+        }
+    }
+}
+
+loadFilters();
+
+// ========== РАБОТА С URL ПАРАМЕТРАМИ ==========
+function getFiltersFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('status') || 'all';
+    const classFilter = params.get('class') || 'all';
+    return { status, classFilter };
+}
+
+function updateUrlFilters() {
+    const params = new URLSearchParams(window.location.search);
+    if (currentStatusFilter && currentStatusFilter !== 'all') {
+        params.set('status', currentStatusFilter);
+    } else {
+        params.delete('status');
+    }
+    if (currentClassFilter && currentClassFilter !== 'all') {
+        params.set('class', currentClassFilter);
+    } else {
+        params.delete('class');
+    }
+    const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+    window.history.replaceState({}, '', newUrl);
+}
 
 let isMaterialInputComposing = false;
 let pendingSilentRefresh = false;
@@ -281,16 +344,142 @@ function normalizeApiItem(item, idx) {
 }
 
 
-// ========== ЗАГРУЗКА ПИСЕМ ИЗ API ==========
+// ========== ЗАГРУЗКА ПИСЕМ ИЗ API (С ПАГИНАЦИЕЙ) ==========
 async function loadEmailsFromApi(showLoadingState = true) {
-    const result = await loadEmailsFromApiFromApiModule(
-        showLoadingState,
-        normalizeApiItem,
-    );
+    const cfg = window.MAILPAGECONFIG || {};
+    const baseUrl = cfg.apiUrl || "/api/queue";
+    const url = new URL(baseUrl, window.location.origin);
+    url.searchParams.set('offset', currentPage * PAGE_SIZE);
+    url.searchParams.set('limit', PAGE_SIZE);
 
-    emails = result.emails || [];
-    recalculateUnreadCount();
-    return result.ok;
+    // Добавляем фильтры, если они не равны 'all'
+    if (currentStatusFilter && currentStatusFilter !== 'all') {
+        url.searchParams.set('status', currentStatusFilter);
+    }
+    if (currentClassFilter && currentClassFilter !== 'all') {
+        url.searchParams.set('class_filter', currentClassFilter);
+    }
+
+    const listEl = document.getElementById("emailsContainer");
+    const viewEl = document.getElementById("emailView");
+    const countSpan = document.getElementById("email-count-display");
+
+    try {
+        if (showLoadingState) {
+            if (countSpan) countSpan.textContent = "Загрузка...";
+            if (listEl) {
+                listEl.innerHTML = `<div class="email-placeholder" style="padding:20px;text-align:center;">Загрузка писем...</div>`;
+            }
+        }
+
+        const resp = await fetch(url, {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            credentials: "same-origin",
+        });
+
+        if (resp.status === 401) {
+            if (countSpan) countSpan.textContent = "Не авторизован";
+            if (listEl) {
+                listEl.innerHTML = `<div class="email-placeholder" style="padding:20px;text-align:center;">Нужно войти заново</div>`;
+            }
+            if (viewEl) {
+                viewEl.innerHTML = `<div class="email-placeholder">Нужно войти заново</div>`;
+            }
+            return false;
+        }
+
+        if (!resp.ok) {
+            if (countSpan) countSpan.textContent = "Ошибка";
+            if (listEl) {
+                listEl.innerHTML = `<div class="email-placeholder" style="padding:20px;text-align:center;">Ошибка загрузки писем</div>`;
+            }
+            if (viewEl) {
+                viewEl.innerHTML = `<div class="email-placeholder">Ошибка загрузки писем</div>`;
+            }
+            return false;
+        }
+
+        const data = await resp.json();
+        const items = Array.isArray(data.items) ? data.items : [];
+        totalEmails = data.total || 0;
+
+        emails = items.map((item, idx) => normalizeApiItem(item, idx));
+        recalculateUnreadCount();
+
+        // Обновляем счётчик
+        if (countSpan) {
+            const pageType = cfg.pageType || "inbox";
+            if (pageType === "archived") {
+                countSpan.textContent = `${emails.length} из ${totalEmails}`;
+            } else {
+                countSpan.textContent = `${emails.length} из ${totalEmails} (непрочитанных: ${unreadCount})`;
+            }
+        }
+
+        renderPagination(); // отрисовать элементы управления
+        return true;
+    } catch (e) {
+        console.error("Ошибка загрузки писем:", e);
+        const listEl = document.getElementById("emailsContainer");
+        const viewEl = document.getElementById("emailView");
+        const countSpan = document.getElementById("email-count-display");
+        if (countSpan) countSpan.textContent = "Ошибка";
+        if (listEl) {
+            listEl.innerHTML = `<div class="email-placeholder" style="padding:20px;text-align:center;">Ошибка загрузки писем</div>`;
+        }
+        if (viewEl) {
+            viewEl.innerHTML = `<div class="email-placeholder">Ошибка загрузки писем</div>`;
+        }
+        return false;
+    }
+}
+
+// ========== ПАГИНАЦИЯ: ОТРИСОВКА И ПЕРЕЗАГРУЗКА ==========
+function renderPagination() {
+    const container = document.getElementById('pagination-controls');
+    if (!container) return;
+    const totalPages = Math.ceil(totalEmails / PAGE_SIZE) || 1;
+    const current = currentPage + 1;
+
+    const prevBtn = document.getElementById('prev-page-btn');
+    const nextBtn = document.getElementById('next-page-btn');
+    const pageInfo = document.getElementById('page-info');
+
+    if (prevBtn) {
+        prevBtn.disabled = currentPage === 0;
+        prevBtn.onclick = () => {
+            if (currentPage > 0) {
+                currentPage--;
+                reloadPage();
+            }
+        };
+    }
+
+    if (nextBtn) {
+        nextBtn.disabled = currentPage >= totalPages - 1;
+        nextBtn.onclick = () => {
+            if (currentPage < totalPages - 1) {
+                currentPage++;
+                reloadPage();
+            }
+        };
+    }
+
+    if (pageInfo) {
+        pageInfo.textContent = `Страница ${current} из ${totalPages}`;
+    }
+}
+
+function reloadPage() {
+    loadEmailsFromApi(true).then(() => {
+        renderEmailList();
+        selectedEmailId = null;
+        const emailView = document.getElementById('emailView');
+        if (emailView) {
+            emailView.innerHTML = '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+        }
+    });
 }
 
 

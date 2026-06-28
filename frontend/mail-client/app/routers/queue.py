@@ -264,20 +264,28 @@ async def download_all_result_documents(task_id: int, request: Request):
 async def get_queue(
     request: Request,
     status: str = "",
-    limit: int | None = None,
+    limit: int = 100,
+    offset: int = 0,
     archived: bool | None = None,
+    class_filter: str = "",
 ):
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    if limit is not None:
-        if limit < 1:
-            limit = 1
-        if limit > 2000:
-            limit = 2000
+    if limit < 1:
+        limit = 100
+    if limit > 500:
+        limit = 500
 
-    items = await list_queue_for_user(user=user, status=status, limit=limit, archived=archived)
+    items, total = await list_queue_for_user(
+        user=user,
+        status=status,
+        limit=limit,
+        offset=offset,
+        archived=archived,
+        class_filter=class_filter,
+    )
 
     return {
         "user": {
@@ -285,8 +293,10 @@ async def get_queue(
             "email": user["email"],
             "role": user.get("role"),
         },
-        "count": len(items),
         "items": items,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
     }
 
 async def _download_document_by_id(

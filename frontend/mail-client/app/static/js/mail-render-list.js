@@ -47,28 +47,6 @@
             );
         }
 
-        if (state.currentStatusFilter !== "all") {
-            filtered = filtered.filter((e) => {
-                if (state.currentStatusFilter === "manual_review") {
-                    return e.status === "materials_review" || e.status === "ml_review";
-                }
-                return e.status === state.currentStatusFilter;
-            });
-        }
-
-        if (state.currentClassFilter !== "all") {
-            filtered = filtered.filter((e) => {
-                const decision = String(e.model_decision ?? "").trim().toLowerCase();
-                const isUndefinedClass = decision === "" || decision === "review";
-
-                if (state.currentClassFilter === "undefined_only") {
-                    return isUndefinedClass;
-                }
-
-                return decision === state.currentClassFilter && !isUndefinedClass;
-            });
-        }
-
         filtered.sort((a, b) => {
             const dateA = new Date(a.date);
             const dateB = new Date(b.date);
