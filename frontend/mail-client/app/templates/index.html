@@ -47,6 +47,16 @@
             <div class="header-right">
                 <span class="user-email">{{ user.email }}</span>
                 <span class="user-name">{{ user.name }}</span>
+                <button
+                    type="button"
+                    id="signature-settings-btn"
+                    class="header-icon-btn"
+                    aria-label="Настроить подпись"
+                    title="Настроить подпись"
+                    aria-haspopup="dialog"
+                >
+                    <span class="header-icon-symbol" aria-hidden="true">☰</span>
+                </button>
                 <a href="/logout" class="logout-btn">Выйти</a>
             </div>
         </header>
@@ -160,6 +170,7 @@
     </div>
 
     <div id="compose-root"></div>
+    <div id="signature-modal-root"></div>
 
     <div
         id="mail-toast"

@@ -13,6 +13,7 @@ from pathlib import Path
 from app.db import get_db_pool
 from app.routers import auth
 from app.services.queue import list_queue_for_user
+from app.services.users import get_user_signature, update_user_signature
 from app.cloud.minio import MinIOClient
 
 
@@ -53,6 +54,66 @@ class ForwardDraftResponse(BaseModel):
     subject: str = ""
     body: str = ""
     attachments: list[ForwardAttachmentItem] = Field(default_factory=list)
+
+class SignatureUpdatePayload(BaseModel):
+    signature: str = ""
+
+def _normalize_text(value: str | None) -> str:
+    return str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def _build_signature_block(signature: str | None) -> str:
+    normalized = _normalize_text(signature)
+    if not normalized:
+        return ""
+    return f"-- \n{normalized}"
+
+
+def append_signature_if_missing(body: str | None, signature: str | None) -> str:
+    normalized_body = _normalize_text(body)
+    signature_block = _build_signature_block(signature)
+
+    if not signature_block:
+        return normalized_body
+
+    if normalized_body.endswith(signature_block):
+        return normalized_body
+
+    if not normalized_body:
+        return signature_block
+
+    return f"{normalized_body}\n\n{signature_block}"
+
+@router.get("/me/signature")
+async def get_my_signature(request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    signature = await get_user_signature(user["id"])
+    return {"signature": str(signature or "")}
+
+
+@router.patch("/me/signature")
+async def update_my_signature_endpoint(
+    payload: SignatureUpdatePayload,
+    request: Request,
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    normalized_signature = _normalize_text(payload.signature)
+
+    saved_signature = await update_user_signature(
+        user_id=user["id"],
+        signature=normalized_signature,
+    )
+
+    return {
+        "ok": True,
+        "signature": str(saved_signature or ""),
+    }
 
 async def _load_document_bytes_from_storage(bucket_name: str, object_key: str) -> bytes:
     client = MinIOClient.get_client()
@@ -953,6 +1014,9 @@ async def reply_to_email(
 
     if not body.strip():
         raise HTTPException(status_code=400, detail="body is empty")
+    
+    signature = await get_user_signature(user["id"])
+    body = append_signature_if_missing(body, signature)
 
     pool = await get_db_pool()
 
@@ -1125,6 +1189,9 @@ async def forward_email(
 
     if not body.strip():
         raise HTTPException(status_code=400, detail="body is empty")
+    
+    signature = await get_user_signature(user["id"])
+    body = append_signature_if_missing(body, signature)
 
     pool = await get_db_pool()
 
@@ -1232,6 +1299,9 @@ async def send_email(
 
     if not body.strip():
         raise HTTPException(status_code=400, detail="body is empty")
+    
+    signature = await get_user_signature(user["id"])
+    body = append_signature_if_missing(body, signature)
 
     files = []
     try:

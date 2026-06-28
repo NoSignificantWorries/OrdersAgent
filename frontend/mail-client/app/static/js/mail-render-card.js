@@ -1,4 +1,19 @@
 (function () {
+    function getReplySignatureHelpers() {
+        const composeApi = window.MailCompose || {};
+
+        return {
+            appendSignatureIfMissing:
+                typeof composeApi.appendSignatureIfMissing === "function"
+                    ? composeApi.appendSignatureIfMissing
+                    : (body) => String(body || "").trim(),
+            ensureUserSignature:
+                typeof composeApi.ensureUserSignature === "function"
+                    ? composeApi.ensureUserSignature
+                    : async () => "",
+        };
+    }
+
     function getDisplayDocuments(email) {
         const docs = Array.isArray(email?.documents) ? email.documents : [];
         const seenNames = new Set();
@@ -336,6 +351,7 @@
         if (!emailView) return;
 
         const realEmailId = email.email_id || email.id;
+        const { appendSignatureIfMissing, ensureUserSignature } = getReplySignatureHelpers();
         const savedReplyDraft = state.replyDrafts?.get(realEmailId) || "";
         const shouldShowReplyForm = state.openReplyForms?.has(realEmailId) === true;
 
@@ -528,7 +544,18 @@
         const replyFilesList = document.getElementById("reply-files-list");
 
         if (replyBodyInput) {
-            replyBodyInput.value = savedReplyDraft;
+            const initialReplyBody = appendSignatureIfMissing(
+                savedReplyDraft,
+                state.userSignature || "",
+            );
+
+            replyBodyInput.value = initialReplyBody;
+
+            if (!state.replyDrafts) {
+                state.replyDrafts = new Map();
+            }
+            state.replyDrafts.set(realEmailId, initialReplyBody);
+
             bindReplyInputEvents({
                 input: replyBodyInput,
                 email,
@@ -664,11 +691,30 @@
         }
 
         if (replyToggleBtn && replyFormBlock && replyBodyInput) {
-            replyToggleBtn.addEventListener("click", () => {
-                state.openReplyForms?.add(realEmailId);
-                replyFormBlock.hidden = false;
-                replyToggleBtn.hidden = true;
-                replyBodyInput.focus();
+            replyToggleBtn.addEventListener("click", async () => {
+                try {
+                    await ensureUserSignature(state);
+
+                    const nextValue = appendSignatureIfMissing(
+                        replyBodyInput.value,
+                        state.userSignature || "",
+                    );
+
+                    replyBodyInput.value = nextValue;
+
+                    if (!state.replyDrafts) {
+                        state.replyDrafts = new Map();
+                    }
+                    state.replyDrafts.set(realEmailId, nextValue);
+
+                    state.openReplyForms?.add(realEmailId);
+                    replyFormBlock.hidden = false;
+                    replyToggleBtn.hidden = true;
+                    replyBodyInput.focus();
+                } catch (error) {
+                    console.error(error);
+                    alert(error.message || "Не удалось открыть форму ответа");
+                }
             });
         }
 
@@ -727,7 +773,20 @@
 
         if (replySendBtn && replyBodyInput) {
             replySendBtn.addEventListener("click", async () => {
-                const body = replyBodyInput.value.trim();
+                await ensureUserSignature(state);
+
+                const body = appendSignatureIfMissing(
+                    replyBodyInput.value,
+                    state.userSignature || "",
+                ).trim();
+
+                replyBodyInput.value = body;
+
+                if (!state.replyDrafts) {
+                    state.replyDrafts = new Map();
+                }
+                state.replyDrafts.set(realEmailId, body);
+
                 if (!body) {
                     alert("Введите текст ответа");
                     return;

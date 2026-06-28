@@ -97,3 +97,42 @@ async def update_user_mail_tokens(
             "email": row["email"],
             "mail_access_expires_at": row["mail_access_expires_at"],
         }
+    
+async def get_user_signature(user_id: int) -> str:
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT mail_signature
+            FROM users
+            WHERE id = $1
+            """,
+            user_id,
+        )
+
+        if not row:
+            raise ValueError(f"user not found: id={user_id}")
+
+        return row["mail_signature"] or ""
+
+
+async def update_user_signature(user_id: int, signature: str) -> str:
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE users
+            SET mail_signature = $1
+            WHERE id = $2
+            RETURNING mail_signature
+            """,
+            signature,
+            user_id,
+        )
+
+        if not row:
+            raise ValueError(f"user not found: id={user_id}")
+
+        return row["mail_signature"] or ""

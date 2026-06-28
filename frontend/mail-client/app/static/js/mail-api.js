@@ -260,6 +260,57 @@
         return resp;
     }
 
+    async function getMySignature() {
+        const response = await fetch("/api/me/signature", {
+            method: "GET",
+            headers: {
+                Accept: "application/json",
+            },
+            credentials: "same-origin",
+        });
+
+        if (!response.ok) {
+            let detail = "Не удалось загрузить подпись";
+            try {
+                const data = await response.json();
+                if (data && typeof data.detail === "string" && data.detail.trim()) {
+                    detail = data.detail.trim();
+                }
+            } catch (_) {}
+            throw new Error(detail);
+        }
+
+        const data = await response.json();
+        return String(data?.signature || "");
+    }
+
+    async function updateMySignature(signature) {
+        const response = await fetch("/api/me/signature", {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+            },
+            credentials: "same-origin",
+            body: JSON.stringify({
+                signature: String(signature || ""),
+            }),
+        });
+
+        if (!response.ok) {
+            let detail = "Не удалось сохранить подпись";
+            try {
+                const data = await response.json();
+                if (data && typeof data.detail === "string" && data.detail.trim()) {
+                    detail = data.detail.trim();
+                }
+            } catch (_) {}
+            throw new Error(detail);
+        }
+
+        return await response.json();
+    }
+
     window.MailApi = {
         downloadBlob,
         downloadEmailAttachments,
@@ -269,5 +320,7 @@
         sendNewEmail,
         loadForwardDraft,
         sendForwardEmail,
+        getMySignature,
+        updateMySignature,
     };
 })();

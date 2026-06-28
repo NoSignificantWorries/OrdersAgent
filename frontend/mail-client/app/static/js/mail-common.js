@@ -23,6 +23,8 @@ const {
     sendNewEmail,
     loadForwardDraft,
     sendForwardEmail,
+    getMySignature,
+    updateMySignature,
 } = window.MailApi;
 
 const {
@@ -69,6 +71,8 @@ const {
     closeCompose: closeComposeFromModule,
     isComposeInputProtected: isComposeInputProtectedFromModule,
     initCompose: initComposeFromModule,
+    appendSignatureIfMissing: appendSignatureIfMissingFromModule,
+    ensureUserSignature: ensureUserSignatureFromModule,
 } = window.MailCompose;
 
 const chatStorage = new Map();
@@ -104,6 +108,13 @@ let composeDraft = {
     isFileDialogOpen: false,
 };
 
+let userSignature = "";
+let signatureLoaded = false;
+
+let signatureModalOpen = false;
+let signatureModalSaving = false;
+let signatureDraft = "";
+
 let mailToastTimer = null;
 
 function showMailToast(message) {
@@ -121,6 +132,195 @@ function showMailToast(message) {
         toast.classList.remove("is-visible");
         toast.textContent = "";
     }, 2800);
+}
+
+function escapeSignatureHtml(value) {
+    return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function renderSignatureModal() {
+    const root = document.getElementById("signature-modal-root");
+
+    if (!root) return;
+
+    root.innerHTML = `
+        <div class="signature-modal-overlay ${signatureModalOpen ? "is-open" : ""}" ${signatureModalOpen ? "" : "hidden"}>
+            <div class="signature-modal-backdrop" data-signature-close="backdrop"></div>
+            <div
+                class="signature-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="signature-modal-title"
+            >
+                <div class="signature-modal-header">
+                    <h2 id="signature-modal-title" class="signature-modal-title">Подпись</h2>
+                    <button
+                        type="button"
+                        class="signature-modal-close-btn"
+                        data-signature-close="button"
+                        aria-label="Закрыть окно"
+                        title="Закрыть"
+                        ${signatureModalSaving ? "disabled" : ""}
+                    >
+                        ×
+                    </button>
+                </div>
+
+                <div class="signature-modal-body">
+                    <label for="signature-textarea" class="signature-modal-label">
+                        Текст подписи
+                    </label>
+                    <textarea
+                        id="signature-textarea"
+                        class="signature-modal-textarea"
+                        placeholder="Введите подпись, которая будет подставляться в письмо"
+                        ${signatureModalSaving ? "disabled" : ""}
+                    >${escapeSignatureHtml(signatureDraft)}</textarea>
+                    <div class="signature-modal-hint">
+                        Подпись будет автоматически добавляться в новые письма, ответы и пересылки.
+                    </div>
+                </div>
+
+                <div class="signature-modal-footer">
+                    <button
+                        type="button"
+                        id="signature-cancel-btn"
+                        class="signature-modal-secondary-btn"
+                        ${signatureModalSaving ? "disabled" : ""}
+                    >
+                        Отмена
+                    </button>
+                    <button
+                        type="button"
+                        id="signature-save-btn"
+                        class="signature-modal-primary-btn"
+                        ${signatureModalSaving ? "disabled" : ""}
+                    >
+                        ${signatureModalSaving ? "Сохранение..." : "Сохранить"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    bindSignatureModalEvents();
+}
+
+async function openSignatureModal() {
+    try {
+        if (!signatureLoaded) {
+            userSignature = await getMySignature();
+            signatureLoaded = true;
+        }
+
+        signatureDraft = userSignature || "";
+        signatureModalOpen = true;
+        renderSignatureModal();
+
+        const textarea = document.getElementById("signature-textarea");
+        if (textarea) {
+            textarea.focus();
+        }
+    } catch (error) {
+        console.error(error);
+        alert(error.message || "Не удалось загрузить подпись");
+    }
+}
+
+function closeSignatureModal() {
+    signatureModalOpen = false;
+    signatureModalSaving = false;
+    renderSignatureModal();
+}
+
+async function saveSignatureModal() {
+    const textarea = document.getElementById("signature-textarea");
+    if (!textarea) return;
+
+    signatureDraft = textarea.value;
+
+    try {
+        signatureModalSaving = true;
+        renderSignatureModal();
+
+        const result = await updateMySignature(signatureDraft);
+
+        userSignature = String(result?.signature || "");
+        signatureDraft = userSignature;
+        signatureLoaded = true;
+        signatureModalSaving = false;
+        signatureModalOpen = false;
+        renderSignatureModal();
+
+        showMailToast("Подпись сохранена");
+    } catch (error) {
+        console.error(error);
+        signatureModalSaving = false;
+        renderSignatureModal();
+        alert(error.message || "Не удалось сохранить подпись");
+    }
+}
+
+function bindSignatureModalEvents() {
+    const openBtn = document.getElementById("signature-settings-btn");
+    if (openBtn && !openBtn.dataset.signatureBound) {
+        openBtn.dataset.signatureBound = "true";
+        openBtn.addEventListener("click", () => {
+            openSignatureModal();
+        });
+    }
+
+    if (!document.body.dataset.signatureEscapeBound) {
+        document.body.dataset.signatureEscapeBound = "true";
+        document.addEventListener("keydown", handleSignatureModalEscape);
+    }
+
+    const overlay = document.querySelector(".signature-modal-overlay");
+    const cancelBtn = document.getElementById("signature-cancel-btn");
+    const saveBtn = document.getElementById("signature-save-btn");
+    const textarea = document.getElementById("signature-textarea");
+
+    if (textarea) {
+        textarea.addEventListener("input", (event) => {
+            signatureDraft = event.target.value;
+        });
+    }
+
+    if (cancelBtn) {
+        cancelBtn.addEventListener("click", () => {
+            if (signatureModalSaving) return;
+            closeSignatureModal();
+        });
+    }
+
+    if (saveBtn) {
+        saveBtn.addEventListener("click", async () => {
+            if (signatureModalSaving) return;
+            await saveSignatureModal();
+        });
+    }
+
+    if (overlay) {
+        overlay.addEventListener("click", (event) => {
+            const closeTrigger = event.target.closest("[data-signature-close]");
+            if (!closeTrigger) return;
+            if (signatureModalSaving) return;
+            closeSignatureModal();
+        });
+    }
+}
+
+function handleSignatureModalEscape(event) {
+    if (event.key !== "Escape") return;
+    if (!signatureModalOpen) return;
+    if (signatureModalSaving) return;
+
+    closeSignatureModal();
 }
 
 function normalizeHeaderValue(value) {
@@ -441,6 +641,18 @@ function getMailRenderCardState() {
         set isReplyFileDialogOpen(value) {
             isReplyFileDialogOpen = value;
         },
+        get userSignature() {
+            return userSignature;
+        },
+        set userSignature(value) {
+            userSignature = typeof value === "string" ? value : "";
+        },
+        get _signatureLoaded() {
+            return signatureLoaded;
+        },
+        set _signatureLoaded(value) {
+            signatureLoaded = value === true;
+        },
         replyDrafts,
         chatStorage,
         openReplyForms,
@@ -535,7 +747,33 @@ function getMailComposeState() {
         set pendingSilentRefresh(value) {
             pendingSilentRefresh = value;
         },
+        get userSignature() {
+            return userSignature;
+        },
+        set userSignature(value) {
+            userSignature = typeof value === "string" ? value : "";
+        },
+        get _signatureLoaded() {
+            return signatureLoaded;
+        },
+        set _signatureLoaded(value) {
+            signatureLoaded = value === true;
+        },
     };
+}
+
+function appendSignatureIfMissing(body, signature) {
+    if (typeof appendSignatureIfMissingFromModule === "function") {
+        return appendSignatureIfMissingFromModule(body, signature);
+    }
+    return String(body || "").trim();
+}
+
+async function ensureUserSignature(state = getMailComposeState()) {
+    if (typeof ensureUserSignatureFromModule === "function") {
+        return ensureUserSignatureFromModule(state);
+    }
+    return "";
 }
 
 function renderCompose() {
@@ -710,6 +948,18 @@ function getMailInitState() {
         set isReplyFileDialogOpen(value) {
             isReplyFileDialogOpen = value;
         },
+                get userSignature() {
+            return userSignature;
+        },
+        set userSignature(value) {
+            userSignature = typeof value === "string" ? value : "";
+        },
+        get _signatureLoaded() {
+            return signatureLoaded;
+        },
+        set _signatureLoaded(value) {
+            signatureLoaded = value === true;
+        },
     };
 }
 
@@ -737,7 +987,13 @@ function refreshEmailsSilently() {
     });
 }
 
+function initSignatureSettings() {
+    renderSignatureModal();
+}
+
 function initMailPage(config) {
+    initSignatureSettings();
+
     return initMailPageFromModule(config, {
         state: getMailInitState(),
         loadEmailsFromApi,
@@ -762,4 +1018,6 @@ window.MailPage = {
     initMailPage,
     showMailToast,
     openForwardCompose,
+    openSignatureModal,
+    initSignatureSettings,
 };

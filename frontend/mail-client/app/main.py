@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import os
 
 from app.config import settings
-from app.routers import auth, queue
+from app.routers import auth, queue, me
 
 app = FastAPI(
     title=settings.app_name,
@@ -18,6 +18,7 @@ templates = Jinja2Templates(directory="app/templates")
 
 app.include_router(auth.router)
 app.include_router(queue.router)
+app.include_router(me.router)
 
 
 @app.get("/", response_class=HTMLResponse)

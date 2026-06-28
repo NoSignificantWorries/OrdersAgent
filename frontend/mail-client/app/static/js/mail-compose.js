@@ -32,6 +32,10 @@
         state.composeDraft.isComposing = state.composeDraft.isComposing === true;
         state.composeDraft.isFileDialogOpen =
             state.composeDraft.isFileDialogOpen === true;
+        state.userSignature = typeof state.userSignature === "string"
+            ? state.userSignature
+            : "";
+        state._signatureLoaded = state._signatureLoaded === true;
     }
 
     function escapeComposeHtml(value) {
@@ -286,10 +290,67 @@
         bindComposeEvents(deps);
     }
 
-    function openCompose(deps, preset = {}) {
+    function normalizeSignature(value) {
+        return String(value || "")
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .trim();
+    }
+
+    function buildSignatureBlock(signature) {
+        const normalized = normalizeSignature(signature);
+        if (!normalized) return "";
+        return `-- \n${normalized}`;
+    }
+
+    function appendSignatureIfMissing(body, signature) {
+        const normalizedBody = String(body || "")
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .trim();
+
+        const signatureBlock = buildSignatureBlock(signature);
+        if (!signatureBlock) return normalizedBody;
+
+        if (normalizedBody.endsWith(signatureBlock)) {
+            return normalizedBody;
+        }
+
+        if (!normalizedBody) {
+            return signatureBlock;
+        }
+
+        return `${normalizedBody}\n\n${signatureBlock}`;
+    }
+
+    async function ensureUserSignature(state) {
+        if (state._signatureLoaded) {
+            return state.userSignature || "";
+        }
+
+        try {
+            const api = window.MailApi;
+            if (!api || typeof api.getMySignature !== "function") {
+                state.userSignature = "";
+                state._signatureLoaded = true;
+                return "";
+            }
+
+            state.userSignature = await api.getMySignature();
+            state._signatureLoaded = true;
+            return state.userSignature || "";
+        } catch (error) {
+            console.error("Failed to load user signature", error);
+            state.userSignature = "";
+            state._signatureLoaded = true;
+            return "";
+        }
+    }
+
+    async function openCompose(deps, preset = {}) {
         const { state } = deps;
         ensureComposeState(state);
-
+        await ensureUserSignature(state);
         resetComposeDraft(state);
 
         state.composeDraft.isOpen = true;
@@ -302,7 +363,15 @@
             state.composeDraft.subject = preset.subject;
         }
         if (typeof preset.body === "string") {
-            state.composeDraft.body = preset.body;
+            state.composeDraft.body = appendSignatureIfMissing(
+                preset.body,
+                state.userSignature,
+            );
+        } else {
+            state.composeDraft.body = appendSignatureIfMissing(
+                "",
+                state.userSignature,
+            );
         }
 
         renderCompose(deps);
@@ -316,6 +385,7 @@
     async function openForwardCompose(deps, payload = {}) {
         const { state } = deps;
         ensureComposeState(state);
+        await ensureUserSignature(state);
 
         const emailId = Number(payload?.emailId);
         if (Number.isNaN(emailId)) {
@@ -344,7 +414,10 @@
         state.composeDraft.to = typeof draftData?.to === "string" ? draftData.to : "";
         state.composeDraft.subject =
             typeof draftData?.subject === "string" ? draftData.subject : "";
-        state.composeDraft.body = typeof draftData?.body === "string" ? draftData.body : "";
+                state.composeDraft.body = appendSignatureIfMissing(
+            typeof draftData?.body === "string" ? draftData.body : "",
+            state.userSignature,
+        );
         state.composeDraft.files = [];
         state.composeDraft.sourceAttachments = attachments;
         state.composeDraft.selectedDocumentIds = attachments
@@ -474,9 +547,11 @@
         const { mode, emailId, recipients, subject, body, selectedDocumentIds } =
             validateComposeDraft(state);
 
+        const finalBody = appendSignatureIfMissing(body, state.userSignature);
+
         const formData = new FormData();
         formData.append("to", recipients.join(","));
-        formData.append("body", body);
+        formData.append("body", finalBody);
 
         if (mode === "new") {
             formData.append("subject", subject);
@@ -506,6 +581,11 @@
         if (state.composeDraft.isSending) return;
 
         try {
+            state.composeDraft.body = appendSignatureIfMissing(
+                state.composeDraft.body,
+                state.userSignature,
+            );
+            
             const draftMeta = validateComposeDraft(state);
             const formData = buildComposeFormData(state);
 
@@ -561,7 +641,14 @@
         const openBtn = document.getElementById("compose-open-btn");
         if (openBtn && !openBtn.dataset.composeBound) {
             openBtn.dataset.composeBound = "true";
-            openBtn.addEventListener("click", () => openCompose(deps));
+            openBtn.addEventListener("click", async () => {
+                try {
+                    await openCompose(deps);
+                } catch (error) {
+                    console.error(error);
+                    alert(error.message || "Не удалось открыть форму письма");
+                }
+            });
         }
 
         const overlay = document.querySelector(".compose-overlay");
@@ -698,5 +785,9 @@
         submitCompose,
         isComposeInputProtected,
         initCompose,
+        normalizeSignature,
+        buildSignatureBlock,
+        appendSignatureIfMissing,
+        ensureUserSignature,
     };
 })();
