@@ -34,6 +34,14 @@ func main() {
 			statusParam := strings.TrimSpace(r.URL.Query().Get("status"))
 			limitStr := r.URL.Query().Get("limit")
 
+			showCopiesStr := r.URL.Query().Get("showCopies")
+			showCopies := false
+			if showCopiesStr != "" {
+				if v, err := strconv.ParseBool(showCopiesStr); err == nil {
+					showCopies = v
+				}
+			}
+
 			limit := 50
 			if limitStr != "" {
 				if v, err := strconv.Atoi(limitStr); err == nil && v > 0 && v <= 500 {
@@ -47,7 +55,7 @@ func main() {
 			)
 
 			if statusParam == "" {
-				items, err = db.ListQueueEmails(ctx, limit)
+				items, err = db.ListQueueEmails(ctx, limit, showCopies)
 			} else {
 				rawStatuses := strings.Split(statusParam, ",")
 				statuses := make([]string, 0, len(rawStatuses))
@@ -59,9 +67,9 @@ func main() {
 				}
 
 				if len(statuses) == 0 {
-					items, err = db.ListQueueEmails(ctx, limit)
+					items, err = db.ListQueueEmails(ctx, limit, showCopies)
 				} else {
-					items, err = db.ListQueueEmailsByStatuses(ctx, statuses, limit)
+					items, err = db.ListQueueEmailsByStatuses(ctx, statuses, limit, showCopies)
 				}
 			}
 

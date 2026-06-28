@@ -258,7 +258,6 @@ func GetUserMailAuthByEmail(db *api.DB, mailbox string) (*UserMailAuth, error) {
 
 // SaveOrder — сохраняет письмо и вложения в MinIO, а метаданные — в emails/documents/tasks.
 func (r *DBRepo) SaveOrder(userID int64, order any) (err error) {
-	// ВАЖНО: теперь ждём значение parser.Email, а не *parser.Email
 	email, ok := order.(parser.Email)
 	if !ok {
 		return fmt.Errorf("SaveOrder: expected parser.Email, got %T", order)
@@ -324,6 +323,46 @@ func (r *DBRepo) SaveOrder(userID int64, order any) (err error) {
 		}
 	}
 
+    toHeaderValue := ""
+	if email.To != "" {
+		toHeaderValue = email.To
+	}
+
+	ccHeaderValue := ""
+	if email.Cc != "" {
+		ccHeaderValue = email.Cc
+	}
+
+	deliveredToValue := ""
+	if email.DeliveredTo != "" {
+		deliveredToValue = email.DeliveredTo
+	}
+
+	xOriginalToValue := ""
+	if email.XOriginalTo != "" {
+		xOriginalToValue = email.XOriginalTo
+	}
+
+	envelopeToValue := ""
+	if email.EnvelopeTo != "" {
+		envelopeToValue = email.EnvelopeTo
+	}
+
+	xEnvelopeToValue := ""
+	if email.XEnvelopeTo != "" {
+		xEnvelopeToValue = email.XEnvelopeTo
+	}
+
+	recipientEmailValue := ""
+	if email.RecipientEmail != "" {
+		recipientEmailValue = email.RecipientEmail
+	}
+
+	recipientSourceValue := ""
+	if email.RecipientSource != "" {
+		recipientSourceValue = email.RecipientSource
+	}
+
 	tx, err := r.db.Conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -347,6 +386,15 @@ func (r *DBRepo) SaveOrder(userID int64, order any) (err error) {
         EmailSubject:     emailSubjectValue,
         RawEmail:         rawEmailValue,
         EmailDate:        emailDateValue,
+        ToHeader:           toHeaderValue,
+		CcHeader:           ccHeaderValue,
+		DeliveredTo:        deliveredToValue,
+		XOriginalTo:        xOriginalToValue,
+		EnvelopeTo:         envelopeToValue,
+		XEnvelopeTo:        xEnvelopeToValue,
+		RecipientEmail:     recipientEmailValue,
+		RecipientSource:    recipientSourceValue,
+		IsPrimaryRecipient: email.IsPrimaryRecipient,
     })
 	if err != nil {
 		return fmt.Errorf("upsert email (user_id=%d, uid=%d): %w", userID, emailUID, err)
