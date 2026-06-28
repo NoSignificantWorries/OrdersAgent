@@ -15,7 +15,7 @@ type Client struct {
 	cfg  *config.Config
 }
 
-// Новый конструктор по OAuth2 (XOAUTH2).
+// Конструктор по OAuth2 (XOAUTH2).
 func NewOAuth(cfg *config.Config, email, accessToken string) (*Client, error) {
 	c, err := imapclient.DialTLS(
 		fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
@@ -65,48 +65,6 @@ func (c *Client) FetchUnread() ([]imap.UID, error) {
     return uids, nil
 }
 
-// func (c *Client) FetchUnread() ([]imap.UID, error) {
-// 	criteria := &imap.SearchCriteria{}
-// 	searchData, err := c.conn.UIDSearch(criteria, nil).Wait()
-// 	if err != nil {
-// 		return nil, fmt.Errorf("search: %w", err)
-// 	}
-
-// 	allUIDs := searchData.AllUIDs()
-// 	if len(allUIDs) == 0 {
-// 		return nil, nil
-// 	}
-
-// 	fetchOptions := &imap.FetchOptions{
-// 		Flags: true,
-// 		UID:   true,
-// 	}
-
-// 	fetchCmd := c.conn.Fetch(imap.UIDSetNum(allUIDs...), fetchOptions)
-// 	defer fetchCmd.Close()
-
-// 	messages, err := fetchCmd.Collect()
-// 	if err != nil {
-// 		return nil, fmt.Errorf("fetch flags: %w", err)
-// 	}
-
-// 	var unreadUIDs []imap.UID
-// 	for _, msg := range messages {
-// 		hasSeen := false
-// 		for _, flag := range msg.Flags {
-// 			if flag == "\\Seen" {
-// 				hasSeen = true
-// 				break
-// 			}
-// 		}
-// 		if !hasSeen {
-// 			unreadUIDs = append(unreadUIDs, msg.UID)
-// 		}
-// 	}
-
-// 	return unreadUIDs, nil
-// }
-
 func (c *Client) FetchMessage(uid imap.UID) (*imapclient.FetchCommand, error) {
 	log.Printf("imap fetch message | uid=%d", uid)
 
@@ -139,8 +97,6 @@ func (c *Client) MarkRead(uid imap.UID) error {
 func (c *Client) Close() error {
 	return c.conn.Close()
 }
-
-// ---- минимальная реализация SASL XOAUTH2 ----
 
 type xoauth2Client struct {
 	email       string
