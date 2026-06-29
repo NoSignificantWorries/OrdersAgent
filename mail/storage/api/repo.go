@@ -100,6 +100,38 @@ type EmailForReply struct {
     IsPrimaryRecipient   bool
 }
 
+type SentEmailRecord struct {
+    ID               int64      `db:"id"`
+    UserID           *int64     `db:"user_id"`
+    Mailbox          string     `db:"mailbox"`
+    EmailUID         *int64     `db:"email_uid"`
+    MessageID        string     `db:"message_id"`
+    InReplyTo        string     `db:"in_reply_to"`
+    ReferencesHeader string     `db:"references_header"`
+    ParentEmailID    *int64     `db:"parent_email_id"`
+    EmailFrom        string     `db:"email_from"`
+    ReplyTo          string     `db:"reply_to"`
+    ToHeader         string     `db:"to_header"`
+    CcHeader         string     `db:"cc_header"`
+    BccHeader        string     `db:"bcc_header"`
+    EmailSubject     string     `db:"email_subject"`
+    RawEmail         string     `db:"raw_email"`
+    EmailDate        *time.Time `db:"email_date"`
+    SendStatus       string     `db:"send_status"`
+    CreatedAt        time.Time  `db:"created_at"`
+    SentAt           time.Time  `db:"sent_at"`
+}
+
+type SentDocumentRecord struct {
+    ID           int64     `db:"id"`
+    SentEmailID  int64     `db:"sent_email_id"`
+    Filename     string    `db:"filename"`
+    MinioObjectKey string  `db:"minio_object_key"`
+    ContentType  string    `db:"content_type"`
+    SizeBytes    int64     `db:"size_bytes"`
+    CreatedAt    time.Time `db:"created_at"`
+}
+
 
 func (db DB) UpsertEmail(ctx context.Context, rec EmailRecord) (int64, error) {
     const q = `
@@ -407,6 +439,144 @@ func (db DB) CreateTaskTx(ctx context.Context, tx *sql.Tx, rec TaskRecord) (int6
         rec.CompletedAt,
     ).Scan(&id)
     if err != nil {
+        return 0, err
+    }
+
+    return id, nil
+}
+
+func InsertSentEmailTx(tx *sql.Tx, rec SentEmailRecord) (int64, error) {
+    const q = `
+        INSERT INTO sent_emails (
+            user_id,
+            mailbox,
+            email_uid,
+            message_id,
+            in_reply_to,
+            references_header,
+            parent_email_id,
+            email_from,
+            reply_to,
+            to_header,
+            cc_header,
+            bcc_header,
+            email_subject,
+            raw_email,
+            email_date,
+            send_status,
+            created_at,
+            sent_at
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9,
+            $10, $11, $12, $13, $14, $15, $16,
+            COALESCE($17, NOW()),
+            COALESCE($18, NOW())
+        )
+        RETURNING id
+    `
+
+    var id int64
+    err := tx.QueryRowContext(
+        context.Background(),
+        q,
+        rec.UserID,
+        rec.Mailbox,
+        rec.EmailUID,
+        rec.MessageID,
+        rec.InReplyTo,
+        rec.ReferencesHeader,
+        rec.ParentEmailID,
+        rec.EmailFrom,
+        rec.ReplyTo,
+        rec.ToHeader,
+        rec.CcHeader,
+        rec.BccHeader,
+        rec.EmailSubject,
+        rec.RawEmail,
+        rec.EmailDate,
+        rec.SendStatus,
+        nullableTime(rec.CreatedAt),
+        nullableTime(rec.SentAt),
+    ).Scan(&id)
+    if err != nil {
+        return 0, err
+    }
+
+    return id, nil
+}
+
+func InsertSentEmail(db *DB, rec SentEmailRecord) (int64, error) {
+    tx, err := db.Conn.Begin()
+    if err != nil {
+        return 0, err
+    }
+    defer func() {
+        _ = tx.Rollback()
+    }()
+
+    id, err := InsertSentEmailTx(tx, rec)
+    if err != nil {
+        return 0, err
+    }
+
+    if err := tx.Commit(); err != nil {
+        return 0, err
+    }
+
+    return id, nil
+}
+
+func InsertSentDocumentTx(tx *sql.Tx, rec SentDocumentRecord) (int64, error) {
+    const q = `
+        INSERT INTO sent_documents (
+            sent_email_id,
+            filename,
+            minio_object_key,
+            content_type,
+            size_bytes,
+            created_at
+        )
+        VALUES (
+            $1, $2, $3, $4, $5,
+            COALESCE($6, NOW())
+        )
+        RETURNING id
+    `
+
+    var id int64
+    err := tx.QueryRowContext(
+        context.Background(),
+        q,
+        rec.SentEmailID,
+        rec.Filename,
+        rec.MinioObjectKey,
+        rec.ContentType,
+        rec.SizeBytes,
+        nullableTime(rec.CreatedAt),
+    ).Scan(&id)
+    if err != nil {
+        return 0, err
+    }
+
+    return id, nil
+}
+
+func InsertSentDocument(db *DB, rec SentDocumentRecord) (int64, error) {
+    tx, err := db.Conn.Begin()
+    if err != nil {
+        return 0, err
+    }
+    defer func() {
+        _ = tx.Rollback()
+    }()
+
+    id, err := InsertSentDocumentTx(tx, rec)
+    if err != nil {
+        return 0, err
+    }
+
+    if err := tx.Commit(); err != nil {
         return 0, err
     }
 
@@ -1036,4 +1206,11 @@ func pqStringArray(items []string) any {
         return []string{}
     }
     return items
+}
+
+func nullableTime(t time.Time) any {
+    if t.IsZero() {
+        return nil
+    }
+    return t
 }

@@ -53,15 +53,21 @@ func main() {
 	endpoint := os.Getenv("MINIO_ENDPOINT")
 	accessKey := os.Getenv("MINIO_ACCESS_KEY")
 	secretKey := os.Getenv("MINIO_SECRET_KEY")
-	bucket := os.Getenv("MINIO_BUCKET")
+	incomingBucket := os.Getenv("MINIO_BUCKET")
+	outgoingBucket := os.Getenv("MINIO_OUTGOING_BUCKET")
 	useSSL := false
 
-	store, err := minio.NewCloudStorage(endpoint, accessKey, secretKey, bucket, useSSL)
+	incomingStore, err := minio.NewCloudStorage(endpoint, accessKey, secretKey, incomingBucket, useSSL)
 	if err != nil {
-		log.Fatalf("init cloud storage: %v", err)
+		log.Fatalf("init incoming cloud storage: %v", err)
 	}
 
-	repo := storage.NewDBRepo(db, store)
+	outgoingStore, err := minio.NewCloudStorage(endpoint, accessKey, secretKey, outgoingBucket, useSSL)
+	if err != nil {
+		log.Fatalf("init outgoing cloud storage: %v", err)
+	}
+
+	repo := storage.NewDBRepo(db, incomingStore, outgoingStore)
 	dbRepo, ok := repo.(*storage.DBRepo)
 	if !ok {
 		log.Fatalf("repo type assertion to *storage.DBRepo failed")
@@ -259,7 +265,7 @@ func main() {
 
 			log.Printf("send start | mailbox=%s to=%q subject=%q attachments=%d", mailbox, to, subject, len(attachments))
 
-			if err := storage.SendEmail(db, smtpClient, imapCfg, storage.SendEmailRequest{
+			if err := storage.SendEmail(db, dbRepo, smtpClient, imapCfg, storage.SendEmailRequest{
 				Mailbox:     mailbox,
 				To:          to,
 				Subject:     subject,
@@ -307,7 +313,7 @@ func main() {
 
 			log.Printf("reply send start | email_id=%d attachments=%d", emailID, len(attachments))
 
-			if err := storage.ReplyToEmail(db, smtpClient, imapCfg, storage.ReplyToEmailRequest{
+			if err := storage.ReplyToEmail(db, dbRepo, smtpClient, imapCfg, storage.ReplyToEmailRequest{
 				EmailID:     emailID,
 				Body:        body,
 				Attachments: attachments,

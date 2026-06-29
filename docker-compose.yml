@@ -67,6 +67,8 @@ services:
             mc version enable myminio/orders-attachments;
             mc mb myminio/results --ignore-existing;
             mc version enable myminio/results;
+            mc mb myminio/outgoing-attachments --ignore-existing;
+            mc version enable myminio/outgoing-attachments;
             echo 'MinIO initialized successfully!';
             "
         networks:
@@ -91,6 +93,7 @@ services:
             - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
             - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
             - MINIO_BUCKET=orders-attachments
+            - MINIO_OUTGOING_BUCKET=outgoing-attachments
         depends_on:
             postgres:
                 condition: service_healthy
