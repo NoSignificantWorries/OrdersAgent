@@ -23,6 +23,35 @@ def _task_status_order_sql(task_alias: str = "tt") -> str:
     """
 
 
+def _map_ui_statuses_to_task_statuses(statuses: list[str]) -> list[str]:
+    status_map = {
+        "waiting": ["new", "downloaded", "files_saved"],
+        "processing": ["ml_processing", "manual_review_done"],
+        "manual_review": ["materials_review", "ml_review"],
+        "completed": ["completed"],
+        "error": ["error"],
+    }
+
+    mapped: list[str] = []
+
+    for raw_status in statuses:
+        status = (raw_status or "").strip().lower()
+        if not status:
+            continue
+
+        mapped.extend(status_map.get(status, [status]))
+
+    seen: set[str] = set()
+    result: list[str] = []
+
+    for item in mapped:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+
+    return result
+
+
 def _normalize_documents(raw: Any) -> list[dict]:
     """
     Приводим documents к виду list[dict] с полем document_name.
@@ -106,7 +135,8 @@ async def list_queue_for_user(
         print("QUEUE USER EMAIL =", user.get("email"))
 
         is_admin = user.get("role") == "admin"
-        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        ui_statuses = [s.strip() for s in status.split(",") if s.strip()]
+        statuses = _map_ui_statuses_to_task_statuses(ui_statuses)
         normalized_search = (search or "").strip().lower()
         normalized_class_filter = (class_filter or "").strip().lower()
         normalized_sort = "oldest" if (sort or "").strip().lower() == "oldest" else "newest"
@@ -117,7 +147,7 @@ async def list_queue_for_user(
             param_idx += 1
 
         if statuses:
-            where_clauses.append(f"lt.status = ANY(${param_idx}::task_status[])")
+            where_clauses.append(f"LOWER(lt.status::text) = ANY(${param_idx}::text[])")
             params.append(statuses)
             param_idx += 1
 
@@ -144,6 +174,7 @@ async def list_queue_for_user(
                     """(
                         e.model_decision IS NULL
                         OR BTRIM(e.model_decision) = ''
+                        OR LOWER(BTRIM(e.model_decision)) = 'review'
                     )"""
                 )
             elif normalized_class_filter in {"request", "calculation", "question"}:
