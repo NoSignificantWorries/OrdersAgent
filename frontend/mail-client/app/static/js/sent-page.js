@@ -433,16 +433,24 @@
 
         state.composeDeps = composeDeps;
 
+        const existingMailPage = window.MailPage || {};
+
         if (window.MailCompose?.initCompose) {
             window.MailCompose.initCompose(composeDeps);
         }
 
-        window.MailPage = window.MailPage || {};
-        window.MailPage.openForwardCompose = ({ emailId }) =>
-            window.MailCompose.openForwardCompose(state.composeDeps, {
-                emailId,
-                sourceType: "sent",
-            });
+        if (typeof existingMailPage.initSignatureSettings === "function") {
+            existingMailPage.initSignatureSettings();
+        }
+
+        window.MailPage = {
+            ...existingMailPage,
+            openForwardCompose: ({ emailId }) =>
+                window.MailCompose.openForwardCompose(state.composeDeps, {
+                    emailId,
+                    sourceType: "sent",
+                }),
+        };
 
         try {
             await loadSentEmails(state);
@@ -457,5 +465,9 @@
         }
     }
 
-    document.addEventListener("DOMContentLoaded", initSentPage);
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initSentPage);
+    } else {
+        initSentPage();
+    }
 })();
