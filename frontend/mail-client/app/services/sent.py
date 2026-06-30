@@ -102,128 +102,146 @@ def _extract_body_text_from_raw_email(raw_email: str | None) -> str:
 
 async def list_sent_for_user(
     user: dict,
-    limit: int | None = None,
-) -> list[dict]:
+    page: int = 1,
+    per_page: int = 100,
+    search: str = "",
+    sort: str = "newest",
+) -> dict:
     pool = await get_db_pool()
 
-    if not limit or limit < 1:
-        limit = 1500
-    if limit > 2000:
-        limit = 2000
+    if page < 1:
+        page = 1
+
+    if per_page < 1:
+        per_page = 1
+    if per_page > 100:
+        per_page = 100
+
+    offset = (page - 1) * per_page
+    is_admin = user.get("role") == "admin"
+
+    where_clauses: list[str] = []
+    params: list[object] = []
+    param_idx = 1
+
+    if not is_admin:
+        where_clauses.append(f"se.mailbox = ${param_idx}")
+        params.append(user["email"])
+        param_idx += 1
+
+    normalized_search = (search or "").strip()
+    if normalized_search:
+        where_clauses.append(
+            f"""(
+                COALESCE(se.email_subject, '') ILIKE ${param_idx}
+                OR COALESCE(se.to_header, '') ILIKE ${param_idx}
+                OR COALESCE(se.email_from, '') ILIKE ${param_idx}
+                OR COALESCE(se.raw_email, '') ILIKE ${param_idx}
+            )"""
+        )
+        params.append(f"%{normalized_search}%")
+        param_idx += 1
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "\nWHERE " + "\n  AND ".join(where_clauses)
+
+    sort_sql = "ASC" if sort == "oldest" else "DESC"
+
+    count_sql = f"""
+        SELECT COUNT(*) AS total
+        FROM sent_emails se
+        {where_sql}
+    """
+
+    page_sql = f"""
+        SELECT
+            se.id AS sent_email_id,
+            se.user_id,
+            se.mailbox,
+            se.email_uid,
+            se.message_id,
+            se.in_reply_to,
+            se.references_header AS references,
+            se.parent_email_id,
+            se.email_from,
+            se.reply_to,
+            se.to_header,
+            se.cc_header,
+            se.bcc_header,
+            se.email_subject,
+            se.raw_email,
+            se.email_date,
+            se.send_status,
+            se.created_at,
+            se.sent_at,
+
+            COALESCE(
+                jsonb_agg(
+                    DISTINCT jsonb_build_object(
+                        'id', sd.id,
+                        'document_name', sd.filename,
+                        'filename', sd.filename,
+                        'object_bucket', NULL,
+                        'object_key', sd.minio_object_key,
+                        'minio_object_key', sd.minio_object_key,
+                        'content_type', sd.content_type,
+                        'size_bytes', sd.size_bytes,
+                        'has_document_data',
+                            CASE
+                                WHEN sd.size_bytes IS NOT NULL AND sd.size_bytes > 0 THEN true
+                                ELSE false
+                            END,
+                        'result_document_name', NULL,
+                        'has_result_document_data', false,
+                        'created_at', sd.created_at
+                    )
+                ) FILTER (WHERE sd.id IS NOT NULL),
+                '[]'::jsonb
+            ) AS documents
+
+        FROM sent_emails se
+        LEFT JOIN sent_documents sd
+            ON sd.sent_email_id = se.id
+        {where_sql}
+        GROUP BY
+            se.id,
+            se.user_id,
+            se.mailbox,
+            se.email_uid,
+            se.message_id,
+            se.in_reply_to,
+            se.references_header,
+            se.parent_email_id,
+            se.email_from,
+            se.reply_to,
+            se.to_header,
+            se.cc_header,
+            se.bcc_header,
+            se.email_subject,
+            se.raw_email,
+            se.email_date,
+            se.send_status,
+            se.created_at,
+            se.sent_at
+        ORDER BY
+            COALESCE(se.sent_at, se.email_date, se.created_at) {sort_sql},
+            se.id {sort_sql}
+        LIMIT ${param_idx}
+        OFFSET ${param_idx + 1}
+    """
 
     async with pool.acquire() as conn:
-        sql = """
-            SELECT
-                se.id AS sent_email_id,
-                se.user_id,
-                se.mailbox,
-                se.email_uid,
-                se.message_id,
-                se.in_reply_to,
-                se.references_header AS references,
-                se.parent_email_id,
-                se.email_from,
-                se.reply_to,
-                se.to_header,
-                se.cc_header,
-                se.bcc_header,
-                se.email_subject,
-                se.raw_email,
-                se.email_date,
-                se.send_status,
-                se.created_at,
-                se.sent_at,
+        total_row = await conn.fetchrow(count_sql, *params)
+        total = int(total_row["total"] or 0)
 
-                COALESCE(
-                    jsonb_agg(
-                        DISTINCT jsonb_build_object(
-                            'id', sd.id,
-                            'document_name', sd.filename,
-                            'filename', sd.filename,
-                            'object_bucket', NULL,
-                            'object_key', sd.minio_object_key,
-                            'minio_object_key', sd.minio_object_key,
-                            'content_type', sd.content_type,
-                            'size_bytes', sd.size_bytes,
-                            'has_document_data',
-                                CASE
-                                    WHEN sd.size_bytes IS NOT NULL AND sd.size_bytes > 0 THEN true
-                                    ELSE false
-                                END,
-                            'result_document_name', NULL,
-                            'has_result_document_data', false,
-                            'created_at', sd.created_at
-                        )
-                    ) FILTER (WHERE sd.id IS NOT NULL),
-                    '[]'::jsonb
-                ) AS documents
-
-            FROM sent_emails se
-            LEFT JOIN sent_documents sd
-                ON sd.sent_email_id = se.id
-        """
-
-        where_clauses: list[str] = []
-        params: list[object] = []
-        param_idx = 1
-
-        is_admin = user.get("role") == "admin"
-
-        if not is_admin:
-            where_clauses.append(f"se.mailbox = ${param_idx}")
-            params.append(user["email"])
-            param_idx += 1
-
-        if where_clauses:
-            sql += "\nWHERE " + "\n  AND ".join(where_clauses)
-
-        sql += f"""
-            GROUP BY
-                se.id,
-                se.user_id,
-                se.mailbox,
-                se.email_uid,
-                se.message_id,
-                se.in_reply_to,
-                se.references_header,
-                se.parent_email_id,
-                se.email_from,
-                se.reply_to,
-                se.to_header,
-                se.cc_header,
-                se.bcc_header,
-                se.email_subject,
-                se.raw_email,
-                se.email_date,
-                se.send_status,
-                se.created_at,
-                se.sent_at
-            ORDER BY
-                COALESCE(se.sent_at, se.created_at) DESC,
-                se.id DESC
-            LIMIT ${param_idx}
-        """
-        params.append(limit)
-
-        rows = await conn.fetch(sql, *params)
-        print("SENT SQL ROWS COUNT =", len(rows))
-        for row in rows:
-            print(
-                "SENT ROW:",
-                {
-                    "sent_email_id": row["sent_email_id"],
-                    "subject": row["email_subject"],
-                    "documents_raw": row["documents"],
-                }
-            )
+        page_params = [*params, per_page, offset]
+        rows = await conn.fetch(page_sql, *page_params)
 
     result: list[dict] = []
 
     for row in rows:
-        print("RAW DOCUMENTS BEFORE NORMALIZE =", row["documents"])
         documents = _normalize_documents(row["documents"])
-        print("NORMALIZED DOCUMENTS =", documents)
-
         body_text = _extract_body_text_from_raw_email(row["raw_email"])
 
         item: dict = {
@@ -250,7 +268,6 @@ async def list_sent_for_user(
             "sendstatus": row["send_status"],
             "documents": documents,
 
-            # нейтральные поля для фронта
             "archived": False,
             "is_read": True,
             "prob1": None,
@@ -273,4 +290,9 @@ async def list_sent_for_user(
 
         result.append(item)
 
-    return result
+    return {
+        "items": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }

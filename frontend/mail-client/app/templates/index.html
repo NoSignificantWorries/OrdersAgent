@@ -134,6 +134,33 @@
                 <div class="emails-container" id="emailsContainer">
                     <!-- Список писем будет вставлен сюда -->
                 </div>
+
+                <nav
+                    id="emails-pagination"
+                    class="mail-pagination"
+                    aria-label="Навигация по страницам писем"
+                    hidden
+                >
+                    <button
+                        type="button"
+                        id="pagination-prev-btn"
+                        class="pagination-btn"
+                        aria-label="Предыдущая страница"
+                    >
+                        Назад
+                    </button>
+
+                    <div id="pagination-pages" class="pagination-pages"></div>
+
+                    <button
+                        type="button"
+                        id="pagination-next-btn"
+                        class="pagination-btn"
+                        aria-label="Следующая страница"
+                    >
+                        Вперёд
+                    </button>
+                </nav>
             </aside>
 
             <main class="email-content">

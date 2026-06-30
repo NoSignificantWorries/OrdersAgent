@@ -45,9 +45,110 @@
         });
     }
 
+    function buildVisiblePages(currentPage, totalPages, maxVisible = 7) {
+        if (totalPages <= maxVisible) {
+            return Array.from({ length: totalPages }, (_, i) => i + 1);
+        }
+
+        const pages = [1];
+        const start = Math.max(2, currentPage - 1);
+        const end = Math.min(totalPages - 1, currentPage + 1);
+
+        if (start > 2) pages.push("...");
+
+        for (let i = start; i <= end; i += 1) {
+            pages.push(i);
+        }
+
+        if (end < totalPages - 1) pages.push("...");
+
+        pages.push(totalPages);
+        return pages;
+    }
+
+    function renderPagination(deps) {
+        const { state, reloadEmails } = deps;
+
+        const root = document.getElementById("emails-pagination");
+        const pagesEl = document.getElementById("pagination-pages");
+        const prevBtn = document.getElementById("pagination-prev-btn");
+        const nextBtn = document.getElementById("pagination-next-btn");
+
+        if (!root || !pagesEl || !prevBtn || !nextBtn) return;
+
+        if (!state.totalPages || state.totalPages <= 1) {
+            root.hidden = true;
+            pagesEl.innerHTML = "";
+            prevBtn.disabled = true;
+            nextBtn.disabled = true;
+            return;
+        }
+
+        root.hidden = false;
+        pagesEl.innerHTML = "";
+
+        const pages = buildVisiblePages(state.currentPage, state.totalPages, 7);
+
+        pages.forEach((page) => {
+            if (page === "...") {
+                const dots = document.createElement("span");
+                dots.className = "pagination-dots";
+                dots.textContent = "…";
+                pagesEl.appendChild(dots);
+                return;
+            }
+
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "pagination-page-btn";
+            btn.textContent = String(page);
+            btn.setAttribute("aria-label", `Страница ${page}`);
+
+            if (page === state.currentPage) {
+                btn.classList.add("active");
+                btn.setAttribute("aria-current", "page");
+            }
+
+            btn.addEventListener("click", async () => {
+                if (page === state.currentPage) return;
+
+                state.currentPage = page;
+                state.selectedEmailId = null;
+
+                await reloadEmails({ showLoadingState: true });
+
+                const emailView = document.getElementById("emailView");
+                if (emailView) {
+                    emailView.innerHTML =
+                        '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+                }
+            });
+
+            pagesEl.appendChild(btn);
+        });
+
+        prevBtn.disabled = state.currentPage <= 1;
+        nextBtn.disabled = state.currentPage >= state.totalPages;
+
+        prevBtn.onclick = async () => {
+            if (state.currentPage <= 1) return;
+            state.currentPage -= 1;
+            state.selectedEmailId = null;
+            await reloadEmails({ showLoadingState: true });
+        };
+
+        nextBtn.onclick = async () => {
+            if (state.currentPage >= state.totalPages) return;
+            state.currentPage += 1;
+            state.selectedEmailId = null;
+            await reloadEmails({ showLoadingState: true });
+        };
+    }
+
     async function refreshEmailsSilently(deps) {
         const {
             state,
+            archived = null,
             isChatTabActive,
             isMaterialInputProtected,
             isReplyInputProtected = () => false,
@@ -77,12 +178,36 @@
 
         state.pendingSilentRefresh = false;
 
-        await loadEmailsFromApi(false);
+        const result = await loadEmailsFromApi({
+            showLoadingState: false,
+            normalizeApiItem: deps.normalizeApiItem,
+            page: state.currentPage,
+            perPage: state.perPage,
+            extraParams: {
+                search: state.currentSearchTerm,
+                status: state.currentStatusFilter,
+                class: state.currentClassFilter,
+                sort: state.sortNewestFirst ? "newest" : "oldest",
+                archived,
+            },
+        });
 
         if (mySeq !== state.refreshSeq) return;
+        if (!result.ok) return;
+
+        state.emails = result.emails;
+        state.currentPage = result.pagination.page;
+        state.perPage = result.pagination.perPage;
+        state.totalEmails = result.pagination.total;
+        state.totalPages = result.pagination.totalPages;
+        state.unreadCount = state.emails.filter((email) => !email.read).length;
 
         renderEmailList();
         updateUnreadCount();
+
+        if (typeof deps.renderPagination === "function") {
+            deps.renderPagination();
+        }
 
         const isProtectedBeforeRender =
             isMaterialInputProtected() ||
@@ -138,9 +263,41 @@
             sendChatData,
         } = deps;
 
+        const reloadEmails = async ({ showLoadingState = true } = {}) => {
+            const result = await loadEmailsFromApi({
+                showLoadingState,
+                normalizeApiItem: deps.normalizeApiItem,
+                page: state.currentPage,
+                perPage: state.perPage,
+                extraParams: {
+                    search: state.currentSearchTerm,
+                    status: state.currentStatusFilter,
+                    class: state.currentClassFilter,
+                    sort: state.sortNewestFirst ? "newest" : "oldest",
+                    archived: pageConfig.archived,
+                },
+            });
+
+            if (!result.ok) return result;
+
+            state.emails = result.emails;
+            state.currentPage = result.pagination.page;
+            state.perPage = result.pagination.perPage;
+            state.totalEmails = result.pagination.total;
+            state.totalPages = result.pagination.totalPages;
+            state.unreadCount = state.emails.filter((email) => !email.read).length;
+
+            renderEmailList();
+            updateUnreadCount();
+            renderPagination({ state, reloadEmails });
+
+            return result;
+        };
+
         const pageConfig = {
             pageType: config.pageType || "inbox",
             apiUrl: config.apiUrl || "/api/queue",
+            archived: typeof config.archived === "boolean" ? config.archived : null,
             allowCloseTask: config.allowCloseTask ?? true,
             allowDecisionEdit: config.allowDecisionEdit ?? true,
             allowChat: config.allowChat ?? true,
@@ -151,6 +308,10 @@
             window.MAILPAGECONFIG = pageConfig;
 
             state.selectedEmailId = null;
+            state.currentPage = 1;
+            state.perPage = 100;
+            state.totalEmails = 0;
+            state.totalPages = 1;
 
             const emailView = document.getElementById("emailView");
             if (emailView) {
@@ -158,9 +319,7 @@
                     '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
             }
 
-            await loadEmailsFromApi();
-            renderEmailList();
-            updateUnreadCount();
+            await reloadEmails({ showLoadingState: true });
             initCompose();
 
             state.selectedEmailId = null;
@@ -183,11 +342,13 @@
                 refreshEmailsSilently({
                     ...deps,
                     state,
+                    archived: pageConfig.archived,
+                    renderPagination: () => renderPagination({ state, reloadEmails }),
                     isDecisionSelectProtected: () => isDecisionSelectFocused,
                 });
             }, pageConfig.refreshIntervalMs);
 
-            initTabs();
+            initTabs(deps);
 
             const chatSendBtn = document.getElementById("chat-send-btn");
             if (chatSendBtn) {
@@ -203,10 +364,17 @@
             }
 
             if (searchInput) {
+                let searchDebounceTimer = null;
+
                 searchInput.addEventListener("input", (e) => {
                     state.currentSearchTerm = e.target.value;
-                    renderEmailList();
+                    state.currentPage = 1;
                     updateSearchClearButton();
+
+                    clearTimeout(searchDebounceTimer);
+                    searchDebounceTimer = setTimeout(() => {
+                        reloadEmails({ showLoadingState: false });
+                    }, 300);
                 });
             }
 
@@ -214,8 +382,9 @@
                 searchClearBtn.addEventListener("click", () => {
                     searchInput.value = "";
                     state.currentSearchTerm = "";
-                    renderEmailList();
+                    state.currentPage = 1;
                     updateSearchClearButton();
+                    reloadEmails({ showLoadingState: true });
                     searchInput.focus();
                 });
             }
@@ -261,8 +430,9 @@
                     state.sortNewestFirst = sortNewestBtn.classList.contains("active");
                 }
 
-                renderEmailList();
+                state.currentPage = 1;
                 closeFilterPanelFn();
+                reloadEmails({ showLoadingState: true });
             }
 
             if (filterToggle) {

@@ -2,8 +2,9 @@ from io import BytesIO
 from urllib.parse import quote
 from zipfile import ZipFile, ZIP_DEFLATED
 import re
+from math import ceil
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.db import get_db_pool
@@ -48,22 +49,26 @@ def _build_safe_zip_name(subject: str | None, email_id: int) -> str:
 @router.get("/sent")
 async def get_sent(
     request: Request,
-    limit: int | None = None,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=100, ge=1, le=100),
+    search: str = "",
+    sort: str = Query(default="newest"),
 ):
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    if limit is not None:
-        if limit < 1:
-            limit = 1
-        if limit > 2000:
-            limit = 2000
-
-    items = await list_sent_for_user(
+    result = await list_sent_for_user(
         user=user,
-        limit=limit,
+        page=page,
+        per_page=per_page,
+        search=search,
+        sort=sort,
     )
+
+    total = int(result.get("total", 0))
+    items = list(result.get("items", []))
+    total_pages = max(1, ceil(total / per_page)) if total > 0 else 1
 
     return {
         "user": {
@@ -71,6 +76,10 @@ async def get_sent(
             "email": user["email"],
             "role": user.get("role"),
         },
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
         "count": len(items),
         "items": items,
     }

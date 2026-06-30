@@ -489,15 +489,20 @@ function normalizeApiItem(item, idx) {
 
 
 // ========== ЗАГРУЗКА ПИСЕМ ИЗ API ==========
-async function loadEmailsFromApi(showLoadingState = true) {
-    const result = await loadEmailsFromApiFromApiModule(
-        showLoadingState,
+async function loadEmailsFromApi(options = {}) {
+    const normalizedOptions =
+        typeof options === "object" && options !== null
+            ? options
+            : { showLoadingState: Boolean(options) };
+
+    const result = await loadEmailsFromApiFromApiModule({
+        ...normalizedOptions,
         normalizeApiItem,
-    );
+    });
 
     emails = result.emails || [];
     recalculateUnreadCount();
-    return result.ok;
+    return result;
 }
 
 

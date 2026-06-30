@@ -128,7 +128,15 @@
         );
     }
 
-    async function loadEmailsFromApi(showLoadingState = true, normalizeApiItem) {
+    async function loadEmailsFromApi(options = {}) {
+        const {
+            showLoadingState = true,
+            normalizeApiItem = (item) => item,
+            page = 1,
+            perPage = 100,
+            extraParams = {},
+        } = options || {};
+
         const listEl = document.getElementById("emailsContainer");
         const viewEl = document.getElementById("emailView");
         const countSpan = document.getElementById("email-count-display");
@@ -142,9 +150,20 @@
             }
 
             const cfg = window.__MAIL_PAGE_CONFIG__ || {};
-            const url = cfg.apiUrl || "/api/queue";
+            const baseUrl = cfg.apiUrl || "/api/queue";
 
-            const resp = await fetch(url, {
+            const url = new URL(baseUrl, window.location.origin);
+            url.searchParams.set("page", String(page));
+            url.searchParams.set("per_page", String(perPage));
+
+            Object.entries(extraParams || {}).forEach(([key, value]) => {
+                if (value === undefined || value === null || value === "" || value === "all") {
+                    return;
+                }
+                url.searchParams.set(key, String(value));
+            });
+
+            const resp = await fetch(url.toString(), {
                 method: "GET",
                 headers: { Accept: "application/json" },
                 credentials: "same-origin",
@@ -158,7 +177,17 @@
                 if (viewEl) {
                     viewEl.innerHTML = `<div class="email-placeholder">Нужно войти заново</div>`;
                 }
-                return { ok: false, emails: [] };
+
+                return {
+                    ok: false,
+                    emails: [],
+                    pagination: {
+                        page: 1,
+                        perPage,
+                        total: 0,
+                        totalPages: 1,
+                    },
+                };
             }
 
             if (!resp.ok) {
@@ -169,22 +198,50 @@
                 if (viewEl) {
                     viewEl.innerHTML = `<div class="email-placeholder">Ошибка загрузки писем</div>`;
                 }
-                return { ok: false, emails: [] };
+
+                return {
+                    ok: false,
+                    emails: [],
+                    pagination: {
+                        page: 1,
+                        perPage,
+                        total: 0,
+                        totalPages: 1,
+                    },
+                };
             }
 
             const data = await resp.json();
             const items = Array.isArray(data.items) ? data.items : [];
-            const emails = items.map((item, idx) => normalizeApiItem(item, idx));
+            const normalize =
+                typeof normalizeApiItem === "function"
+                    ? normalizeApiItem
+                    : (item) => item;
+            const emails = items.map((item, idx) => normalize(item, idx));
 
-            if (countSpan) countSpan.textContent = `${emails.length} писем`;
+            const total = Number(data.total ?? emails.length);
+            const currentPage = Number(data.page ?? page);
+            const currentPerPage = Number(data.per_page ?? perPage);
+            const totalPages = Number(
+                data.total_pages ?? Math.max(1, Math.ceil(total / currentPerPage))
+            );
 
-            return { ok: true, emails };
+            if (countSpan) {
+                countSpan.textContent = `${total} писем`;
+            }
+
+            return {
+                ok: true,
+                emails,
+                pagination: {
+                    page: currentPage,
+                    perPage: currentPerPage,
+                    total,
+                    totalPages,
+                },
+            };
         } catch (e) {
             console.error("Ошибка загрузки писем:", e);
-
-            const listEl = document.getElementById("emailsContainer");
-            const viewEl = document.getElementById("emailView");
-            const countSpan = document.getElementById("email-count-display");
 
             if (countSpan) countSpan.textContent = "Ошибка";
             if (listEl) {
@@ -194,7 +251,16 @@
                 viewEl.innerHTML = `<div class="email-placeholder">Ошибка загрузки писем</div>`;
             }
 
-            return { ok: false, emails: [] };
+            return {
+                ok: false,
+                emails: [],
+                pagination: {
+                    page: 1,
+                    perPage,
+                    total: 0,
+                    totalPages: 1,
+                },
+            };
         }
     }
 

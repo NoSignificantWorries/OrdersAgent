@@ -6,18 +6,18 @@ from typing import Any
 from app.db import get_db_pool
 
 
-def _task_status_order_sql() -> str:
-    return """
+def _task_status_order_sql(task_alias: str = "tt") -> str:
+    return f"""
         CASE
-            WHEN tt.status = 'completed' THEN 0
-            WHEN tt.status = 'manual_review_done' THEN 1
-            WHEN tt.status = 'ml_classified' THEN 2
-            WHEN tt.status = 'materials_review' THEN 3
-            WHEN tt.status = 'ml_review' THEN 4
-            WHEN tt.status = 'files_saved' THEN 5
-            WHEN tt.status = 'downloaded' THEN 6
-            WHEN tt.status = 'new' THEN 7
-            WHEN tt.status = 'error' THEN 8
+            WHEN {task_alias}.status = 'completed' THEN 0
+            WHEN {task_alias}.status = 'manual_review_done' THEN 1
+            WHEN {task_alias}.status = 'ml_classified' THEN 2
+            WHEN {task_alias}.status = 'materials_review' THEN 3
+            WHEN {task_alias}.status = 'ml_review' THEN 4
+            WHEN {task_alias}.status = 'files_saved' THEN 5
+            WHEN {task_alias}.status = 'downloaded' THEN 6
+            WHEN {task_alias}.status = 'new' THEN 7
+            WHEN {task_alias}.status = 'error' THEN 8
             ELSE 100
         END
     """
@@ -78,18 +78,200 @@ def _normalize_documents(raw: Any) -> list[dict]:
 async def list_queue_for_user(
     user: dict,
     status: str = "",
-    limit: int | None = None,
     archived: bool | None = None,
-) -> list[dict]:
+    page: int = 1,
+    per_page: int = 100,
+    search: str = "",
+    class_filter: str = "",
+    sort: str = "newest",
+) -> dict[str, Any]:
     pool = await get_db_pool()
 
-    if not limit or limit < 1:
-        limit = 1500
-    if limit > 2000:
-        limit = 2000
+    if page < 1:
+        page = 1
+    if per_page < 1:
+        per_page = 1
+    if per_page > 100:
+        per_page = 100
+
+    offset = (page - 1) * per_page
 
     async with pool.acquire() as conn:
-        sql = f"""
+        where_clauses: list[str] = []
+        params: list[object] = []
+        param_idx = 1
+
+        print("QUEUE USER =", user)
+        print("QUEUE USER ROLE =", user.get("role"))
+        print("QUEUE USER EMAIL =", user.get("email"))
+
+        is_admin = user.get("role") == "admin"
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        normalized_search = (search or "").strip().lower()
+        normalized_class_filter = (class_filter or "").strip().lower()
+        normalized_sort = "oldest" if (sort or "").strip().lower() == "oldest" else "newest"
+
+        if not is_admin:
+            where_clauses.append(f"e.mailbox = ${param_idx}")
+            params.append(user["email"])
+            param_idx += 1
+
+        if statuses:
+            where_clauses.append(f"lt.status = ANY(${param_idx}::task_status[])")
+            params.append(statuses)
+            param_idx += 1
+
+        if archived is not None:
+            where_clauses.append(f"e.archived = ${param_idx}")
+            params.append(archived)
+            param_idx += 1
+
+        if normalized_search:
+            where_clauses.append(
+                f"""(
+                    LOWER(COALESCE(e.email_subject, '')) LIKE ${param_idx}
+                    OR LOWER(COALESCE(e.email_from, '')) LIKE ${param_idx}
+                    OR LOWER(COALESCE(e.mailbox, '')) LIKE ${param_idx}
+                    OR LOWER(COALESCE(e.raw_email, '')) LIKE ${param_idx}
+                )"""
+            )
+            params.append(f"%{normalized_search}%")
+            param_idx += 1
+
+        if normalized_class_filter:
+            if normalized_class_filter == "undefined_only":
+                where_clauses.append(
+                    """(
+                        e.model_decision IS NULL
+                        OR BTRIM(e.model_decision) = ''
+                    )"""
+                )
+            elif normalized_class_filter in {"request", "calculation", "question"}:
+                where_clauses.append(f"LOWER(COALESCE(e.model_decision, '')) = ${param_idx}")
+                params.append(normalized_class_filter)
+                param_idx += 1
+
+        where_sql = ""
+        if where_clauses:
+            where_sql = "\nWHERE " + "\n  AND ".join(where_clauses)
+
+        page_order_sql = """
+            sort_date DESC,
+            id DESC
+        """
+        dedupe_pick_order_sql = """
+            sort_date DESC,
+            id DESC
+        """
+
+        if normalized_sort == "oldest":
+            page_order_sql = """
+                sort_date ASC,
+                id ASC
+            """
+            dedupe_pick_order_sql = """
+                sort_date ASC,
+                id ASC
+            """
+
+        base_cte = f"""
+            WITH latest_task AS (
+                SELECT
+                    e.id AS email_id,
+                    t.id AS task_id,
+                    t.status,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY e.id
+                        ORDER BY
+                            {_task_status_order_sql("t")},
+                            t.created_at DESC
+                    ) AS rn
+                FROM emails e
+                LEFT JOIN tasks t
+                    ON t.email_id = e.id
+            ),
+            filtered AS (
+                SELECT
+                    e.id,
+                    COALESCE(e.email_date, e.created_at) AS sort_date,
+                    COALESCE(NULLIF(e.message_id, ''), 'no_id_' || e.id::text) AS dedupe_key
+                FROM emails e
+                LEFT JOIN latest_task lt
+                    ON lt.email_id = e.id
+                   AND lt.rn = 1
+                {where_sql}
+            )
+        """
+
+        if is_admin:
+            count_sql = base_cte + f"""
+                , deduped AS (
+                    SELECT DISTINCT ON (dedupe_key)
+                        id,
+                        dedupe_key,
+                        sort_date
+                    FROM filtered
+                    ORDER BY
+                        dedupe_key,
+                        {dedupe_pick_order_sql}
+                )
+                SELECT COUNT(*) AS total
+                FROM deduped
+            """
+
+            page_sql = base_cte + f"""
+                , deduped AS (
+                    SELECT DISTINCT ON (dedupe_key)
+                        id,
+                        dedupe_key,
+                        sort_date
+                    FROM filtered
+                    ORDER BY
+                        dedupe_key,
+                        {dedupe_pick_order_sql}
+                )
+                SELECT
+                    id
+                FROM deduped
+                ORDER BY
+                    {page_order_sql}
+                LIMIT ${param_idx}
+                OFFSET ${param_idx + 1}
+            """
+        else:
+            count_sql = base_cte + """
+                SELECT COUNT(*) AS total
+                FROM filtered
+            """
+
+            page_sql = base_cte + f"""
+                SELECT
+                    id
+                FROM filtered
+                ORDER BY
+                    {page_order_sql}
+                LIMIT ${param_idx}
+                OFFSET ${param_idx + 1}
+            """
+
+        total_row = await conn.fetchrow(count_sql, *params)
+        total = int(total_row["total"] or 0)
+
+        page_rows = await conn.fetch(page_sql, *params, per_page, offset)
+        email_ids = [row["id"] for row in page_rows]
+
+        if not email_ids:
+            total_pages = max(1, (total + per_page - 1) // per_page)
+
+            return {
+                "items": [],
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+                "total_pages": total_pages,
+            }
+
+        details_sql = f"""
             SELECT
                 e.id AS email_id,
                 e.mailbox,
@@ -160,53 +342,16 @@ async def list_queue_for_user(
                 FROM tasks tt
                 WHERE tt.email_id = e.id
                 ORDER BY
-                    {_task_status_order_sql()},
+                    {_task_status_order_sql("tt")},
                     tt.created_at DESC
                 LIMIT 1
             ) t ON TRUE
 
             LEFT JOIN documents d
                 ON d.email_id = e.id
-        """
 
-        where_clauses: list[str] = []
-        params: list[object] = []
-        param_idx = 1
+            WHERE e.id = ANY($1::int[])
 
-        print("QUEUE USER =", user)
-        print("QUEUE USER ROLE =", user.get("role"))
-        print("QUEUE USER EMAIL =", user.get("email"))
-
-        is_admin = user.get("role") == "admin"
-
-        if is_admin:
-            # Админ: показываем ТОЛЬКО основные письма (is_primary_recipient = true)
-            # Это исключает копии (Cc)
-            pass
-        else:
-            # Обычный пользователь: показываем только его письма
-            where_clauses.append(f"e.mailbox = ${param_idx}")
-            params.append(user["email"])
-            param_idx += 1
-
-        if status:
-            statuses = [s.strip() for s in status.split(",") if s.strip()]
-            if statuses:
-                where_clauses.append(
-                    f"t.status = ANY(${param_idx}::task_status[])"
-                )
-                params.append(statuses)
-                param_idx += 1
-
-        if archived is not None:
-            where_clauses.append(f"e.archived = ${param_idx}")
-            params.append(archived)
-            param_idx += 1
-
-        if where_clauses:
-            sql += "\nWHERE " + "\n  AND ".join(where_clauses)
-
-        sql += f"""
             GROUP BY
                 e.id,
                 t.document_id,
@@ -231,40 +376,18 @@ async def list_queue_for_user(
                 t.attempts,
                 t.created_at,
                 t.completed_at
-            ORDER BY
-                COALESCE(t.created_at, e.created_at) DESC,
-                e.id DESC
-            LIMIT ${param_idx}
         """
-        params.append(limit)
 
-        rows = await conn.fetch(sql, *params)
-
-        if is_admin:
-            # Собираем письма в словарь по message_id
-            emails_by_message_id: dict[str, dict] = {}
-            
-            for row in rows:
-                message_id = row["message_id"]
-                if not message_id:
-                    # Если нет message_id, используем email_id как ключ
-                    key = f"no_id_{row['email_id']}"
-                else:
-                    key = message_id
-                
-                # Если письмо с таким message_id уже есть - пропускаем (берем первое)
-                if key not in emails_by_message_id:
-                    emails_by_message_id[key] = row
-            
-            # Используем только уникальные письма
-            unique_rows = list(emails_by_message_id.values())
-        else:
-            # Для обычного пользователя - все письма (они уже отфильтрованы по mailbox)
-            unique_rows = rows
+        detail_rows = await conn.fetch(details_sql, email_ids)
+        rows_by_id = {row["email_id"]: row for row in detail_rows}
 
         result: list[dict] = []
 
-        for row in unique_rows:
+        for email_id in email_ids:
+            row = rows_by_id.get(email_id)
+            if not row:
+                continue
+
             task_output = row["output_data"]
 
             if task_output is None:
@@ -286,7 +409,6 @@ async def list_queue_for_user(
                 prob_1 = task_output.get("prob_1")
 
             model_decision = row["email_model_decision"]
-
             documents = _normalize_documents(row["documents"])
 
             item: dict = {
@@ -318,7 +440,7 @@ async def list_queue_for_user(
                 item.update(
                     {
                         "id": row["task_id"],
-                        "documentid":row["task_document_id"],
+                        "documentid": row["task_document_id"],
                         "type": row["task_type"],
                         "status": row["task_status"],
                         "priority": row["task_priority"],
@@ -343,7 +465,7 @@ async def list_queue_for_user(
                 item.update(
                     {
                         "id": row["email_id"],
-                        "documentid":None,
+                        "documentid": None,
                         "type": None,
                         "status": None,
                         "priority": 100,
@@ -361,4 +483,12 @@ async def list_queue_for_user(
 
             result.append(item)
 
-        return result
+        total_pages = max(1, (total + per_page - 1) // per_page)
+
+        return {
+            "items": result,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": total_pages,
+        }

@@ -89,27 +89,109 @@
         };
     }
 
+    function getVisiblePages(current, total, maxVisible = 7) {
+    if (total <= maxVisible) {
+        return Array.from({ length: total }, (_, i) => i + 1);
+    }
+
+    const pages = [];
+    const middleCount = maxVisible - 4;
+    const start = Math.max(2, current - Math.floor(middleCount / 2));
+    const end = Math.min(total - 1, start + middleCount - 1);
+
+    pages.push(1);
+
+    if (start > 2) pages.push("dots");
+
+    for (let i = start; i <= end; i += 1) {
+        pages.push(i);
+    }
+
+    if (end < total - 1) pages.push("dots");
+
+    pages.push(total);
+
+    return pages;
+}
+
+async function reloadSentEmails(state) {
+    await loadSentEmails(state);
+    renderSentEmailList(state);
+    renderSentPagination(state);
+}
+
+function renderSentPagination(state) {
+    const root = document.getElementById("emails-pagination");
+    const pagesRoot = document.getElementById("pagination-pages");
+    const prevBtn = document.getElementById("pagination-prev-btn");
+    const nextBtn = document.getElementById("pagination-next-btn");
+
+    if (!root || !pagesRoot || !prevBtn || !nextBtn) return;
+
+    if (state.totalPages <= 1) {
+        root.hidden = true;
+        pagesRoot.innerHTML = "";
+        return;
+    }
+
+    root.hidden = false;
+    pagesRoot.innerHTML = "";
+
+    const visiblePages = getVisiblePages(state.currentPage, state.totalPages, 7);
+
+    visiblePages.forEach((item) => {
+        if (item === "dots") {
+            const span = document.createElement("span");
+            span.className = "pagination-dots";
+            span.textContent = "…";
+            pagesRoot.appendChild(span);
+            return;
+        }
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "pagination-page-btn";
+        btn.textContent = String(item);
+        btn.setAttribute("aria-label", `Страница ${item}`);
+
+        if (item === state.currentPage) {
+            btn.classList.add("active");
+            btn.setAttribute("aria-current", "page");
+        }
+
+        btn.addEventListener("click", async () => {
+            if (item === state.currentPage) return;
+            state.currentPage = item;
+            state.selectedEmailId = null;
+            await reloadSentEmails(state);
+        });
+
+        pagesRoot.appendChild(btn);
+    });
+
+    prevBtn.disabled = state.currentPage <= 1;
+    nextBtn.disabled = state.currentPage >= state.totalPages;
+
+    prevBtn.onclick = async () => {
+        if (state.currentPage <= 1) return;
+        state.currentPage -= 1;
+        state.selectedEmailId = null;
+        await reloadSentEmails(state);
+    };
+
+    nextBtn.onclick = async () => {
+        if (state.currentPage >= state.totalPages) return;
+        state.currentPage += 1;
+        state.selectedEmailId = null;
+        await reloadSentEmails(state);
+    };
+}
+
     function renderSentEmailList(state) {
         const container = document.getElementById("emailsContainer");
         if (!container) return;
 
-        let filtered = [...state.emails];
-
-        if (state.currentSearchTerm.trim() !== "") {
-            const term = state.currentSearchTerm.toLowerCase();
-            filtered = filtered.filter((email) =>
-                String(email.subject || "").toLowerCase().includes(term) ||
-                String(email.sender || "").toLowerCase().includes(term) ||
-                String(email.recipient || "").toLowerCase().includes(term) ||
-                String(email.content || "").toLowerCase().includes(term)
-            );
-        }
-
-        filtered.sort((a, b) => {
-            const dateA = new Date(a.date || 0);
-            const dateB = new Date(b.date || 0);
-            return state.sortNewestFirst ? dateB - dateA : dateA - dateB;
-        });
+        const filtered = [...state.emails];
 
         if (filtered.length === 0) {
             container.innerHTML =
@@ -308,7 +390,17 @@
                 '<div class="email-loading-wrapper"><div class="loading"></div></div>';
         }
 
-        const resp = await fetch("/api/sent", {
+        const params = new URLSearchParams({
+            page: String(state.currentPage),
+            per_page: String(state.perPage),
+            sort: state.sortNewestFirst ? "newest" : "oldest",
+        });
+
+        if (state.currentSearchTerm.trim()) {
+            params.set("search", state.currentSearchTerm.trim());
+        }
+
+        const resp = await fetch(`/api/sent?${params.toString()}`, {
             credentials: "same-origin",
         });
 
@@ -317,10 +409,24 @@
         }
 
         const data = await resp.json();
-        console.log("SENT API DATA =", data);
 
         state.emails = Array.isArray(data.items) ? data.items.map(normalizeSentItem) : [];
-        console.log("SENT NORMALIZED EMAILS =", state.emails);
+        state.currentPage = Number(data.page || 1);
+        state.perPage = Number(data.per_page || 100);
+        state.total = Number(data.total || 0);
+        state.totalPages = Number(data.total_pages || 1);
+
+        if (
+            state.selectedEmailId != null &&
+            !state.emails.some((email) => email.id === state.selectedEmailId)
+        ) {
+            state.selectedEmailId = null;
+            const emailView = document.getElementById("emailView");
+            if (emailView) {
+                emailView.innerHTML =
+                    '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+            }
+        }
     }
 
     function bindSearch(state) {
@@ -328,6 +434,8 @@
         const clearBtn = document.getElementById("search-clear-btn");
 
         if (!searchInput) return;
+
+        let searchTimer = null;
 
         const syncClearBtn = () => {
             if (!clearBtn) return;
@@ -337,15 +445,23 @@
         searchInput.addEventListener("input", () => {
             state.currentSearchTerm = searchInput.value || "";
             syncClearBtn();
-            renderSentEmailList(state);
+
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(async () => {
+                state.currentPage = 1;
+                state.selectedEmailId = null;
+                await reloadSentEmails(state);
+            }, 300);
         });
 
         if (clearBtn) {
-            clearBtn.addEventListener("click", () => {
+            clearBtn.addEventListener("click", async () => {
                 searchInput.value = "";
                 state.currentSearchTerm = "";
                 syncClearBtn();
-                renderSentEmailList(state);
+                state.currentPage = 1;
+                state.selectedEmailId = null;
+                await reloadSentEmails(state);
             });
         }
 
@@ -363,6 +479,7 @@
         if (newestBtn) {
             newestBtn.addEventListener("click", () => {
                 state.sortNewestFirst = true;
+                state.currentPage = 1;
                 newestBtn.classList.add("active");
                 oldestBtn && oldestBtn.classList.remove("active");
             });
@@ -371,14 +488,16 @@
         if (oldestBtn) {
             oldestBtn.addEventListener("click", () => {
                 state.sortNewestFirst = false;
+                state.currentPage = 1;
                 oldestBtn.classList.add("active");
                 newestBtn && newestBtn.classList.remove("active");
             });
         }
 
         if (applyBtn) {
-            applyBtn.addEventListener("click", () => {
-                renderSentEmailList(state);
+            applyBtn.addEventListener("click", async () => {
+                state.selectedEmailId = null;
+                await reloadSentEmails(state);
                 if (filterPanel) {
                     filterPanel.style.display = "none";
                 }
@@ -405,6 +524,11 @@
             selectedEmailId: null,
             currentSearchTerm: "",
             sortNewestFirst: true,
+
+            currentPage: 1,
+            perPage: 100,
+            total: 0,
+            totalPages: 1,
 
             composeDraft: {},
             userSignature: "",
@@ -455,6 +579,7 @@
         try {
             await loadSentEmails(state);
             renderSentEmailList(state);
+            renderSentPagination(state);
         } catch (error) {
             console.error(error);
             const container = document.getElementById("emailsContainer");

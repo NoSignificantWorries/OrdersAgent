@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request, HTTPException, Form, File, UploadFile, Q
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field, ConfigDict
 from pathlib import Path
+from math import ceil
 
 from app.db import get_db_pool
 from app.routers import auth
@@ -421,20 +422,31 @@ async def download_all_result_documents(task_id: int, request: Request):
 async def get_queue(
     request: Request,
     status: str = "",
-    limit: int | None = None,
     archived: bool | None = None,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=100, ge=1, le=100),
+    search: str = "",
+    class_filter: str = Query(default="", alias="class"),
+    sort: str = Query(default="newest"),
 ):
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    if limit is not None:
-        if limit < 1:
-            limit = 1
-        if limit > 2000:
-            limit = 2000
+    result = await list_queue_for_user(
+        user=user,
+        status=status,
+        archived=archived,
+        page=page,
+        per_page=per_page,
+        search=search,
+        class_filter=class_filter,
+        sort=sort,
+    )
 
-    items = await list_queue_for_user(user=user, status=status, limit=limit, archived=archived)
+    total = int(result.get("total", 0))
+    items = list(result.get("items", []))
+    total_pages = max(1, ceil(total / per_page)) if total > 0 else 1
 
     return {
         "user": {
@@ -442,6 +454,10 @@ async def get_queue(
             "email": user["email"],
             "role": user.get("role"),
         },
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
         "count": len(items),
         "items": items,
     }
