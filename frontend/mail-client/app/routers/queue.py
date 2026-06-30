@@ -3,6 +3,7 @@ from io import BytesIO
 from zipfile import ZipFile, ZIP_DEFLATED
 from urllib.parse import quote
 import httpx
+import re
 
 from typing import Annotated, Any
 from fastapi import APIRouter, Request, HTTPException, Form, File, UploadFile, Query
@@ -88,6 +89,20 @@ def normalize_source_type(source_type: str | None) -> str:
     value = (source_type or "").strip().lower()
     return "sent" if value == "sent" else "inbox"
 
+
+def _sanitize_download_filename(value: str, default: str = "results") -> str:
+    value = (value or "").strip()
+    if not value:
+        return default
+
+    value = re.sub(r'[\\/*?:"<>|]+', "_", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    value = value.strip(" .")
+
+    if not value:
+        return default
+
+    return value[:120]
 
 async def get_email_access_row(
     conn,
@@ -300,7 +315,8 @@ async def download_all_result_documents(task_id: int, request: Request):
                 SELECT
                     t.id,
                     t.email_id,
-                    e.mailbox
+                    e.mailbox,
+                    e.email_subject
                 FROM tasks t
                 JOIN emails e ON e.id = t.email_id
                 WHERE t.id = $1
@@ -313,7 +329,8 @@ async def download_all_result_documents(task_id: int, request: Request):
                 SELECT
                     t.id,
                     t.email_id,
-                    e.mailbox
+                    e.mailbox,
+                    e.email_subject
                 FROM tasks t
                 JOIN emails e ON e.id = t.email_id
                 WHERE t.id = $1
@@ -389,7 +406,9 @@ async def download_all_result_documents(task_id: int, request: Request):
 
     zip_buffer.seek(0)
 
-    zip_name = f"task-{task_id}-results.zip"
+    email_subject = task["email_subject"] or ""
+    safe_subject = _sanitize_download_filename(email_subject, default=f"task-{task_id}")
+    zip_name = f"{safe_subject} - результаты.zip"
     return StreamingResponse(
         zip_buffer,
         media_type="application/zip",
@@ -535,7 +554,8 @@ async def download_all_source_documents(email_id: int, request: Request):
                 """
                 SELECT
                     e.id,
-                    e.mailbox
+                    e.mailbox,
+                    e.email_subject
                 FROM emails e
                 WHERE e.id = $1
                 """,
@@ -546,7 +566,8 @@ async def download_all_source_documents(email_id: int, request: Request):
                 """
                 SELECT
                     e.id,
-                    e.mailbox
+                    e.mailbox,
+                    e.email_subject
                 FROM emails e
                 WHERE e.id = $1
                   AND e.mailbox = $2
@@ -603,7 +624,9 @@ async def download_all_source_documents(email_id: int, request: Request):
 
     zip_buffer.seek(0)
 
-    zip_name = f"email-{email_id}-attachments.zip"
+    email_subject = email_row["email_subject"] or ""
+    safe_subject = _sanitize_download_filename(email_subject, default=f"email-{email_id}")
+    zip_name = f"{safe_subject} - входящие.zip"
     return StreamingResponse(
         zip_buffer,
         media_type="application/zip",

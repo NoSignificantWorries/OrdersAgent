@@ -3,6 +3,26 @@
         mapTaskStatusToUiStatus,
     } = window.MailFormatters;
 
+    function getFilenameFromContentDisposition(headerValue) {
+        if (!headerValue) return "";
+
+        const utf8Match = headerValue.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+        if (utf8Match && utf8Match[1]) {
+            try {
+                return decodeURIComponent(utf8Match[1]);
+            } catch (_) {}
+        }
+
+        const asciiMatch = headerValue.match(/filename\s*=\s*"([^"]+)"/i)
+            || headerValue.match(/filename\s*=\s*([^;]+)/i);
+
+        if (asciiMatch && asciiMatch[1]) {
+            return asciiMatch[1].trim().replace(/^"|"$/g, "");
+        }
+
+        return "";
+    }
+
     async function downloadBlob(url, filename) {
         const resp = await fetch(url, {
             method: "GET",
@@ -24,9 +44,13 @@
         const blob = await resp.blob();
         const objectUrl = URL.createObjectURL(blob);
 
+        const contentDisposition = resp.headers.get("Content-Disposition") || "";
+        const serverFilename = getFilenameFromContentDisposition(contentDisposition);
+        const finalFilename = serverFilename || filename || "file";
+
         const link = document.createElement("a");
         link.href = objectUrl;
-        link.download = filename || "file";
+        link.download = finalFilename;
         document.body.appendChild(link);
         link.click();
         link.remove();
