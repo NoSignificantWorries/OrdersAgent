@@ -41,6 +41,14 @@
                     >
                         Отработанные
                     </a>
+
+                    <a
+                        href="/sent"
+                        class="nav-btn {% if current_page == 'sent' %}active{% endif %}"
+                        {% if current_page == 'sent' %}aria-current="page"{% endif %}
+                    >
+                        Исходящие
+                    </a>
                 </nav>
             </div>
 
@@ -67,6 +75,8 @@
                     <h3>
                         {% if current_page == 'archived' %}
                             Отработанные
+                        {% elif current_page == 'sent' %}
+                            Исходящие
                         {% else %}
                             Входящие
                         {% endif %}
@@ -82,28 +92,30 @@
                 </div>
 
                 <div id="filter-panel" class="filter-panel" style="display: none;">
-                    <div class="filter-group">
-                        <label>Статус:</label>
-                        <select id="status-filter-select">
-                            <option value="all">Все</option>
-                            <option value="waiting">Ожидание</option>
-                            <option value="processing">Обработка</option>
-                            <option value="manual_review">Требуется ручная проверка</option>
-                            <option value="completed">Завершено</option>
-                            <option value="error">Ошибка</option>
-                        </select>
-                    </div>
+                    {% if current_page != 'sent' %}
+                        <div class="filter-group">
+                            <label>Статус:</label>
+                            <select id="status-filter-select">
+                                <option value="all">Все</option>
+                                <option value="waiting">Ожидание</option>
+                                <option value="processing">Обработка</option>
+                                <option value="manual_review">Требуется ручная проверка</option>
+                                <option value="completed">Завершено</option>
+                                <option value="error">Ошибка</option>
+                            </select>
+                        </div>
 
-                    <div class="filter-group">
-                        <label>Класс:</label>
-                        <select id="class-filter-select">
-                            <option value="all">Все классы</option>
-                            <option value="request">Заявка</option>
-                            <option value="calculation">Расчёт</option>
-                            <option value="question">Вопрос</option>
-                            <option value="undefined_only">Не определён</option>
-                        </select>
-                    </div>
+                        <div class="filter-group">
+                            <label>Класс:</label>
+                            <select id="class-filter-select">
+                                <option value="all">Все классы</option>
+                                <option value="request">Заявка</option>
+                                <option value="calculation">Расчёт</option>
+                                <option value="question">Вопрос</option>
+                                <option value="undefined_only">Не определён</option>
+                            </select>
+                        </div>
+                    {% endif %}
 
                     <div class="filter-group">
                         <label>Сортировка:</label>
@@ -145,7 +157,9 @@
                 <div class="tabs-container">
                     <div class="tabs-header">
                         <button class="tab-button active" data-tab="emails">Письма</button>
-                        <button class="tab-button" data-tab="chat">Чат</button>
+                        {% if current_page != 'sent' %}
+                            <button class="tab-button" data-tab="chat">Чат</button>
+                        {% endif %}
                     </div>
 
                     <div class="tabs-content">
@@ -155,14 +169,16 @@
                             </div>
                         </div>
 
-                        <div class="tab-pane" id="tab-chat">
-                            <div class="chat-container">
-                                <div id="chat-rows-container"></div>
-                                <div class="chat-submit">
-                                    <button id="chat-send-btn" class="chat-send-button">Отправить</button>
+                        {% if current_page != 'sent' %}
+                            <div class="tab-pane" id="tab-chat">
+                                <div class="chat-container">
+                                    <div id="chat-rows-container"></div>
+                                    <div class="chat-submit">
+                                        <button id="chat-send-btn" class="chat-send-button">Отправить</button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        {% endif %}
                     </div>
                 </div>
             </main>
@@ -190,6 +206,8 @@
     <script src="/static/js/mail-common.js"></script>
     {% if current_page == 'archived' %}
         <script src="/static/js/archived-page.js"></script>
+    {% elif current_page == 'sent' %}
+        <script src="/static/js/sent-page.js"></script>
     {% else %}
         <script src="/static/js/inbox-page.js"></script>
     {% endif %}

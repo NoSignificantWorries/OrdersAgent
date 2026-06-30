@@ -15,6 +15,8 @@
             state.composeDraft.mode === "forward" ? "forward" : "new";
         state.composeDraft.emailId =
             state.composeDraft.emailId == null ? null : Number(state.composeDraft.emailId);
+        state.composeDraft.sourceType =
+            state.composeDraft.sourceType === "sent" ? "sent" : "inbox";
         state.composeDraft.to = state.composeDraft.to || "";
         state.composeDraft.subject = state.composeDraft.subject || "";
         state.composeDraft.body = state.composeDraft.body || "";
@@ -51,6 +53,7 @@
         ensureComposeState(state);
         state.composeDraft.mode = "new";
         state.composeDraft.emailId = null;
+        state.composeDraft.sourceType = "inbox";
         state.composeDraft.to = "";
         state.composeDraft.subject = "";
         state.composeDraft.body = "";
@@ -388,6 +391,9 @@
         await ensureUserSignature(state);
 
         const emailId = Number(payload?.emailId);
+        const sourceType =
+            payload?.sourceType === "sent" ? "sent" : "inbox";
+
         if (Number.isNaN(emailId)) {
             throw new Error("Некорректный идентификатор письма");
         }
@@ -401,7 +407,7 @@
             throw new Error("Метод загрузки черновика пересылки не подключен");
         }
 
-        const draftData = await loader(emailId);
+        const draftData = await loader(emailId, { sourceType });
         const attachments = Array.isArray(draftData?.attachments)
             ? draftData.attachments
             : [];
@@ -411,10 +417,11 @@
         state.composeDraft.isOpen = true;
         state.composeDraft.mode = "forward";
         state.composeDraft.emailId = emailId;
+        state.composeDraft.sourceType = sourceType;
         state.composeDraft.to = typeof draftData?.to === "string" ? draftData.to : "";
         state.composeDraft.subject =
             typeof draftData?.subject === "string" ? draftData.subject : "";
-                state.composeDraft.body = appendSignatureIfMissing(
+        state.composeDraft.body = appendSignatureIfMissing(
             typeof draftData?.body === "string" ? draftData.body : "",
             state.userSignature,
         );
@@ -561,6 +568,10 @@
             if (emailId == null || Number.isNaN(Number(emailId))) {
                 throw new Error("Не удалось определить письмо для пересылки");
             }
+
+            const sourceType =
+                state.composeDraft.sourceType === "sent" ? "sent" : "inbox";
+            formData.append("source_type", sourceType);
 
             selectedDocumentIds.forEach((documentId) => {
                 formData.append("include_document_ids", String(documentId));

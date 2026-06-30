@@ -116,7 +116,9 @@ func main() {
                 return
             }
 
-            draft, err := storage.BuildForwardDraft(db, emailID)
+            sourceType := strings.TrimSpace(r.URL.Query().Get("source_type"))
+
+			draft, err := storage.BuildForwardDraft(db, emailID, sourceType)
             if err != nil {
                 log.Printf("forward draft failed | email_id=%d err=%v", emailID, err)
                 writeJSONError(w, http.StatusInternalServerError, "failed to build forward draft")
@@ -336,6 +338,7 @@ func main() {
 
 			to := strings.TrimSpace(r.FormValue("to"))
 			body := strings.TrimSpace(r.FormValue("body"))
+			sourceType := strings.TrimSpace(r.FormValue("source_type"))
 
 			if to == "" {
 				http.Error(w, "to is empty", http.StatusBadRequest)
@@ -359,8 +362,9 @@ func main() {
 			}
 
 			log.Printf(
-				"forward send start | email_id=%d to=%q include_docs=%d new_attachments=%d",
+				"forward send start | email_id=%d source_type=%q to=%q include_docs=%d new_attachments=%d",
 				emailID,
+				sourceType,
 				to,
 				len(includeDocumentIDs),
 				len(attachments),
@@ -372,8 +376,9 @@ func main() {
 				Body:               body,
 				IncludeDocumentIDs: includeDocumentIDs,
 				Attachments:        attachments,
+				SourceType:         sourceType,
 			}); err != nil {
-				log.Printf("forward send failed | email_id=%d err=%v", emailID, err)
+				log.Printf("forward send failed | email_id=%d source_type=%q err=%v", emailID, sourceType, err)
 				http.Error(w, "failed to forward email", http.StatusInternalServerError)
 				return
 			}

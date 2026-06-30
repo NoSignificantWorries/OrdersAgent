@@ -198,8 +198,15 @@
         return resp;
     }
 
-    async function loadForwardDraft(emailId) {
-        const resp = await fetch(`/api/emails/${emailId}/forward-draft`, {
+    async function loadForwardDraft(emailId, options = {}) {
+        const sourceType = options?.sourceType === "sent" ? "sent" : "inbox";
+
+        const url = new URL(`/api/emails/${emailId}/forward-draft`, window.location.origin);
+        url.search = new URLSearchParams({
+            source_type: sourceType,
+        }).toString();
+
+        const resp = await fetch(url.toString(), {
             method: "GET",
             headers: { Accept: "application/json" },
             credentials: "same-origin",

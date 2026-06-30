@@ -5,7 +5,7 @@ from urllib.parse import quote
 import httpx
 
 from typing import Annotated, Any
-from fastapi import APIRouter, Request, HTTPException, Form, File, UploadFile
+from fastapi import APIRouter, Request, HTTPException, Form, File, UploadFile, Query
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field, ConfigDict
 from pathlib import Path
@@ -83,6 +83,67 @@ def append_signature_if_missing(body: str | None, signature: str | None) -> str:
         return signature_block
 
     return f"{normalized_body}\n\n{signature_block}"
+
+def normalize_source_type(source_type: str | None) -> str:
+    value = (source_type or "").strip().lower()
+    return "sent" if value == "sent" else "inbox"
+
+
+async def get_email_access_row(
+    conn,
+    *,
+    email_id: int,
+    user: dict[str, Any],
+    source_type: str,
+):
+    normalized_source_type = normalize_source_type(source_type)
+
+    if normalized_source_type == "sent":
+        if user.get("role") == "admin":
+            return await conn.fetchrow(
+                """
+                SELECT id, mailbox
+                FROM sent_emails
+                WHERE id = $1
+                LIMIT 1
+                """,
+                email_id,
+            )
+
+        return await conn.fetchrow(
+            """
+            SELECT id, mailbox
+            FROM sent_emails
+            WHERE id = $1
+              AND mailbox = $2
+            LIMIT 1
+            """,
+            email_id,
+            user["email"],
+        )
+
+    if user.get("role") == "admin":
+        return await conn.fetchrow(
+            """
+            SELECT id, mailbox
+            FROM emails
+            WHERE id = $1
+            LIMIT 1
+            """,
+            email_id,
+        )
+
+    return await conn.fetchrow(
+        """
+        SELECT id, mailbox
+        FROM emails
+        WHERE id = $1
+          AND mailbox = $2
+        LIMIT 1
+        """,
+        email_id,
+        user["email"],
+    )
 
 @router.get("/me/signature")
 async def get_my_signature(request: Request):
@@ -1101,36 +1162,26 @@ async def reply_to_email(
     return Response(status_code=204)
 
 @router.get("/emails/{email_id}/forward-draft", response_model=ForwardDraftResponse)
-async def get_forward_draft(email_id: int, request: Request):
+async def get_forward_draft(
+    email_id: int,
+    request: Request,
+    source_type: str | None = Query(default=None),
+):
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    normalized_source_type = normalize_source_type(source_type)
+
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        if user.get("role") == "admin":
-            row = await conn.fetchrow(
-                """
-                SELECT id, mailbox
-                FROM emails
-                WHERE id = $1
-                LIMIT 1
-                """,
-                email_id,
-            )
-        else:
-            row = await conn.fetchrow(
-                """
-                SELECT id, mailbox
-                FROM emails
-                WHERE id = $1
-                  AND mailbox = $2
-                LIMIT 1
-                """,
-                email_id,
-                user["email"],
-            )
+        row = await get_email_access_row(
+            conn,
+            email_id=email_id,
+            user=user,
+            source_type=normalized_source_type,
+        )
 
     if not row:
         raise HTTPException(status_code=404, detail="Письмо не найдено")
@@ -1139,7 +1190,10 @@ async def get_forward_draft(email_id: int, request: Request):
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(mail_service_url)
+            resp = await client.get(
+                mail_service_url,
+                params={"source_type": normalized_source_type},
+            )
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
 
@@ -1173,6 +1227,7 @@ async def forward_email(
     body: Annotated[str, Form(...)],
     include_document_ids: Annotated[list[int] | None, Form()] = None,
     attachments: Annotated[list[UploadFile] | None, File()] = None,
+    source_type: Annotated[str | None, Form()] = None,
 ):
     attachments = attachments or []
     include_document_ids = include_document_ids or []
@@ -1180,6 +1235,8 @@ async def forward_email(
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    normalized_source_type = normalize_source_type(source_type)
 
     to = (to or "").strip()
     body = body or ""
@@ -1196,28 +1253,12 @@ async def forward_email(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        if user.get("role") == "admin":
-            row = await conn.fetchrow(
-                """
-                SELECT id, mailbox
-                FROM emails
-                WHERE id = $1
-                LIMIT 1
-                """,
-                email_id,
-            )
-        else:
-            row = await conn.fetchrow(
-                """
-                SELECT id, mailbox
-                FROM emails
-                WHERE id = $1
-                  AND mailbox = $2
-                LIMIT 1
-                """,
-                email_id,
-                user["email"],
-            )
+        row = await get_email_access_row(
+            conn,
+            email_id=email_id,
+            user=user,
+            source_type=normalized_source_type,
+        )
 
     if not row:
         raise HTTPException(status_code=404, detail="Письмо не найдено")
@@ -1229,6 +1270,7 @@ async def forward_email(
         "to": to,
         "body": body,
         "include_document_ids": [str(document_id) for document_id in include_document_ids],
+        "source_type": normalized_source_type,
     }
 
     try:

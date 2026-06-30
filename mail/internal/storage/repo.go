@@ -10,6 +10,14 @@ import (
 	"net/mail"
 	"crypto/rand"
 	"encoding/hex"
+    "bytes"
+    "io"
+    "encoding/base64"
+    "html"
+    "mime"
+    "mime/multipart"
+    "mime/quotedprintable"
+    "regexp"
 
     mailsmtp "mail/internal/smtp"
 	"mail/internal/parser"
@@ -102,6 +110,7 @@ type ForwardEmailRequest struct {
 	Body               string
 	IncludeDocumentIDs []int64
 	Attachments        []SendAttachment
+    SourceType          string
 }
 
 // DBRepo — пишет метаданные в Postgres и файлы в MinIO.
@@ -115,6 +124,15 @@ type SentAttachment struct {
     Filename    string
     ContentType string
     Data        []byte
+}
+
+type SentDocumentRecord struct {
+    ID             int64
+    SentEmailID     int64
+    Filename       string
+    MinioObjectKey string
+    ContentType    string
+    SizeBytes      int64
 }
 
 func extractReplyAddress(replyTo string, emailFrom string) (string, error) {
@@ -213,6 +231,100 @@ func parseRecipients(raw string) ([]string, error) {
     return recipients, nil
 }
 
+func normalizeSourceType(v string) string {
+    if strings.EqualFold(strings.TrimSpace(v), "sent") {
+        return "sent"
+    }
+    return "inbox"
+}
+
+func ListSentDocumentsByEmailID(db *api.DB, emailID int64) ([]SentDocumentRecord, error) {
+    rows, err := db.Conn.Query(`
+        SELECT id, sent_email_id, filename, minio_object_key, content_type, size_bytes
+        FROM sent_documents
+        WHERE sent_email_id = $1
+        ORDER BY id
+    `, emailID)
+    if err != nil {
+        return nil, fmt.Errorf("query sent documents by email: %w", err)
+    }
+    defer rows.Close()
+
+    var items []SentDocumentRecord
+    for rows.Next() {
+        var rec SentDocumentRecord
+        if err := rows.Scan(
+            &rec.ID,
+            &rec.SentEmailID,
+            &rec.Filename,
+            &rec.MinioObjectKey,
+            &rec.ContentType,
+            &rec.SizeBytes,
+        ); err != nil {
+            return nil, fmt.Errorf("scan sent document: %w", err)
+        }
+        items = append(items, rec)
+    }
+
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("iterate sent documents: %w", err)
+    }
+
+    return items, nil
+}
+
+func ListSentDocumentsByIDsForEmail(db *api.DB, emailID int64, documentIDs []int64) ([]SentDocumentRecord, error) {
+    if len(documentIDs) == 0 {
+        return []SentDocumentRecord{}, nil
+    }
+
+    placeholders := make([]string, 0, len(documentIDs))
+    args := make([]any, 0, len(documentIDs)+1)
+
+    args = append(args, emailID) // $1
+
+    for i, id := range documentIDs {
+        placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
+        args = append(args, id)
+    }
+
+    query := fmt.Sprintf(`
+        SELECT id, sent_email_id, filename, minio_object_key, content_type, size_bytes
+        FROM sent_documents
+        WHERE sent_email_id = $1
+          AND id IN (%s)
+        ORDER BY id
+    `, strings.Join(placeholders, ", "))
+
+    rows, err := db.Conn.Query(query, args...)
+    if err != nil {
+        return nil, fmt.Errorf("query sent documents by ids: %w", err)
+    }
+    defer rows.Close()
+
+    var items []SentDocumentRecord
+    for rows.Next() {
+        var rec SentDocumentRecord
+        if err := rows.Scan(
+            &rec.ID,
+            &rec.SentEmailID,
+            &rec.Filename,
+            &rec.MinioObjectKey,
+            &rec.ContentType,
+            &rec.SizeBytes,
+        ); err != nil {
+            return nil, fmt.Errorf("scan sent document by ids: %w", err)
+        }
+        items = append(items, rec)
+    }
+
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("iterate sent documents by ids: %w", err)
+    }
+
+    return items, nil
+}
+
 func buildForwardSubject(subject string) string {
 	subject = strings.TrimSpace(subject)
 	if subject == "" {
@@ -222,6 +334,226 @@ func buildForwardSubject(subject string) string {
 		return subject
 	}
 	return "Fwd: " + subject
+}
+
+func normalizeEmailText(s string) string {
+    s = strings.ReplaceAll(s, "\r\n", "\n")
+    s = strings.ReplaceAll(s, "\r", "\n")
+    s = html.UnescapeString(s)
+
+    lines := strings.Split(s, "\n")
+    cleaned := make([]string, 0, len(lines))
+    emptyCount := 0
+
+    for _, line := range lines {
+        line = strings.TrimRight(line, " \t")
+        if strings.TrimSpace(line) == "" {
+            emptyCount++
+            if emptyCount > 1 {
+                continue
+            }
+            cleaned = append(cleaned, "")
+            continue
+        }
+        emptyCount = 0
+        cleaned = append(cleaned, line)
+    }
+
+    return strings.TrimSpace(strings.Join(cleaned, "\n"))
+}
+
+func stripHTMLToText(s string) string {
+    if strings.TrimSpace(s) == "" {
+        return ""
+    }
+
+    reBreaks := regexp.MustCompile(`(?is)<\s*(br|/p|/div|/li|/tr|/h[1-6])\b[^>]*>`)
+    s = reBreaks.ReplaceAllString(s, "\n")
+
+    reBlocks := regexp.MustCompile(`(?is)</\s*(p|div|li|tr|table|section|article|ul|ol|h[1-6])\s*>`)
+    s = reBlocks.ReplaceAllString(s, "\n")
+
+    reTags := regexp.MustCompile(`(?is)<[^>]+>`)
+    s = reTags.ReplaceAllString(s, "")
+
+    return normalizeEmailText(s)
+}
+
+func decodePartBody(part *multipart.Part) ([]byte, error) {
+    encoding := strings.ToLower(strings.TrimSpace(part.Header.Get("Content-Transfer-Encoding")))
+
+    switch encoding {
+    case "base64":
+        data, err := io.ReadAll(base64.NewDecoder(base64.StdEncoding, part))
+        if err == nil {
+            return data, nil
+        }
+
+        rawData, rawErr := io.ReadAll(part)
+        if rawErr != nil {
+            return nil, rawErr
+        }
+
+        compact := strings.Map(func(r rune) rune {
+            switch r {
+            case '\r', '\n', '\t', ' ':
+                return -1
+            default:
+                return r
+            }
+        }, string(rawData))
+
+        decoded, decErr := base64.StdEncoding.DecodeString(compact)
+        if decErr != nil {
+            return nil, decErr
+        }
+        return decoded, nil
+
+    case "quoted-printable":
+        return io.ReadAll(quotedprintable.NewReader(part))
+
+    default:
+        return io.ReadAll(part)
+    }
+}
+
+func extractPreferredTextFromMultipartReader(mr *multipart.Reader) (plain string, htmlText string, err error) {
+    for {
+        part, err := mr.NextPart()
+        if err == io.EOF {
+            return plain, htmlText, nil
+        }
+        if err != nil {
+            return plain, htmlText, err
+        }
+
+        dispType, _, _ := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+        if strings.EqualFold(dispType, "attachment") {
+            continue
+        }
+
+        contentType := part.Header.Get("Content-Type")
+        mediaType, params, parseErr := mime.ParseMediaType(contentType)
+        if parseErr != nil || mediaType == "" {
+            mediaType = "text/plain"
+        }
+        mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+
+        if strings.HasPrefix(mediaType, "multipart/") {
+            boundary := params["boundary"]
+            if strings.TrimSpace(boundary) == "" {
+                continue
+            }
+
+            nestedPlain, nestedHTML, nestedErr := extractPreferredTextFromMultipartReader(
+                multipart.NewReader(part, boundary),
+            )
+            if nestedErr != nil {
+                continue
+            }
+
+            if plain == "" && strings.TrimSpace(nestedPlain) != "" {
+                plain = nestedPlain
+            }
+            if htmlText == "" && strings.TrimSpace(nestedHTML) != "" {
+                htmlText = nestedHTML
+            }
+            continue
+        }
+
+        bodyBytes, readErr := decodePartBody(part)
+        if readErr != nil {
+            continue
+        }
+
+        bodyText := normalizeEmailText(string(bodyBytes))
+        if bodyText == "" {
+            continue
+        }
+
+        switch {
+        case strings.HasPrefix(mediaType, "text/plain"):
+            if plain == "" {
+                plain = bodyText
+            }
+        case strings.HasPrefix(mediaType, "text/html"):
+            if htmlText == "" {
+                htmlText = stripHTMLToText(bodyText)
+            }
+        }
+    }
+}
+
+func extractBodyFromRawEmail(raw string) string {
+    raw = strings.TrimSpace(raw)
+    if raw == "" {
+        return ""
+    }
+
+    msg, err := mail.ReadMessage(bytes.NewReader([]byte(raw)))
+    if err != nil {
+        return normalizeEmailText(raw)
+    }
+
+    contentType := msg.Header.Get("Content-Type")
+    mediaType, params, err := mime.ParseMediaType(contentType)
+    if err != nil || mediaType == "" {
+        bodyBytes, readErr := io.ReadAll(msg.Body)
+        if readErr != nil {
+            return normalizeEmailText(raw)
+        }
+        body := normalizeEmailText(string(bodyBytes))
+        if body == "" {
+            return normalizeEmailText(raw)
+        }
+        return body
+    }
+
+    mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+
+    if !strings.HasPrefix(mediaType, "multipart/") {
+        bodyBytes, readErr := io.ReadAll(msg.Body)
+        if readErr != nil {
+            return normalizeEmailText(raw)
+        }
+
+        body := normalizeEmailText(string(bodyBytes))
+        if strings.HasPrefix(mediaType, "text/html") {
+            body = stripHTMLToText(body)
+        }
+
+        if body == "" {
+            return normalizeEmailText(raw)
+        }
+        return body
+    }
+
+    boundary := strings.TrimSpace(params["boundary"])
+    if boundary == "" {
+        bodyBytes, readErr := io.ReadAll(msg.Body)
+        if readErr != nil {
+            return normalizeEmailText(raw)
+        }
+        body := normalizeEmailText(string(bodyBytes))
+        if body == "" {
+            return normalizeEmailText(raw)
+        }
+        return body
+    }
+
+    plain, htmlText, err := extractPreferredTextFromMultipartReader(
+        multipart.NewReader(msg.Body, boundary),
+    )
+    if err == nil {
+        if strings.TrimSpace(plain) != "" {
+            return plain
+        }
+        if strings.TrimSpace(htmlText) != "" {
+            return htmlText
+        }
+    }
+
+    return normalizeEmailText(raw)
 }
 
 func buildForwardBody(ctx *EmailReplyContext) string {
@@ -250,9 +582,10 @@ func buildForwardBody(ctx *EmailReplyContext) string {
 
 	sb.WriteString("\n")
 
-	rawBody := strings.ReplaceAll(ctx.RawEmail, "\r\n", "\n")
-	rawBody = strings.ReplaceAll(rawBody, "\r", "\n")
-	sb.WriteString(rawBody)
+	rawBody := extractBodyFromRawEmail(ctx.RawEmail)
+    if strings.TrimSpace(rawBody) != "" {
+        sb.WriteString(rawBody)
+    }
 
 	return sb.String()
 }
@@ -683,6 +1016,90 @@ func (r *DBRepo) SaveSentEmailWithAttachments(
     return sentEmailID, nil
 }
 
+func GetForwardContext(db *api.DB, emailID int64, sourceType string) (*EmailReplyContext, error) {
+    switch normalizeSourceType(sourceType) {
+    case "sent":
+        return GetSentEmailReplyContext(db, emailID)
+    default:
+        return GetEmailReplyContext(db, emailID)
+    }
+}
+
+func GetSentEmailReplyContext(db *api.DB, emailID int64) (*EmailReplyContext, error) {
+    row := db.Conn.QueryRow(`
+        SELECT
+            id,
+            user_id,
+            mailbox,
+            email_from,
+            reply_to,
+            message_id,
+            in_reply_to,
+            references_header,
+            email_subject,
+            raw_email,
+            email_date
+        FROM sent_emails
+        WHERE id = $1
+    `, emailID)
+
+    var (
+        id               int64
+        userID           sql.NullInt64
+        mailbox          sql.NullString
+        emailFrom        sql.NullString
+        replyTo          sql.NullString
+        messageID        sql.NullString
+        inReplyTo        sql.NullString
+        referencesHeader sql.NullString
+        emailSubject     sql.NullString
+        rawEmail         sql.NullString
+        emailDate        sql.NullTime
+    )
+
+    if err := row.Scan(
+        &id,
+        &userID,
+        &mailbox,
+        &emailFrom,
+        &replyTo,
+        &messageID,
+        &inReplyTo,
+        &referencesHeader,
+        &emailSubject,
+        &rawEmail,
+        &emailDate,
+    ); err != nil {
+        if err == sql.ErrNoRows {
+            return nil, fmt.Errorf("sent email not found: id=%d", emailID)
+        }
+        return nil, fmt.Errorf("get sent email for reply: %w", err)
+    }
+
+    if !userID.Valid {
+        return nil, fmt.Errorf("sent email id=%d has NULL user_id", emailID)
+    }
+
+    var dt time.Time
+    if emailDate.Valid {
+        dt = emailDate.Time
+    }
+
+    return &EmailReplyContext{
+        EmailID:          id,
+        UserID:           userID.Int64,
+        Mailbox:          mailbox.String,
+        EmailFrom:        emailFrom.String,
+        ReplyTo:          replyTo.String,
+        MessageID:        messageID.String,
+        InReplyTo:        inReplyTo.String,
+        ReferencesHeader: referencesHeader.String,
+        EmailSubject:     emailSubject.String,
+        RawEmail:         rawEmail.String,
+        EmailDate:        dt,
+    }, nil
+}
+
 func GetEmailReplyContext(db *api.DB, emailID int64) (*EmailReplyContext, error) {
     rec, err := db.GetEmailForReply(context.Background(), emailID)
     if err != nil {
@@ -716,36 +1133,58 @@ func GetEmailReplyContext(db *api.DB, emailID int64) (*EmailReplyContext, error)
     }, nil
 }
 
-func BuildForwardDraft(db *api.DB, emailID int64) (*ForwardDraft, error) {
-	ctx, err := GetEmailReplyContext(db, emailID)
-	if err != nil {
-		return nil, err
-	}
+func BuildForwardDraft(db *api.DB, emailID int64, sourceType string) (*ForwardDraft, error) {
+    normalizedSource := normalizeSourceType(sourceType)
 
-	docs, err := db.ListDocumentsByEmailID(context.Background(), emailID)
-	if err != nil {
-		return nil, fmt.Errorf("list documents by email: %w", err)
-	}
+    ctx, err := GetForwardContext(db, emailID, normalizedSource)
+    if err != nil {
+        return nil, err
+    }
 
-	attachments := make([]ForwardAttachment, 0, len(docs))
-	for _, doc := range docs {
-		attachments = append(attachments, ForwardAttachment{
-			DocumentID:  doc.ID,
-			Filename:    doc.Filename,
-			ContentType: doc.ContentType,
-			SizeBytes:   doc.SizeBytes,
-			Selected:    true,
-		})
-	}
+    attachments := make([]ForwardAttachment, 0)
 
-	return &ForwardDraft{
-		EmailID:     ctx.EmailID,
-		Mailbox:     ctx.Mailbox,
-		To:          "",
-		Subject:     buildForwardSubject(ctx.EmailSubject),
-		Body:        buildForwardBody(ctx),
-		Attachments: attachments,
-	}, nil
+    if normalizedSource == "sent" {
+        docs, err := ListSentDocumentsByEmailID(db, emailID)
+        if err != nil {
+            return nil, fmt.Errorf("list sent documents by email: %w", err)
+        }
+
+        attachments = make([]ForwardAttachment, 0, len(docs))
+        for _, doc := range docs {
+            attachments = append(attachments, ForwardAttachment{
+                DocumentID:  doc.ID,
+                Filename:    doc.Filename,
+                ContentType: doc.ContentType,
+                SizeBytes:   doc.SizeBytes,
+                Selected:    true,
+            })
+        }
+    } else {
+        docs, err := db.ListDocumentsByEmailID(context.Background(), emailID)
+        if err != nil {
+            return nil, fmt.Errorf("list documents by email: %w", err)
+        }
+
+        attachments = make([]ForwardAttachment, 0, len(docs))
+        for _, doc := range docs {
+            attachments = append(attachments, ForwardAttachment{
+                DocumentID:  doc.ID,
+                Filename:    doc.Filename,
+                ContentType: doc.ContentType,
+                SizeBytes:   doc.SizeBytes,
+                Selected:    true,
+            })
+        }
+    }
+
+    return &ForwardDraft{
+        EmailID:     ctx.EmailID,
+        Mailbox:     ctx.Mailbox,
+        To:          "",
+        Subject:     buildForwardSubject(ctx.EmailSubject),
+        Body:        buildForwardBody(ctx),
+        Attachments: attachments,
+    }, nil
 }
 
 func sumSMTPAttachmentsSize(items []mailsmtp.Attachment) int {
@@ -1022,6 +1461,13 @@ func SendEmail(db *api.DB, repo *DBRepo, smtpClient *mailsmtp.Client, imapCfg *c
 }
 
 func ForwardEmail(db *api.DB, repo *DBRepo, smtpClient *mailsmtp.Client, imapCfg *config.Config, req ForwardEmailRequest) error {
+    sourceType := normalizeSourceType(req.SourceType)
+
+    ctxReply, err := GetForwardContext(db, req.EmailID, sourceType)
+    if err != nil {
+        return err
+    }
+
     if repo == nil {
         return fmt.Errorf("repo is nil")
     }
@@ -1039,11 +1485,6 @@ func ForwardEmail(db *api.DB, repo *DBRepo, smtpClient *mailsmtp.Client, imapCfg
         return fmt.Errorf("body is empty")
     }
 
-    ctxReply, err := GetEmailReplyContext(db, req.EmailID)
-    if err != nil {
-        return err
-    }
-
     authData, err := GetUserMailAuth(db, ctxReply.UserID)
     if err != nil {
         return fmt.Errorf("get user mail auth: %w", err)
@@ -1056,25 +1497,44 @@ func ForwardEmail(db *api.DB, repo *DBRepo, smtpClient *mailsmtp.Client, imapCfg
 
     subject := buildForwardSubject(ctxReply.EmailSubject)
 
-    selectedDocs, err := db.ListDocumentsByIDsForEmail(context.Background(), req.EmailID, req.IncludeDocumentIDs)
-    if err != nil {
-        return fmt.Errorf("list selected documents: %w", err)
-    }
+    smtpAttachments := make([]mailsmtp.Attachment, 0, len(req.IncludeDocumentIDs)+len(req.Attachments))
 
-    smtpAttachments := make([]mailsmtp.Attachment, 0, len(selectedDocs)+len(req.Attachments))
-
-    // Вложения из исходящего письма (берём из incomingStore)
-    for _, doc := range selectedDocs {
-        data, err := repo.incomingStore.Download(context.Background(), doc.MinioObjectKey)
+    if sourceType == "sent" {
+        selectedDocs, err := ListSentDocumentsByIDsForEmail(db, req.EmailID, req.IncludeDocumentIDs)
         if err != nil {
-            return fmt.Errorf("download attachment document_id=%d: %w", doc.ID, err)
+            return fmt.Errorf("list selected sent documents: %w", err)
         }
 
-        smtpAttachments = append(smtpAttachments, mailsmtp.Attachment{
-            Filename:    doc.Filename,
-            ContentType: doc.ContentType,
-            Data:        data,
-        })
+        for _, doc := range selectedDocs {
+            data, err := repo.outgoingStore.Download(context.Background(), doc.MinioObjectKey)
+            if err != nil {
+                return fmt.Errorf("download sent attachment document_id=%d: %w", doc.ID, err)
+            }
+
+            smtpAttachments = append(smtpAttachments, mailsmtp.Attachment{
+                Filename:    doc.Filename,
+                ContentType: doc.ContentType,
+                Data:        data,
+            })
+        }
+    } else {
+        selectedDocs, err := db.ListDocumentsByIDsForEmail(context.Background(), req.EmailID, req.IncludeDocumentIDs)
+        if err != nil {
+            return fmt.Errorf("list selected documents: %w", err)
+        }
+
+        for _, doc := range selectedDocs {
+            data, err := repo.incomingStore.Download(context.Background(), doc.MinioObjectKey)
+            if err != nil {
+                return fmt.Errorf("download attachment document_id=%d: %w", doc.ID, err)
+            }
+
+            smtpAttachments = append(smtpAttachments, mailsmtp.Attachment{
+                Filename:    doc.Filename,
+                ContentType: doc.ContentType,
+                Data:        data,
+            })
+        }
     }
 
     // Новые вложения, добавленные при пересылке
