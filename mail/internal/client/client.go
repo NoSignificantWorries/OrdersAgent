@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 	"time"
-	"sort"
+	//"sort"
 
 	"mail/internal/config"
 
@@ -135,73 +135,73 @@ func (c *Client) FetchUnread() ([]imap.UID, error) {
     )
 
     if len(uids) == 0 {
-        c.logAllMessagesDiagnostic()
+        //c.logAllMessagesDiagnostic()
         return nil, nil
     }
 
     return uids, nil
 }
 
-func (c *Client) logAllMessagesDiagnostic() {
-    started := time.Now()
+// func (c *Client) logAllMessagesDiagnostic() {
+//     started := time.Now()
 
-    log.Printf(
-        "imap diagnostic all start | email=%s session_id=%s age=%s",
-        c.email,
-        c.sessionID,
-        time.Since(c.connectedAt),
-    )
+//     log.Printf(
+//         "imap diagnostic all start | email=%s session_id=%s age=%s",
+//         c.email,
+//         c.sessionID,
+//         time.Since(c.connectedAt),
+//     )
 
-    allCriteria := &imap.SearchCriteria{}
-    searchData, err := c.conn.UIDSearch(allCriteria, nil).Wait()
-    duration := time.Since(started)
-    if err != nil {
-        log.Printf(
-            "imap diagnostic all failed | email=%s session_id=%s duration=%s err=%v",
-            c.email,
-            c.sessionID,
-            duration,
-            err,
-        )
-        return
-    }
+//     allCriteria := &imap.SearchCriteria{}
+//     searchData, err := c.conn.UIDSearch(allCriteria, nil).Wait()
+//     duration := time.Since(started)
+//     if err != nil {
+//         log.Printf(
+//             "imap diagnostic all failed | email=%s session_id=%s duration=%s err=%v",
+//             c.email,
+//             c.sessionID,
+//             duration,
+//             err,
+//         )
+//         return
+//     }
 
-    c.TouchOK()
+//     c.TouchOK()
 
-    allUIDs := searchData.AllUIDs()
-    log.Printf(
-        "imap diagnostic all done | email=%s session_id=%s duration=%s count=%d",
-        c.email,
-        c.sessionID,
-        duration,
-        len(allUIDs),
-    )
+//     allUIDs := searchData.AllUIDs()
+//     log.Printf(
+//         "imap diagnostic all done | email=%s session_id=%s duration=%s count=%d",
+//         c.email,
+//         c.sessionID,
+//         duration,
+//         len(allUIDs),
+//     )
 
-    if len(allUIDs) == 0 {
-        log.Printf(
-            "imap diagnostic all empty | email=%s session_id=%s",
-            c.email,
-            c.sessionID,
-        )
-        return
-    }
+//     if len(allUIDs) == 0 {
+//         log.Printf(
+//             "imap diagnostic all empty | email=%s session_id=%s",
+//             c.email,
+//             c.sessionID,
+//         )
+//         return
+//     }
 
-    sorted := append([]imap.UID(nil), allUIDs...)
-    sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+//     sorted := append([]imap.UID(nil), allUIDs...)
+//     sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 
-    limit := 5
-    if len(sorted) < limit {
-        limit = len(sorted)
-    }
+//     limit := 5
+//     if len(sorted) < limit {
+//         limit = len(sorted)
+//     }
 
-    tail := sorted[len(sorted)-limit:]
-    log.Printf(
-        "imap diagnostic recent uids | email=%s session_id=%s recent_uids=%v",
-        c.email,
-        c.sessionID,
-        tail,
-    )
-}
+//     tail := sorted[len(sorted)-limit:]
+//     log.Printf(
+//         "imap diagnostic recent uids | email=%s session_id=%s recent_uids=%v",
+//         c.email,
+//         c.sessionID,
+//         tail,
+//     )
+// }
 
 func (c *Client) FetchMessage(uid imap.UID) (*imapclient.FetchCommand, error) {
 	log.Printf("imap fetch message | email=%s session_id=%s uid=%d", c.email, c.sessionID, uid)
