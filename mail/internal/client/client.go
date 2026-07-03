@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"mail/internal/config"
 
@@ -11,8 +12,47 @@ import (
 )
 
 type Client struct {
-	conn *imapclient.Client
-	cfg  *config.Config
+	conn        *imapclient.Client
+	cfg         *config.Config
+	email       string
+	sessionID   string
+	connectedAt time.Time
+	lastOKAt    time.Time
+}
+
+func (c *Client) SessionID() string {
+    if c == nil {
+        return ""
+    }
+    return c.sessionID
+}
+
+func (c *Client) Email() string {
+    if c == nil {
+        return ""
+    }
+    return c.email
+}
+
+func (c *Client) ConnectedAt() time.Time {
+    if c == nil {
+        return time.Time{}
+    }
+    return c.connectedAt
+}
+
+func (c *Client) LastOKAt() time.Time {
+    if c == nil {
+        return time.Time{}
+    }
+    return c.lastOKAt
+}
+
+func (c *Client) TouchOK() {
+    if c == nil {
+        return
+    }
+    c.lastOKAt = time.Now()
 }
 
 // Конструктор по OAuth2 (XOAUTH2).
@@ -40,7 +80,21 @@ func NewOAuth(cfg *config.Config, email, accessToken string) (*Client, error) {
 		return nil, fmt.Errorf("select INBOX: %w", err)
 	}
 
-	return &Client{conn: c, cfg: cfg}, nil
+	now := time.Now()
+	sessionID := fmt.Sprintf("%d", now.UnixNano())
+
+	client := &Client{
+		conn:        c,
+		cfg:         cfg,
+		email:       email,
+		sessionID:   sessionID,
+		connectedAt: now,
+		lastOKAt:    now,
+	}
+
+	log.Printf("imap client ready | email=%s session_id=%s", email, sessionID)
+
+	return client, nil
 }
 
 func (c *Client) FetchUnread() ([]imap.UID, error) {
@@ -48,15 +102,36 @@ func (c *Client) FetchUnread() ([]imap.UID, error) {
         NotFlag: []imap.Flag{"\\Seen"},
     }
 
-    log.Printf("imap search unread start")
+    started := time.Now()
+    log.Printf(
+        "imap search unread start | email=%s session_id=%s age=%s",
+        c.email,
+        c.sessionID,
+        time.Since(c.connectedAt),
+    )
 
     searchData, err := c.conn.UIDSearch(criteria, nil).Wait()
+    duration := time.Since(started)
     if err != nil {
-        return nil, fmt.Errorf("search unread: %w", err)
+        return nil, fmt.Errorf(
+            "search unread: session_id=%s duration=%s: %w",
+            c.sessionID,
+            duration,
+            err,
+        )
     }
 
+    c.TouchOK()
+
     uids := searchData.AllUIDs()
-    log.Printf("imap search unread done | count=%d uids=%v", len(uids), uids)
+    log.Printf(
+        "imap search unread done | email=%s session_id=%s duration=%s count=%d uids=%v",
+        c.email,
+        c.sessionID,
+        duration,
+        len(uids),
+        uids,
+    )
 
     if len(uids) == 0 {
         return nil, nil
@@ -66,7 +141,7 @@ func (c *Client) FetchUnread() ([]imap.UID, error) {
 }
 
 func (c *Client) FetchMessage(uid imap.UID) (*imapclient.FetchCommand, error) {
-	log.Printf("imap fetch message | uid=%d", uid)
+	log.Printf("imap fetch message | email=%s session_id=%s uid=%d", c.email, c.sessionID, uid)
 
 	fetchOptions := &imap.FetchOptions{
 		UID:      true,
@@ -82,20 +157,38 @@ func (c *Client) FetchMessage(uid imap.UID) (*imapclient.FetchCommand, error) {
         },
 	}
 
+	c.TouchOK()
 	return c.conn.Fetch(imap.UIDSetNum(uid), fetchOptions), nil
 }
 
 func (c *Client) MarkRead(uid imap.UID) error {
-	storeFlags := imap.StoreFlags{
-		Op:    imap.StoreFlagsAdd,
-		Flags: []imap.Flag{"\\Seen"},
-	}
-	storeCmd := c.conn.Store(imap.UIDSetNum(uid), &storeFlags, nil)
-	return storeCmd.Close()
+    started := time.Now()
+
+    storeFlags := imap.StoreFlags{
+        Op:    imap.StoreFlagsAdd,
+        Flags: []imap.Flag{"\\Seen"},
+    }
+
+    log.Printf("imap mark read start | email=%s session_id=%s uid=%d", c.email, c.sessionID, uid)
+
+    storeCmd := c.conn.Store(imap.UIDSetNum(uid), &storeFlags, nil)
+    if err := storeCmd.Close(); err != nil {
+        return fmt.Errorf("mark read uid=%d session_id=%s duration=%s: %w", uid, c.sessionID, time.Since(started), err)
+    }
+
+    c.TouchOK()
+    log.Printf("imap mark read done | email=%s session_id=%s uid=%d duration=%s", c.email, c.sessionID, uid, time.Since(started))
+    return nil
 }
 
 func (c *Client) Close() error {
-	return c.conn.Close()
+    log.Printf("imap client close | email=%s session_id=%s age=%s last_ok_ago=%s",
+        c.email,
+        c.sessionID,
+        time.Since(c.connectedAt),
+        time.Since(c.lastOKAt),
+    )
+    return c.conn.Close()
 }
 
 type xoauth2Client struct {
