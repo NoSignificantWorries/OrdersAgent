@@ -10,15 +10,23 @@
     };
 
     function formatDate(dateString) {
-        const date = new Date(dateString);
-        if (isNaN(date)) return "";
+        const formatted = formatDateTime(dateString);
+        if (!formatted) return "";
+
+        const match = formatted.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+        if (!match) return "";
 
         const months = [
             "янв", "фев", "мар", "апр", "май", "июн",
             "июл", "авг", "сен", "окт", "ноя", "дек",
         ];
 
-        return `${date.getDate()} ${months[date.getMonth()]}`;
+        const day = String(Number(match[1]));
+        const monthIndex = Number(match[2]) - 1;
+
+        if (monthIndex < 0 || monthIndex > 11) return "";
+
+        return `${day} ${months[monthIndex]}`;
     }
 
     function formatDateTime(dateString) {
