@@ -151,6 +151,8 @@
         const {
             state,
             escapeHtml,
+            formatDate,
+            formatTimeOnly,
             formatDateTime,
             getStatusName,
             decisionOptions,
@@ -247,7 +249,7 @@
                                                 </span>
 
                                                 <span class="email-thread-item-meta">
-                                                    ${formatDateTime(threadEmail.date)}
+                                                    ${escapeHtml(formatDate(threadEmail.date))} ${escapeHtml(formatTimeOnly(threadEmail.date))}
                                                 </span>
 
                                                 <span class="email-thread-item-subject">
@@ -415,7 +417,7 @@
                     <div class="email-meta">
                         <div><strong>От:</strong> ${escapeHtml(email.sender)}</div>
                         <div><strong>Кому:</strong> ${escapeHtml(email.mailbox)}</div>
-                        <div><strong>Дата:</strong> ${formatDateTime(email.date)}</div>
+                        <div><strong>Дата:</strong> ${escapeHtml(formatDate(email.date))} ${escapeHtml(formatTimeOnly(email.date))}</div>
                     </div>
                 </div>
 

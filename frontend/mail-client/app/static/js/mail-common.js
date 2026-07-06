@@ -695,6 +695,8 @@ function renderEmailCard(email) {
     return renderEmailCardFromModule(email, {
         state: getMailRenderCardState(),
         escapeHtml,
+        formatDate,
+        formatTimeOnly,
         formatDateTime,
         getStatusName,
         decisionOptions,

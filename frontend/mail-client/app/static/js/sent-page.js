@@ -1,29 +1,35 @@
 (function () {
-    function escapeHtml(value) {
-        return String(value ?? "")
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#39;");
-    }
+    // function escapeHtml(value) {
+    //     return String(value ?? "")
+    //         .replace(/&/g, "&amp;")
+    //         .replace(/</g, "&lt;")
+    //         .replace(/>/g, "&gt;")
+    //         .replace(/"/g, "&quot;")
+    //         .replace(/'/g, "&#39;");
+    // }
 
-    function formatDate(value) {
-        if (!value) return "";
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return "";
-        return date.toLocaleDateString("ru-RU");
-    }
+    // function formatDate(value) {
+    //     if (!value) return "";
+    //     const date = new Date(value);
+    //     if (Number.isNaN(date.getTime())) return "";
+    //     return date.toLocaleDateString("ru-RU");
+    // }
 
-    function formatTimeOnly(value) {
-        if (!value) return "";
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return "";
-        return date.toLocaleTimeString("ru-RU", {
-            hour: "2-digit",
-            minute: "2-digit",
-        });
-    }
+    // function formatTimeOnly(value) {
+    //     if (!value) return "";
+    //     const date = new Date(value);
+    //     if (Number.isNaN(date.getTime())) return "";
+    //     return date.toLocaleTimeString("ru-RU", {
+    //         hour: "2-digit",
+    //         minute: "2-digit",
+    //     });
+    // }
+
+    const {
+        escapeHtml,
+        formatDate,
+        formatTimeOnly,
+    } = window.MailFormatters;
 
     function normalizeDocuments(raw) {
         if (!raw) return [];
