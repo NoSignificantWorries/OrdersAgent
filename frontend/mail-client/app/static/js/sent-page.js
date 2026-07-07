@@ -108,11 +108,12 @@
         const date = item.sentat || item.emaildate || item.createdat || null;
 
         return {
-            id: Number(item.emailid || item.id),
-            email_id: Number(item.emailid || item.id),
+            id: Number(item.id || item.source_id || 0),                 // sent_emails.id
+            email_id: Number(item.emailid || item.email_id || item.id), // parent_email_id
+            source_id: Number(item.id || item.source_id || 0),
             subject,
             sender,
-            mailbox: recipient,
+            mailbox: item.mailbox || "",
             recipient,
             to_header: item.toheader || "",
             cc_header: item.ccheader || "",
@@ -123,16 +124,128 @@
             date,
             read: true,
             archived: false,
-            status: null,
-            model_decision: null,
-            predicted_class: null,
-            prob_1: null,
-            message_id: item.messageid || "",
-            in_reply_to: item.inreplyto || "",
+            status: item.status || null,
+            model_decision: item.modeldecision || null,
+            predicted_class: item.predictedclass || null,
+            prob_1: item.prob1 ?? null,
+            message_id: item.messageid || item.message_id || "",
+            in_reply_to: item.inreplyto || item.in_reply_to || "",
             references: item.references || "",
             documents: normalizeDocuments(item.documents),
             task: null,
             source_type: "sent",
+        };
+    }
+
+    const getThreadCountLabel = (count) => {
+        const mod10 = count % 10;
+        const mod100 = count % 100;
+
+        if (mod10 === 1 && mod100 !== 11) return `${count} письмо`;
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+            return `${count} письма`;
+        }
+        return `${count} писем`;
+    };
+
+    async function loadSentThread(emailId) {
+        const resp = await fetch(`/api/emails/${emailId}/thread?source=sent`, {
+            credentials: "same-origin",
+        });
+
+        if (!resp.ok) {
+            let detail = `Не удалось загрузить цепочку (${resp.status})`;
+
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    detail = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(detail);
+        }
+
+        const data = await resp.json();
+        return Array.isArray(data?.items) ? data.items : [];
+    }
+
+    function extractDisplayBodyFromRawEmail(value) {
+        const raw = String(value || "").replace(/\r\n/g, "\n");
+
+        if (!raw.trim()) {
+            return "";
+        }
+
+        const headerBodySeparator = raw.indexOf("\n\n");
+        let body = headerBodySeparator >= 0 ? raw.slice(headerBodySeparator + 2) : raw;
+
+        body = body
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+
+        return body;
+    }
+
+    function normalizeSentThreadItem(threadEmail) {
+        const subject =
+            threadEmail?.subject ||
+            threadEmail?.emailsubject ||
+            "(без темы)";
+
+        const rawSource =
+            threadEmail?.content ||
+            threadEmail?.rawemail ||
+            "";
+
+        const rawText =
+            threadEmail?.thread_source === "sent"
+                ? extractDisplayBodyFromRawEmail(rawSource)
+                : rawSource;
+
+        const preview =
+            threadEmail?.preview ||
+            String(rawText)
+                .replace(/\r/g, "\n")
+                .replace(/\n{2,}/g, "\n")
+                .replace(/\s+/g, " ")
+                .trim();
+
+        const date =
+            threadEmail?.date ||
+            threadEmail?.emaildate ||
+            threadEmail?.createdat ||
+            threadEmail?.sentat ||
+            null;
+
+        const sender =
+            threadEmail?.sender ||
+            threadEmail?.emailfrom ||
+            "Без отправителя";
+
+        const mailbox =
+            threadEmail?.mailbox ||
+            threadEmail?.toheader ||
+            "";
+
+        return {
+            ...threadEmail,
+            id: Number(threadEmail?.source_id || threadEmail?.id || threadEmail?.emailid),
+            email_id: Number(threadEmail?.emailid || threadEmail?.email_id || threadEmail?.id),
+            subject,
+            content: rawText,
+            preview,
+            date,
+            sender,
+            mailbox,
+            to_header: threadEmail?.to_header || threadEmail?.toheader || "",
+            cc_header: threadEmail?.cc_header || threadEmail?.ccheader || "",
+            bcc_header: threadEmail?.bcc_header || threadEmail?.bccheader || "",
+            documents: normalizeDocuments(threadEmail?.documents),
+            source_type: threadEmail?.thread_source || threadEmail?.source_type || "inbox",
+            thread_source: threadEmail?.thread_source || threadEmail?.source_type || "inbox",
+            source_id: Number(threadEmail?.source_id || threadEmail?.id || threadEmail?.emailid),
+            message_id: threadEmail?.message_id || threadEmail?.messageid || "",
         };
     }
 
@@ -297,11 +410,122 @@ function renderSentPagination(state) {
         }
     }
 
-    function renderSentEmailCard(email, state) {
+    async function renderSentEmailCard(email, state) {
         const emailView = document.getElementById("emailView");
         if (!emailView) return;
 
         const docs = Array.isArray(email.documents) ? email.documents : [];
+
+        const realEmailId = email.id;
+
+        let threadMessages = [];
+
+        try {
+            threadMessages = await loadSentThread(realEmailId);
+        } catch (error) {
+            console.error("Не удалось загрузить цепочку исходящего письма", error);
+            threadMessages = [email];
+        }
+
+        threadMessages = threadMessages.map(normalizeSentThreadItem);
+
+        console.log("SENT THREAD DEBUG", {
+            realEmailId,
+            email,
+            threadMessagesRawCount: Array.isArray(threadMessages) ? threadMessages.length : null,
+            threadMessages,
+        });
+
+        const hasThread = threadMessages.length > 1;
+
+        const threadExpanded = false;
+        const threadChevron = threadExpanded ? "▼" : "▶";
+
+        const currentThreadSource = email.source_type || "sent";
+        const currentSourceId = email.id;
+
+        const threadBlock = hasThread
+            ? `
+                <div class="email-thread-block">
+                    <button
+                        type="button"
+                        id="thread-toggle-btn-${email.id}"
+                        class="email-thread-toggle"
+                        aria-expanded="${threadExpanded ? "true" : "false"}"
+                        aria-controls="email-thread-panel-${email.id}"
+                    >
+                        <span class="email-thread-toggle-icon" aria-hidden="true">${threadChevron}</span>
+                        <span class="email-thread-toggle-text">Цепочка: ${getThreadCountLabel(threadMessages.length)}</span>
+                    </button>
+
+                    <div
+                        id="email-thread-panel-${email.id}"
+                        class="email-thread-panel"
+                        ${threadExpanded ? "" : "hidden"}
+                    >
+                        <div class="email-thread-timeline">
+                            ${threadMessages
+                                .map((threadEmail) => {
+                                    const threadEmailRealId =
+                                        threadEmail.email_id || threadEmail.id || "";
+
+                                    const isCurrent =
+                                        String(threadEmail.thread_source || "inbox") === String(currentThreadSource) &&
+                                        Number(threadEmail.source_id || threadEmailRealId) === Number(currentSourceId);
+
+                                    const previewSource =
+                                        threadEmail.preview || threadEmail.content || threadEmail.rawemail || "";
+
+                                    const clickableThreadId =
+                                        threadEmail.thread_source === "sent"
+                                            ? (threadEmail.source_id || threadEmail.id || "")
+                                            : (threadEmail.email_id || threadEmail.id || "");
+
+                                    const preview = escapeHtml(String(previewSource).slice(0, 180));
+
+                                    return `
+                                        <button
+                                            type="button"
+                                            class="email-thread-item ${isCurrent ? "is-current" : ""}"
+                                            data-thread-email-id="${escapeHtml(String(clickableThreadId))}"
+                                        >
+                                            <span class="email-thread-marker" aria-hidden="true"></span>
+
+                                            <span class="email-thread-item-main">
+                                                <span class="email-thread-item-top">
+                                                    <span class="email-thread-sender">${
+                                                        threadEmail.thread_source === "sent"
+                                                            ? `Исходящее: ${escapeHtml(threadEmail.sender || threadEmail.emailfrom || "Без отправителя")}`
+                                                            : `Входящее: ${escapeHtml(threadEmail.sender || threadEmail.emailfrom || "Без отправителя")}`
+                                                    }</span>
+                                                    ${
+                                                        isCurrent
+                                                            ? '<span class="email-thread-current-badge">Текущее</span>'
+                                                            : ""
+                                                    }
+                                                </span>
+
+                                                <span class="email-thread-item-meta">
+                                                    ${threadEmail.date ? `${escapeHtml(formatDate(threadEmail.date))} ${escapeHtml(formatTimeOnly(threadEmail.date))}` : "Дата неизвестна"}
+                                                </span>
+
+                                                <span class="email-thread-item-subject">
+                                                    ${escapeHtml(threadEmail.subject || threadEmail.emailsubject || "(без темы)")}
+                                                </span>
+
+                                                <span class="email-thread-item-preview">
+                                                    ${preview || "Без текста"}
+                                                </span>
+                                            </span>
+                                        </button>
+                                    `;
+                                })
+                                .join("")}
+                        </div>
+                    </div>
+                </div>
+            `
+            : "";
 
         const bodySource = String(email.body_text || email.content || email.raw_email || "")
             .replace(/\r\n/g, "\n")
@@ -380,6 +604,7 @@ function renderSentPagination(state) {
                     </div>
                 </div>
 
+                ${threadBlock}
                 ${attachmentsHtml}
 
                 <div class="email-body">
@@ -400,13 +625,60 @@ function renderSentPagination(state) {
             });
         }
 
+        const threadToggleBtn = emailView.querySelector(`#thread-toggle-btn-${email.id}`);
+        const threadPanelElement = emailView.querySelector(`#email-thread-panel-${email.id}`);
+
+        if (threadToggleBtn && threadPanelElement) {
+            threadToggleBtn.addEventListener("click", () => {
+                const expanded = threadToggleBtn.getAttribute("aria-expanded") === "true";
+                const nextExpanded = !expanded;
+
+                threadToggleBtn.setAttribute("aria-expanded", nextExpanded ? "true" : "false");
+
+                const icon = threadToggleBtn.querySelector(".email-thread-toggle-icon");
+                if (icon) {
+                    icon.textContent = nextExpanded ? "▼" : "▶";
+                }
+
+                threadPanelElement.hidden = !nextExpanded;
+            });
+        }
+
+        const threadPanel = emailView.querySelector(".email-thread-panel");
+        if (threadPanel) {
+            threadPanel.addEventListener("click", async (event) => {
+                const target = event.target.closest("[data-thread-email-id]");
+                if (!target) return;
+
+                event.stopPropagation();
+
+                const rawTargetId = target.dataset.threadEmailId;
+                const targetId = Number(rawTargetId);
+
+                if (!rawTargetId || Number.isNaN(targetId) || targetId === realEmailId) return;
+
+                const targetEmail = state.emails.find(
+                    (e) => Number(e.id) === targetId,
+                );
+
+                if (targetEmail) {
+                    state.selectedEmailId = targetEmail.id;
+                    highlightSelectedEmail(targetEmail.id);
+                    await renderSentEmailCard(targetEmail, state);
+                    return;
+                }
+
+                alert("Это письмо есть в цепочке, но отсутствует в текущем списке исходящих.");
+            });
+        }
+
         const forwardToggleBtn = emailView.querySelector("#forward-toggle-btn");
             if (forwardToggleBtn) {
                 forwardToggleBtn.addEventListener("click", async () => {
                     forwardToggleBtn.disabled = true;
 
                     try {
-                        const realEmailId = email.email_id || email.id;
+                        //const realEmailId = email.email_id || email.id;
 
                         if (typeof window.MailPage?.openForwardCompose === "function") {
                             await window.MailPage.openForwardCompose({ emailId: realEmailId });
@@ -427,15 +699,16 @@ function renderSentPagination(state) {
             }
     }
 
-    function selectSentEmail(id, state) {
+    async function selectSentEmail(id, state) {
         state.selectedEmailId = id;
 
         const email = state.emails.find((e) => e.id === id);
         if (!email) return;
 
         highlightSelectedEmail(id);
-        renderSentEmailCard(email, state);
+        await renderSentEmailCard(email, state);
     }
+
 
     async function loadSentEmails(state) {
         const container = document.getElementById("emailsContainer");

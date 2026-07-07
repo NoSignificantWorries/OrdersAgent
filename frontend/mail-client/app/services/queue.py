@@ -686,44 +686,88 @@ def _thread_sort_dt(item: dict[str, Any]) -> tuple[datetime, int]:
 async def get_email_thread_for_user(
     user: dict,
     email_id: int,
+    source: str | None = None,
 ) -> dict[str, Any]:
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
         is_admin = user.get("role") == "admin"
 
-        if is_admin:
-            root_email = await conn.fetchrow(
-                """
-                SELECT
-                    e.id,
-                    e.mailbox,
-                    e.message_id,
-                    e.in_reply_to,
-                    e.references_header
-                FROM emails e
-                WHERE e.id = $1
-                LIMIT 1
-                """,
-                email_id,
-            )
-        else:
-            root_email = await conn.fetchrow(
-                """
-                SELECT
-                    e.id,
-                    e.mailbox,
-                    e.message_id,
-                    e.in_reply_to,
-                    e.references_header
-                FROM emails e
-                WHERE e.id = $1
-                  AND e.mailbox = $2
-                LIMIT 1
-                """,
-                email_id,
-                user["email"],
-            )
+        if source == "sent":
+            if is_admin:
+                root_email = await conn.fetchrow(
+                    """
+                    SELECT
+                        'sent'::text AS source_type,
+                        se.id AS source_id,
+                        se.parent_email_id AS email_id,
+                        se.mailbox,
+                        se.message_id,
+                        se.in_reply_to,
+                        se.references_header
+                    FROM sent_emails se
+                    WHERE se.id = $1
+                    LIMIT 1
+                    """,
+                    email_id,
+                )
+            else:
+                root_email = await conn.fetchrow(
+                    """
+                    SELECT
+                        'sent'::text AS source_type,
+                        se.id AS source_id,
+                        se.parent_email_id AS email_id,
+                        se.mailbox,
+                        se.message_id,
+                        se.in_reply_to,
+                        se.references_header
+                    FROM sent_emails se
+                    WHERE se.id = $1
+                      AND se.mailbox = $2
+                    LIMIT 1
+                    """,
+                    email_id,
+                    user["email"],
+                )
+
+        elif source == "inbox":
+            if is_admin:
+                root_email = await conn.fetchrow(
+                    """
+                    SELECT
+                        'inbox'::text AS source_type,
+                        e.id AS source_id,
+                        e.id AS email_id,
+                        e.mailbox,
+                        e.message_id,
+                        e.in_reply_to,
+                        e.references_header
+                    FROM emails e
+                    WHERE e.id = $1
+                    LIMIT 1
+                    """,
+                    email_id,
+                )
+            else:
+                root_email = await conn.fetchrow(
+                    """
+                    SELECT
+                        'inbox'::text AS source_type,
+                        e.id AS source_id,
+                        e.id AS email_id,
+                        e.mailbox,
+                        e.message_id,
+                        e.in_reply_to,
+                        e.references_header
+                    FROM emails e
+                    WHERE e.id = $1
+                      AND e.mailbox = $2
+                    LIMIT 1
+                    """,
+                    email_id,
+                    user["email"],
+                )
 
         if not root_email:
             return {
@@ -1072,9 +1116,16 @@ async def get_email_thread_for_user(
         }
         candidates.append(item)
 
+    root_source_type = str(root_email["source_type"])
+    root_source_id = int(root_email["source_id"])
+
     root_candidate = next(
-        (item for item in candidates if item["emailid"] == email_id),
-        None
+        (
+            item for item in candidates
+            if str(item.get("thread_source")) == root_source_type
+            and int(item.get("source_id")) == root_source_id
+        ),
+        None,
     )
     if not root_candidate:
         return {
@@ -1085,10 +1136,6 @@ async def get_email_thread_for_user(
     thread_keys = _collect_thread_keys(root_candidate)
     if not thread_keys and root_candidate.get("messageid"):
         thread_keys.add(root_candidate["messageid"])
-
-    print("THREAD DEBUG root_email_id =", email_id)
-    print("THREAD DEBUG root_message_id =", root_candidate.get("messageid"))
-    print("THREAD DEBUG initial_thread_keys =", thread_keys)
 
     matched_keys: set[tuple[str, int]] = set()
     related: list[dict[str, Any]] = []

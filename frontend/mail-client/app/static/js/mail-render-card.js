@@ -148,7 +148,7 @@
     };
 
     async function loadEmailThread(emailId) {
-        const resp = await fetch(`/api/emails/${emailId}/thread`, {
+        const resp = await fetch(`/api/emails/${emailId}/thread?source=inbox`, {
             credentials: "same-origin",
         });
 

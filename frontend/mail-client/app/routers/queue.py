@@ -464,7 +464,11 @@ async def get_queue(
 
 
 @router.get("/emails/{email_id}/thread")
-async def get_email_thread(email_id: int, request: Request):
+async def get_email_thread(
+    email_id: int,
+    request: Request,
+    source: str | None = None,
+):
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -472,6 +476,7 @@ async def get_email_thread(email_id: int, request: Request):
     result = await get_email_thread_for_user(
         user=user,
         email_id=email_id,
+        source=source,
     )
 
     return {
