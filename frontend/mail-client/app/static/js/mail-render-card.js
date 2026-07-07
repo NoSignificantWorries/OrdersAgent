@@ -308,12 +308,11 @@
         const decisionBlock =
             email.task && cfg.allowDecisionEdit !== false
                 ? `
-                    <div class="decision-block">
-                        <label for="decision-select" class="decision-label">Класс письма</label>
-                        <select id="decision-select" class="decision-select">
+                    <div class="email-bottom-decision">
+                        <select id="decision-select" class="decision-select email-bottom-select" aria-label="Класс письма">
                             ${decisionHtml}
                         </select>
-                        <button id="decision-save-btn" class="decision-save-btn">Сохранить</button>
+                        <button id="decision-save-btn" class="decision-save-btn email-bottom-btn email-bottom-btn-save">Сохранить</button>
                     </div>
                 `
                 : "";
@@ -321,11 +320,9 @@
         const closeTaskBlock =
             cfg.allowCloseTask !== false && canCloseTask(email) && email.task?.id
                 ? `
-                    <div class="danger-zone">
-                        <button id="close-task-btn" class="close-task-btn">
-                            Закрыть задачу
-                        </button>
-                    </div>
+                    <button id="close-task-btn" class="close-task-btn email-bottom-btn email-bottom-btn-danger">
+                        Закрыть задачу
+                    </button>
                 `
                 : "";
 
@@ -341,11 +338,9 @@
 
         const unarchiveTaskBlock = canUnarchiveTask(email)
                 ? `
-                    <div class="danger-zone">
-                        <button id="unarchive-task-btn" class="close-task-btn">
-                            Вернуть во входящие
-                        </button>
-                    </div>
+                    <button id="unarchive-task-btn" class="close-task-btn email-bottom-btn email-bottom-btn-danger">
+                        Вернуть во входящие
+                    </button>
                 `
                 : "";
 
@@ -426,34 +421,12 @@
                 <div class="email-divider"></div>
 
                 ${attachmentBlock}
-                ${decisionBlock}
-                ${closeTaskBlock}
-                ${unarchiveTaskBlock}
 
                 <div class="email-body">
                     ${formattedContent}
                 </div>
 
                 <div class="reply-block">
-                    <div class="reply-toolbar">
-                        <button
-                            type="button"
-                            id="reply-toggle-btn"
-                            class="reply-btn reply-btn-primary"
-                            ${shouldShowReplyForm ? "hidden" : ""}
-                        >
-                            Ответить
-                        </button>
-
-                        <button
-                            type="button"
-                            id="forward-toggle-btn"
-                            class="reply-btn reply-btn-primary"
-                        >
-                            Переслать
-                        </button>
-                    </div>
-
                     <div
                         id="reply-form-block"
                         class="reply-form-block"
@@ -486,6 +459,35 @@
                                 aria-label="Добавить вложения"
                                 title="Добавить вложения"
                             />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="email-bottom-actions">
+                    <div class="email-bottom-actions-inner">
+                        <div class="email-bottom-actions-left">
+                            <button
+                                type="button"
+                                id="reply-toggle-btn"
+                                class="reply-btn reply-btn-primary"
+                                ${shouldShowReplyForm ? "hidden" : ""}
+                            >
+                                Ответить
+                            </button>
+
+                            <button
+                                type="button"
+                                id="forward-toggle-btn"
+                                class="reply-btn reply-btn-primary"
+                            >
+                                Переслать
+                            </button>
+                        </div>
+
+                        <div class="email-bottom-actions-right">
+                            ${decisionBlock}
+                            ${closeTaskBlock}
+                            ${unarchiveTaskBlock}
                         </div>
                     </div>
                 </div>

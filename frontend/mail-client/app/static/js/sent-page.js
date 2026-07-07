@@ -351,14 +351,18 @@ function renderSentPagination(state) {
 
             const actionsHtml = `
                 <div class="reply-block">
-                    <div class="reply-toolbar">
-                        <button
-                            type="button"
-                            id="forward-toggle-btn"
-                            class="reply-btn reply-btn-primary"
-                        >
-                            Переслать
-                        </button>
+                    <div class="email-bottom-actions sent-email-bottom-actions">
+                        <div class="email-bottom-actions-inner">
+                            <div class="email-bottom-actions-left">
+                                <button
+                                    type="button"
+                                    id="forward-toggle-btn"
+                                    class="reply-btn reply-btn-primary"
+                                >
+                                    Переслать
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             `;
