@@ -1,4 +1,100 @@
 (function () {
+    function readListStateFromUrl(pageType) {
+        const params = new URLSearchParams(window.location.search);
+
+        const page = Math.max(1, Number(params.get("page")) || 1);
+        const search = params.get("search") || "";
+        const sort = params.get("sort") === "oldest" ? "oldest" : "newest";
+
+        return {
+            page,
+            perPage: 100,
+            search,
+            sortNewestFirst: sort !== "oldest",
+            status: pageType === "sent" ? "all" : (params.get("status") || "all"),
+            classFilter: pageType === "sent" ? "all" : (params.get("class") || "all"),
+        };
+    }
+
+    function writeListStateToUrl(pageType, state) {
+        const params = new URLSearchParams();
+
+        if (Number(state.currentPage) > 1) {
+            params.set("page", String(state.currentPage));
+        }
+
+        if (String(state.currentSearchTerm || "").trim()) {
+            params.set("search", String(state.currentSearchTerm).trim());
+        }
+
+        if (state.sortNewestFirst === false) {
+            params.set("sort", "oldest");
+        }
+
+        if (pageType !== "sent") {
+            if (state.currentStatusFilter && state.currentStatusFilter !== "all") {
+                params.set("status", state.currentStatusFilter);
+            }
+
+            if (state.currentClassFilter && state.currentClassFilter !== "all") {
+                params.set("class", state.currentClassFilter);
+            }
+        }
+
+        const query = params.toString();
+        const nextUrl = query
+            ? `${window.location.pathname}?${query}`
+            : window.location.pathname;
+
+        window.history.replaceState({}, "", nextUrl);
+    }
+
+    function updateSectionNavLinks(state) {
+        const navLinks = document.querySelectorAll(".header-nav a.nav-btn");
+        if (!navLinks.length) return;
+
+        navLinks.forEach((link) => {
+            const rawHref = link.getAttribute("href");
+            if (!rawHref) return;
+
+            try {
+                const url = new URL(rawHref, window.location.origin);
+                const params = new URLSearchParams();
+
+                if (String(state.currentSearchTerm || "").trim()) {
+                    params.set("search", String(state.currentSearchTerm).trim());
+                }
+
+                if (state.sortNewestFirst === false) {
+                    params.set("sort", "oldest");
+                }
+
+                const isSentLink = url.pathname === "/sent";
+
+                if (!isSentLink) {
+                    if (state.currentStatusFilter && state.currentStatusFilter !== "all") {
+                        params.set("status", state.currentStatusFilter);
+                    }
+
+                    if (state.currentClassFilter && state.currentClassFilter !== "all") {
+                        params.set("class", state.currentClassFilter);
+                    }
+                }
+
+                link.href = params.toString()
+                    ? `${url.pathname}?${params.toString()}`
+                    : url.pathname;
+            } catch (error) {
+                console.error("Не удалось обновить ссылку раздела", error);
+            }
+        });
+    }
+
+    function syncListState(pageType, state) {
+        writeListStateToUrl(pageType, state);
+        updateSectionNavLinks(state);
+    }
+
     function initTabs(deps) {
         const { state, renderChatForEmail, renderEmailCard } = deps;
 
@@ -114,6 +210,7 @@
 
                 state.currentPage = page;
                 state.selectedEmailId = null;
+                syncListState(window.MAILPAGECONFIG?.pageType || "inbox", state);
 
                 await reloadEmails({ showLoadingState: true });
 
@@ -134,6 +231,7 @@
             if (state.currentPage <= 1) return;
             state.currentPage -= 1;
             state.selectedEmailId = null;
+            syncListState(window.MAILPAGECONFIG?.pageType || "inbox", state);
             await reloadEmails({ showLoadingState: true });
         };
 
@@ -141,6 +239,7 @@
             if (state.currentPage >= state.totalPages) return;
             state.currentPage += 1;
             state.selectedEmailId = null;
+            syncListState(window.MAILPAGECONFIG?.pageType || "inbox", state);
             await reloadEmails({ showLoadingState: true });
         };
     }
@@ -290,6 +389,7 @@
             renderEmailList();
             updateUnreadCount();
             renderPagination({ state, reloadEmails });
+            syncListState(pageConfig.pageType, state);
 
             return result;
         };
@@ -307,11 +407,17 @@
         document.addEventListener("DOMContentLoaded", async () => {
             window.MAILPAGECONFIG = pageConfig;
 
+            const initialUrlState = readListStateFromUrl(pageConfig.pageType);
+
             state.selectedEmailId = null;
-            state.currentPage = 1;
-            state.perPage = 100;
+            state.currentPage = initialUrlState.page;
+            state.perPage = initialUrlState.perPage;
             state.totalEmails = 0;
             state.totalPages = 1;
+            state.currentSearchTerm = initialUrlState.search;
+            state.currentStatusFilter = initialUrlState.status;
+            state.currentClassFilter = initialUrlState.classFilter;
+            state.sortNewestFirst = initialUrlState.sortNewestFirst;
 
             const emailView = document.getElementById("emailView");
             if (emailView) {
@@ -358,6 +464,10 @@
             const searchInput = document.getElementById("search-input");
             const searchClearBtn = document.getElementById("search-clear-btn");
 
+            if (searchInput) {
+                searchInput.value = state.currentSearchTerm || "";
+            }
+
             function updateSearchClearButton() {
                 if (!searchClearBtn || !searchInput) return;
                 searchClearBtn.hidden = searchInput.value.trim() === "";
@@ -370,6 +480,7 @@
                     state.currentSearchTerm = e.target.value;
                     state.currentPage = 1;
                     updateSearchClearButton();
+                    syncListState(pageConfig.pageType, state);
 
                     clearTimeout(searchDebounceTimer);
                     searchDebounceTimer = setTimeout(() => {
@@ -384,6 +495,7 @@
                     state.currentSearchTerm = "";
                     state.currentPage = 1;
                     updateSearchClearButton();
+                    syncListState(pageConfig.pageType, state);
                     reloadEmails({ showLoadingState: true });
                     searchInput.focus();
                 });
@@ -399,6 +511,26 @@
             const classSelect = document.getElementById("class-filter-select");
             const sortNewestBtn = document.getElementById("sort-newest-btn");
             const sortOldestBtn = document.getElementById("sort-oldest-btn");
+
+            if (statusSelect) {
+                statusSelect.value = state.currentStatusFilter || "all";
+            }
+
+            if (classSelect) {
+                classSelect.value = state.currentClassFilter || "all";
+            }
+
+            if (sortNewestBtn && sortOldestBtn) {
+                if (state.sortNewestFirst) {
+                    sortNewestBtn.classList.add("active");
+                    sortOldestBtn.classList.remove("active");
+                } else {
+                    sortOldestBtn.classList.add("active");
+                    sortNewestBtn.classList.remove("active");
+                }
+            }
+
+            syncListState(pageConfig.pageType, state);
 
             function openFilterPanel() {
                 if (!filterPanel) return;
@@ -431,6 +563,7 @@
                 }
 
                 state.currentPage = 1;
+                syncListState(pageConfig.pageType, state);
                 closeFilterPanelFn();
                 reloadEmails({ showLoadingState: true });
             }

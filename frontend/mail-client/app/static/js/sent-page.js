@@ -1,35 +1,76 @@
 (function () {
-    // function escapeHtml(value) {
-    //     return String(value ?? "")
-    //         .replace(/&/g, "&amp;")
-    //         .replace(/</g, "&lt;")
-    //         .replace(/>/g, "&gt;")
-    //         .replace(/"/g, "&quot;")
-    //         .replace(/'/g, "&#39;");
-    // }
-
-    // function formatDate(value) {
-    //     if (!value) return "";
-    //     const date = new Date(value);
-    //     if (Number.isNaN(date.getTime())) return "";
-    //     return date.toLocaleDateString("ru-RU");
-    // }
-
-    // function formatTimeOnly(value) {
-    //     if (!value) return "";
-    //     const date = new Date(value);
-    //     if (Number.isNaN(date.getTime())) return "";
-    //     return date.toLocaleTimeString("ru-RU", {
-    //         hour: "2-digit",
-    //         minute: "2-digit",
-    //     });
-    // }
-
     const {
         escapeHtml,
         formatDate,
         formatTimeOnly,
     } = window.MailFormatters;
+
+    function readSentStateFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+
+        return {
+            currentPage: Math.max(1, Number(params.get("page")) || 1),
+            currentSearchTerm: params.get("search") || "",
+            sortNewestFirst: params.get("sort") !== "oldest",
+        };
+    }
+
+    function writeSentStateToUrl(state) {
+        const params = new URLSearchParams();
+
+        if (Number(state.currentPage) > 1) {
+            params.set("page", String(state.currentPage));
+        }
+
+        if (String(state.currentSearchTerm || "").trim()) {
+            params.set("search", String(state.currentSearchTerm).trim());
+        }
+
+        if (state.sortNewestFirst === false) {
+            params.set("sort", "oldest");
+        }
+
+        const query = params.toString();
+        const nextUrl = query
+            ? `${window.location.pathname}?${query}`
+            : window.location.pathname;
+
+        window.history.replaceState({}, "", nextUrl);
+    }
+
+    function updateSentSectionNavLinks(state) {
+        const navLinks = document.querySelectorAll(".header-nav a.nav-btn");
+        if (!navLinks.length) return;
+
+        navLinks.forEach((link) => {
+            const rawHref = link.getAttribute("href");
+            if (!rawHref) return;
+
+            try {
+                const url = new URL(rawHref, window.location.origin);
+                const params = new URLSearchParams();
+
+                if (String(state.currentSearchTerm || "").trim()) {
+                    params.set("search", String(state.currentSearchTerm).trim());
+                }
+
+                if (state.sortNewestFirst === false) {
+                    params.set("sort", "oldest");
+                }
+
+                link.href = params.toString()
+                    ? `${url.pathname}?${params.toString()}`
+                    : url.pathname;
+            } catch (error) {
+                console.error("Не удалось обновить ссылку раздела (sent)", error);
+            }
+        });
+    }
+
+    function syncSentState(state) {
+        writeSentStateToUrl(state);
+        updateSentSectionNavLinks(state);
+    }
 
     function normalizeDocuments(raw) {
         if (!raw) return [];
@@ -169,6 +210,7 @@ function renderSentPagination(state) {
             if (item === state.currentPage) return;
             state.currentPage = item;
             state.selectedEmailId = null;
+            syncSentState(state);
             await reloadSentEmails(state);
         });
 
@@ -182,6 +224,7 @@ function renderSentPagination(state) {
         if (state.currentPage <= 1) return;
         state.currentPage -= 1;
         state.selectedEmailId = null;
+        syncSentState(state);
         await reloadSentEmails(state);
     };
 
@@ -189,6 +232,7 @@ function renderSentPagination(state) {
         if (state.currentPage >= state.totalPages) return;
         state.currentPage += 1;
         state.selectedEmailId = null;
+        syncSentState(state);
         await reloadSentEmails(state);
     };
 }
@@ -433,6 +477,8 @@ function renderSentPagination(state) {
                     '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
             }
         }
+
+        syncSentState(state);
     }
 
     function bindSearch(state) {
@@ -456,6 +502,7 @@ function renderSentPagination(state) {
             searchTimer = setTimeout(async () => {
                 state.currentPage = 1;
                 state.selectedEmailId = null;
+                syncSentState(state);
                 await reloadSentEmails(state);
             }, 300);
         });
@@ -467,6 +514,7 @@ function renderSentPagination(state) {
                 syncClearBtn();
                 state.currentPage = 1;
                 state.selectedEmailId = null;
+                syncSentState(state);
                 await reloadSentEmails(state);
             });
         }
@@ -503,6 +551,7 @@ function renderSentPagination(state) {
         if (applyBtn) {
             applyBtn.addEventListener("click", async () => {
                 state.selectedEmailId = null;
+                syncSentState(state);
                 await reloadSentEmails(state);
                 if (filterPanel) {
                     filterPanel.style.display = "none";
@@ -525,13 +574,15 @@ function renderSentPagination(state) {
     }
 
     async function initSentPage() {
+        const initialUrlState = readSentStateFromUrl();
+
         const state = {
             emails: [],
             selectedEmailId: null,
-            currentSearchTerm: "",
-            sortNewestFirst: true,
+            currentSearchTerm: initialUrlState.currentSearchTerm,
+            sortNewestFirst: initialUrlState.sortNewestFirst,
 
-            currentPage: 1,
+            currentPage: initialUrlState.currentPage,
             perPage: 100,
             total: 0,
             totalPages: 1,
@@ -553,6 +604,13 @@ function renderSentPagination(state) {
 
         bindSearch(state);
         bindSort(state);
+
+        const searchInput = document.getElementById("search-input");
+        if (searchInput) {
+            searchInput.value = state.currentSearchTerm || "";
+        }
+
+        syncSentState(state);
 
         const composeDeps = {
             state,
