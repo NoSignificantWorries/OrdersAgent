@@ -71,7 +71,9 @@
             .join("");
 
         document.querySelectorAll(".email-item").forEach((el) => {
-            el.addEventListener("click", () => selectEmail(el.dataset.id));
+            el.addEventListener("click", async () => {
+                await selectEmail(el.dataset.id);
+            });
         });
 
         if (state.selectedEmailId != null) {
@@ -182,7 +184,7 @@
         countSpan.textContent = formatUnreadCount(state.unreadCount);
     }
 
-    function selectEmail(id, deps) {
+    async function selectEmail(id, deps) {
         const {
             state,
             showLoading,
@@ -230,9 +232,9 @@
 
         showLoading();
 
-        setTimeout(() => {
+        setTimeout(async () => {
             highlightSelectedEmail(id);
-            renderEmailCard(email);
+            await renderEmailCard(email);
 
             const chatTab = document.getElementById("tab-chat");
             if (chatTab && chatTab.classList.contains("active")) {

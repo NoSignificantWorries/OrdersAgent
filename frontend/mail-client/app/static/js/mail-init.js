@@ -101,7 +101,7 @@
         const btns = document.querySelectorAll(".tab-button");
         const panes = document.querySelectorAll(".tab-pane");
 
-        function switchTab(tabId) {
+        async function switchTab(tabId) {
             btns.forEach((btn) => {
                 btn.classList.remove("active");
                 if (btn.dataset.tab === tabId) {
@@ -123,7 +123,7 @@
                 if (state.selectedEmailId) {
                     const email = state.emails.find((e) => e.id === state.selectedEmailId);
                     if (email) {
-                        renderEmailCard(email);
+                        await renderEmailCard(email);
                         return;
                     }
                 }
@@ -137,7 +137,9 @@
         }
 
         btns.forEach((btn) => {
-            btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+            btn.addEventListener("click", async () => {
+                await switchTab(btn.dataset.tab);
+            });
         });
     }
 
@@ -329,7 +331,7 @@
             if (inChat) {
                 renderChatForEmail(currentEmail);
             } else {
-                renderEmailCard(currentEmail);
+                await renderEmailCard(currentEmail);
             }
         } else if (inChat) {
             renderChatForEmail(null);
@@ -450,11 +452,14 @@
                     state,
                     archived: pageConfig.archived,
                     renderPagination: () => renderPagination({ state, reloadEmails }),
-                    isDecisionSelectProtected: () => isDecisionSelectFocused,
+                    isDecisionSelectProtected: () => state.isDecisionSelectFocused === true,
                 });
             }, pageConfig.refreshIntervalMs);
 
-            initTabs(deps);
+            initTabs({
+                ...deps,
+                state,
+            });
 
             const chatSendBtn = document.getElementById("chat-send-btn");
             if (chatSendBtn) {

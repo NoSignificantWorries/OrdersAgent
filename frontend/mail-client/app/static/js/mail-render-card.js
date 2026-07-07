@@ -147,7 +147,101 @@
         return `${count} писем`;
     };
 
-    function renderEmailCard(email, deps) {
+    async function loadEmailThread(emailId) {
+        const resp = await fetch(`/api/emails/${emailId}/thread`, {
+            credentials: "same-origin",
+        });
+
+        if (!resp.ok) {
+            let detail = `Не удалось загрузить цепочку (${resp.status})`;
+
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    detail = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(detail);
+        }
+
+        const data = await resp.json();
+        return Array.isArray(data?.items) ? data.items : [];
+    }
+
+    
+    function extractDisplayBodyFromRawEmail(value) {
+        const raw = String(value || "").replace(/\r\n/g, "\n");
+
+        if (!raw.trim()) {
+            return "";
+        }
+
+        const headerBodySeparator = raw.indexOf("\n\n");
+        let body = headerBodySeparator >= 0 ? raw.slice(headerBodySeparator + 2) : raw;
+
+        body = body
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+
+        return body;
+    }
+
+
+    function normalizeThreadItem(threadEmail) {
+        const subject =
+            threadEmail?.subject ||
+            threadEmail?.emailsubject ||
+            "(без темы)";
+
+        const rawSource =
+            threadEmail?.content ||
+            threadEmail?.rawemail ||
+            "";
+
+        const rawText =
+            threadEmail?.thread_source === "sent"
+                ? extractDisplayBodyFromRawEmail(rawSource)
+                : rawSource;
+
+        const preview =
+            threadEmail?.preview ||
+            String(rawText)
+                .replace(/\r/g, "\n")
+                .replace(/\n{2,}/g, "\n")
+                .replace(/\s+/g, " ")
+                .trim();
+
+        const date =
+            threadEmail?.date ||
+            threadEmail?.emaildate ||
+            threadEmail?.createdat ||
+            threadEmail?.sentat ||
+            null;
+
+        const sender =
+            threadEmail?.sender ||
+            threadEmail?.emailfrom ||
+            "Без отправителя";
+
+        const mailbox =
+            threadEmail?.mailbox ||
+            threadEmail?.toheader ||
+            "";
+
+        return {
+            ...threadEmail,
+            subject,
+            content: rawText,
+            preview,
+            date,
+            sender,
+            mailbox,
+        };
+    }
+
+
+    async function renderEmailCard(email, deps) {
         const {
             state,
             escapeHtml,
@@ -162,6 +256,7 @@
             canCloseTask,
             canUnarchiveTask,
             renderEmailList,
+            updateUnreadCount,
             highlightSelectedEmail,
             selectEmail,
             closeOpenedEmail,
@@ -174,8 +269,14 @@
 
         const cfg = window.MAILPAGECONFIG || {};
 
+        const emailSubject = email.subject || email.emailsubject || "(без темы)";
+        const emailSender = email.sender || email.emailfrom || "Без отправителя";
+        const emailDate = email.date || email.emaildate || email.createdat || null;
+        const emailMailbox = email.mailbox || email.toheader || "";
+        const emailContentSource = email.content || email.rawemail || "";
+
         const formattedContent =
-            (email.content || "")
+            (emailContentSource || "")
                 .split("\n")
                 .map((line) => {
                     if (line.trim() === "") return "<br>";
@@ -187,13 +288,24 @@
                 .join("") || "<p>...</p>";
 
         const docsWithName = getDisplayDocuments(email);
+        const realEmailId = email.email_id || email.id;
 
-        const threadMessagesRaw =
-            typeof getThreadMessages === "function" ? getThreadMessages(email) : [email];
+        let threadMessages = [];
 
-        const threadMessages = Array.isArray(threadMessagesRaw) && threadMessagesRaw.length
-            ? threadMessagesRaw
-            : [email];
+        try {
+            threadMessages = await loadEmailThread(realEmailId);
+        } catch (error) {
+            console.error("Не удалось загрузить цепочку через API, используем локальный fallback", error);
+
+            const threadMessagesRaw =
+                typeof getThreadMessages === "function" ? getThreadMessages(email) : [email];
+
+            threadMessages = Array.isArray(threadMessagesRaw) && threadMessagesRaw.length
+                ? threadMessagesRaw
+                : [email];
+        }
+
+        threadMessages = threadMessages.map(normalizeThreadItem);
 
         const hasThread = threadMessages.length > 1;
         const threadExpanded =
@@ -225,22 +337,40 @@
                         <div class="email-thread-timeline">
                             ${threadMessages
                                 .map((threadEmail) => {
-                                    const isCurrent = threadEmail.id === email.id;
+                                    const threadEmailRealId =
+                                        threadEmail.emailid || threadEmail.email_id || threadEmail.id;
+
+                                    const currentThreadSource = email.thread_source || "inbox";
+                                    const currentSourceId = email.source_id || realEmailId;
+
+                                    const isCurrent =
+                                        String(threadEmail.thread_source || "inbox") === String(currentThreadSource) &&
+                                        Number(threadEmail.source_id || threadEmailRealId) === Number(currentSourceId);
                                     const previewSource =
-                                        threadEmail.preview || threadEmail.content || "";
+                                        threadEmail.preview || threadEmail.content || threadEmail.rawemail || "";
+
+                                    const clickableThreadId =
+                                        threadEmail.emailid ||
+                                        threadEmail.email_id ||
+                                        threadEmail.id ||
+                                        "";
                                     const preview = escapeHtml(previewSource.slice(0, 180));
 
                                     return `
                                         <button
                                             type="button"
                                             class="email-thread-item ${isCurrent ? "is-current" : ""}"
-                                            data-thread-email-id="${threadEmail.id}"
+                                            data-thread-email-id="${escapeHtml(String(clickableThreadId))}"
                                         >
                                             <span class="email-thread-marker" aria-hidden="true"></span>
 
                                             <span class="email-thread-item-main">
                                                 <span class="email-thread-item-top">
-                                                    <span class="email-thread-sender">${escapeHtml(threadEmail.sender || "Без отправителя")}</span>
+                                                    <span class="email-thread-sender">${
+                                                        (threadEmail.thread_source === "sent")
+                                                            ? `Исходящее: ${escapeHtml(threadEmail.sender || threadEmail.emailfrom || "Без отправителя")}`
+                                                            : escapeHtml(threadEmail.sender || threadEmail.emailfrom || "Без отправителя")
+                                                    }</span>
                                                     ${
                                                         isCurrent
                                                             ? '<span class="email-thread-current-badge">Текущее</span>'
@@ -249,11 +379,11 @@
                                                 </span>
 
                                                 <span class="email-thread-item-meta">
-                                                    ${escapeHtml(formatDate(threadEmail.date))} ${escapeHtml(formatTimeOnly(threadEmail.date))}
+                                                    ${threadEmail.date ? `${escapeHtml(formatDate(threadEmail.date))} ${escapeHtml(formatTimeOnly(threadEmail.date))}` : "Дата неизвестна"}
                                                 </span>
 
                                                 <span class="email-thread-item-subject">
-                                                    ${escapeHtml(threadEmail.subject || "(без темы)")}
+                                                    ${escapeHtml(threadEmail.subject || threadEmail.emailsubject || "(без темы)")}
                                                 </span>
 
                                                 <span class="email-thread-item-preview">
@@ -347,7 +477,6 @@
         const emailView = document.getElementById("emailView");
         if (!emailView) return;
 
-        const realEmailId = email.email_id || email.id;
         const { appendSignatureIfMissing, ensureUserSignature } = getReplySignatureHelpers();
         const savedReplyDraft = state.replyDrafts?.get(realEmailId) || "";
         const shouldShowReplyForm = state.openReplyForms?.has(realEmailId) === true;
@@ -356,7 +485,7 @@
             <div class="email-card">
                 <div class="email-header">
                     <div class="email-header-top">
-                        <div class="email-subject">${escapeHtml(email.subject)}</div>
+                        <div class="email-subject">${escapeHtml(emailSubject)}</div>
 
                         <div class="email-header-actions">
                             <div class="status-block">
@@ -410,9 +539,9 @@
                     </div>
 
                     <div class="email-meta">
-                        <div><strong>От:</strong> ${escapeHtml(email.sender)}</div>
-                        <div><strong>Кому:</strong> ${escapeHtml(email.mailbox)}</div>
-                        <div><strong>Дата:</strong> ${escapeHtml(formatDate(email.date))} ${escapeHtml(formatTimeOnly(email.date))}</div>
+                        <div><strong>От:</strong> ${escapeHtml(emailSender)}</div>
+                        <div><strong>Кому:</strong> ${escapeHtml(emailMailbox)}</div>
+                        <div><strong>Дата:</strong> ${emailDate ? `${escapeHtml(formatDate(emailDate))} ${escapeHtml(formatTimeOnly(emailDate))}` : "Дата неизвестна"}</div>
                     </div>
                 </div>
 
@@ -531,8 +660,10 @@
 
                 event.stopPropagation();
 
-                const targetId = Number(target.dataset.threadEmailId);
-                if (Number.isNaN(targetId) || targetId === email.id) return;
+                const rawTargetId = target.dataset.threadEmailId;
+                const targetId = Number(rawTargetId);
+
+                if (!rawTargetId || Number.isNaN(targetId) || targetId === realEmailId) return;
 
                 selectEmail(targetId);
             });
@@ -1088,7 +1219,7 @@
 
                     renderEmailList();
                     highlightSelectedEmail(email.id);
-                    renderEmailCard(email, deps);
+                    await renderEmailCard(email, deps);
 
                     if (typeof closeOpenedEmail === 'function') {
                         closeOpenedEmail();

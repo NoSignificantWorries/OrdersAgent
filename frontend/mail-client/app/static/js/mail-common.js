@@ -1,4 +1,5 @@
 // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
+let allEmails = [];
 let emails = [];
 let selectedEmailId = null;
 let unreadCount = 0;
@@ -371,7 +372,9 @@ function getThreadMessages(currentEmail) {
         return [currentEmail];
     }
 
-    const related = emails.filter((email) => {
+    const source = Array.isArray(allEmails) && allEmails.length ? allEmails : emails;
+
+    const related = source.filter((email) => {
         const messageId = getEmailMessageId(email);
         const inReplyTo = getEmailInReplyTo(email);
         const refs = getEmailReferences(email);
@@ -381,7 +384,11 @@ function getThreadMessages(currentEmail) {
         return refs.some((ref) => threadKeys.has(ref));
     });
 
-    if (!related.some((email) => email.id === currentEmail.id)) {
+    const currentRealId = currentEmail.email_id || currentEmail.id;
+
+    if (
+        !related.some((email) => (email.email_id || email.id) === currentRealId)
+    ) {
         related.push(currentEmail);
     }
 
@@ -500,7 +507,8 @@ async function loadEmailsFromApi(options = {}) {
         normalizeApiItem,
     });
 
-    emails = result.emails || [];
+    allEmails = result.emails || [];
+    emails = [...allEmails];
     recalculateUnreadCount();
     return result;
 }
@@ -691,8 +699,8 @@ function closeAndMarkUnread() {
     });
 }
 
-function renderEmailCard(email) {
-    return renderEmailCardFromModule(email, {
+async function renderEmailCard(email) {
+    return await renderEmailCardFromModule(email, {
         state: getMailRenderCardState(),
         escapeHtml,
         formatDate,
@@ -706,6 +714,7 @@ function renderEmailCard(email) {
         canCloseTask,
         canUnarchiveTask,
         renderEmailList,
+        updateUnreadCount,
         highlightSelectedEmail,
         selectEmail,
         closeOpenedEmail,
@@ -985,6 +994,7 @@ function refreshEmailsSilently() {
         isMaterialInputProtected,
         isReplyInputProtected,
         isComposeInputProtected,
+        isDecisionSelectProtected,
         loadEmailsFromApi,
         renderEmailList,
         updateUnreadCount,

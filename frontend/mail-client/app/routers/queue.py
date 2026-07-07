@@ -14,7 +14,7 @@ from math import ceil
 
 from app.db import get_db_pool
 from app.routers import auth
-from app.services.queue import list_queue_for_user
+from app.services.queue import list_queue_for_user, get_email_thread_for_user
 from app.services.users import get_user_signature, update_user_signature
 from app.cloud.minio import MinIOClient
 
@@ -461,6 +461,25 @@ async def get_queue(
         "count": len(items),
         "items": items,
     }
+
+
+@router.get("/emails/{email_id}/thread")
+async def get_email_thread(email_id: int, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    result = await get_email_thread_for_user(
+        user=user,
+        email_id=email_id,
+    )
+
+    return {
+        "ok": True,
+        "count": int(result.get("count", 0)),
+        "items": list(result.get("items", [])),
+    }
+
 
 async def _download_document_by_id(
     document_id: int,
