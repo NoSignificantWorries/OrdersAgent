@@ -3,6 +3,26 @@
         mapTaskStatusToUiStatus,
     } = window.MailFormatters;
 
+    function pickSafeEmailDate(item) {
+        const primary =
+            item?.date ??
+            item?.email_date ??
+            item?.emaildate ??
+            "";
+
+        const fallback =
+            item?.created_at ??
+            item?.createdat ??
+            "";
+
+        const rawPrimary = String(primary || "").trim();
+        if (!rawPrimary || rawPrimary.startsWith("0001-01-01")) {
+            return fallback || "";
+        }
+
+        return rawPrimary;
+    }
+
     function getFilenameFromContentDisposition(headerValue) {
         if (!headerValue) return "";
 
@@ -217,7 +237,15 @@
                 typeof normalizeApiItem === "function"
                     ? normalizeApiItem
                     : (item) => item;
-            const emails = items.map((item, idx) => normalize(item, idx));
+            const emails = items.map((item, idx) => {
+                const patchedItem = {
+                    ...item,
+                    date: pickSafeEmailDate(item),
+                    email_date: pickSafeEmailDate(item),
+                    emaildate: pickSafeEmailDate(item),
+                };
+                return normalize(patchedItem, idx);
+            });
 
             const total = Number(data.total ?? emails.length);
             const currentPage = Number(data.page ?? page);

@@ -343,6 +343,8 @@ func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand, mailbox strin
 
             if !env.Envelope.Date.IsZero() {
                 email.Date = env.Envelope.Date.Format(time.RFC3339)
+            } else {
+                email.Date = ""
             }
 
             email.MessageID = strings.TrimSpace(env.Envelope.MessageID)

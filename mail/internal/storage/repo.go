@@ -771,11 +771,14 @@ func (r *DBRepo) SaveOrder(userID int64, order any) (err error) {
 	}
 
 	var emailDateValue time.Time
-	if email.Date != "" {
-		if parsed, parseErr := time.Parse("2006-01-02 15:04", email.Date); parseErr == nil {
-			emailDateValue = parsed
-		}
-	}
+    if strings.TrimSpace(email.Date) != "" {
+        if parsed, parseErr := time.Parse(time.RFC3339, strings.TrimSpace(email.Date)); parseErr == nil {
+            emailDateValue = parsed.UTC()
+        }
+    }
+    if emailDateValue.IsZero() {
+        emailDateValue = time.Now().UTC()
+    }
 
     toHeaderValue := ""
 	if email.To != "" {

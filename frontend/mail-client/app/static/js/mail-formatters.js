@@ -30,27 +30,35 @@
     }
 
     function formatDateTime(dateString) {
-        const date = new Date(dateString);
+        if (!dateString) return "";
+        const raw = String(dateString).trim();
+        if (!raw || raw.startsWith("0001-01-01")) return "";
+
+        const date = new Date(raw);
         if (isNaN(date)) return "";
-    
+
         return date.toLocaleString("ru-RU", {
             timeZone: "Asia/Novosibirsk",
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit'
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit"
         });
     }
 
     function formatTimeOnly(dateString) {
-        const date = new Date(dateString);
+        if (!dateString) return "";
+        const raw = String(dateString).trim();
+        if (!raw || raw.startsWith("0001-01-01")) return "";
+
+        const date = new Date(raw);
         if (isNaN(date)) return "";
 
         return date.toLocaleString("ru-RU", {
             timeZone: "Asia/Novosibirsk",
-            hour: '2-digit',
-            minute: '2-digit'
+            hour: "2-digit",
+            minute: "2-digit"
         });
     }
 
