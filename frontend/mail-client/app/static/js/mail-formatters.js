@@ -32,14 +32,14 @@
     function formatDateTime(dateString) {
         const date = new Date(dateString);
         if (isNaN(date)) return "";
-
+    
         return date.toLocaleString("ru-RU", {
             timeZone: "Asia/Novosibirsk",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit"
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
         });
     }
 
@@ -49,8 +49,8 @@
 
         return date.toLocaleString("ru-RU", {
             timeZone: "Asia/Novosibirsk",
-            hour: "2-digit",
-            minute: "2-digit"
+            hour: '2-digit',
+            minute: '2-digit'
         });
     }
 

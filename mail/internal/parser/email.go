@@ -13,6 +13,7 @@ import (
     "net/mail"
     "unicode/utf8"
     "regexp"
+    "time"
 
 	htmllib "golang.org/x/net/html"
 
@@ -341,7 +342,7 @@ func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand, mailbox strin
             email.From = joinAddresses(env.Envelope.From)
 
             if !env.Envelope.Date.IsZero() {
-                email.Date = env.Envelope.Date.Format("2006-01-02 15:04")
+                email.Date = env.Envelope.Date.Format(time.RFC3339)
             }
 
             email.MessageID = strings.TrimSpace(env.Envelope.MessageID)
