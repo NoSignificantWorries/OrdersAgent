@@ -7,6 +7,21 @@ import numpy as np
 
 from materials import DELIMETERS, ParserV2
 from table import TableWorker, make_callculation_xlsx, make_request_xlsx, tp2
+from table import config as conf
+from table import table_processer_v3 as tp3
+
+
+def test_ascii_table():
+    table = np.zeros((10, 10), dtype=np.int8)
+    table[5, 5] = 2
+    table[0, 1] = 2
+    print(table)
+    print(conf.CellType.TEXT.value)
+    print(np.argwhere(table == conf.CellType.TEXT.value))
+
+    cell1 = tp3.Cell(row=1, col=2)
+    cell2 = tp3.Cell(row=2, col=3)
+    print(cell1, cell2)
 
 
 def test_callculation_table():
@@ -189,8 +204,51 @@ def mainv2():
         print(error_files)
 
 
+def mainv3():
+    # testfile = Path("../../private/tables/1108A.xls")
+    inputs = Path("../private/tables")
+    output = Path("../private/results/texts")
+    output.mkdir(parents=True, exist_ok=True)
+
+    parsed_cnt = 0
+    all_cnt = 0
+    error_files = []
+    for file in inputs.iterdir():
+        print("\n\n", file)
+
+        try:
+            data = tp3.TableLoader.load(None, file)
+        except BaseException:
+            print("ERROR: Wrong file!")
+            continue
+        all_cnt += 1
+
+        if data is None:
+            continue
+        parsed_cnt += 1
+
+        # text = [
+        #     f"Sheet_{i}\n" + "\n".join(sheet.get_text()) + "\n"
+        #     for i, sheet in enumerate(data)
+        # ]
+        # with open(output / Path(file.stem + ".txt"), "w") as txtfile:
+        #     txtfile.write("\n".join(text))
+
+        # for i, sheet in enumerate(data):
+        #     print("id:", i)
+        #     tp2.parser(sheet.get_text(), sheet.cells)
+
+    if all_cnt == 0:
+        print("No files in the dir")
+    else:
+        print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
+        print(error_files)
+
+
 if __name__ == "__main__":
     # test_callculation_table()
     # main()
-    mainv2()
     # test_text()
+    # mainv2()
+    # test_ascii_table()
+    mainv3()
