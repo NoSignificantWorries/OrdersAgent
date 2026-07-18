@@ -18,7 +18,24 @@
         }
     }
 
-    function syncInboxSelectionState(state) {
+    function buildInboxHistoryState(state) {
+        const pageType = window.MAILPAGECONFIG?.pageType || "inbox";
+
+        return {
+            currentPage: Math.max(1, Number(state.currentPage) || 1),
+            currentSearchTerm: String(state.currentSearchTerm || ""),
+            sortNewestFirst: state.sortNewestFirst !== false,
+            currentStatusFilter:
+                pageType !== "sent" ? String(state.currentStatusFilter || "all") : "all",
+            currentClassFilter:
+                pageType !== "sent" ? String(state.currentClassFilter || "all") : "all",
+            selectedEmailId:
+                state.selectedEmailId != null ? Number(state.selectedEmailId) : null,
+            selectedSourceType: String(state.selectedSourceType || pageType),
+        };
+    }
+
+    function syncInboxSelectionState(state, mode = "replace") {
         const pageType = window.MAILPAGECONFIG?.pageType || "inbox";
         const params = new URLSearchParams(window.location.search);
 
@@ -67,7 +84,14 @@
             ? `${window.location.pathname}?${query}`
             : window.location.pathname;
 
-        window.history.replaceState({}, "", nextUrl);
+        const historyState = buildInboxHistoryState(state);
+
+        if (mode === "push") {
+            window.history.pushState(historyState, "", nextUrl);
+            return;
+        }
+
+        window.history.replaceState(historyState, "", nextUrl);
     }
 
     function renderEmailList(deps) {
@@ -124,7 +148,7 @@
 
         document.querySelectorAll(".email-item").forEach((el) => {
             el.addEventListener("click", async () => {
-                await selectEmail(el.dataset.id);
+                await selectEmail(el.dataset.id, { historyMode: "push" });
             });
         });
 
@@ -150,12 +174,18 @@
         return response.json();
     }
 
-    function closeOpenedEmail(deps) {
-        const { state } = deps;
+    function closeOpenedEmail(deps, options = {}) {
+        const {
+            state,
+        } = deps;
+
+        const {
+            historyMode = "replace",
+        } = options;
 
         state.selectedEmailId = null;
         state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
-        syncInboxSelectionState(state);
+        syncInboxSelectionState(state, historyMode);
 
         document.querySelectorAll(".email-item").forEach((item) => {
             item.classList.remove("selected");
@@ -238,7 +268,7 @@
         countSpan.textContent = formatUnreadCount(state.unreadCount);
     }
 
-    async function selectEmail(id, deps) {
+    async function selectEmail(id, deps, options = {}) {
         const {
             state,
             showLoading,
@@ -249,9 +279,13 @@
             updateUnreadCount,
         } = deps;
 
+        const {
+            historyMode = "push",
+        } = options;
+
         state.selectedEmailId = parseInt(id, 10);
         state.selectedSourceType = "inbox";
-        syncInboxSelectionState(state);
+        syncInboxSelectionState(state, historyMode);
 
         const email = state.emails.find((e) => Number(e.id) === Number(state.selectedEmailId));
         if (!email) return;

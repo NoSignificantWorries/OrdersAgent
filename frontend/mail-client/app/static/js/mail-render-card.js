@@ -259,6 +259,19 @@
         window.location.href = `/sent?${params.toString()}`;
     }
 
+    async function openInboxThreadEmailFromInbox(targetSourceId, selectEmail) {
+        if (!Number.isFinite(Number(targetSourceId)) || Number(targetSourceId) <= 0) {
+            alert("Не удалось определить входящее письмо для перехода.");
+            return;
+        }
+
+        if (typeof selectEmail !== "function") {
+            throw new Error("Функция выбора письма не подключена");
+        }
+
+        await selectEmail(Number(targetSourceId), { historyMode: "push" });
+    }
+
     async function renderEmailCard(email, deps) {
         const {
             state,
@@ -705,7 +718,7 @@
                 }
 
                 if (targetSource === "inbox") {
-                    await selectEmail(targetSourceId);
+                    await openInboxThreadEmailFromInbox(targetSourceId, selectEmail);
                     return;
                 }
 
@@ -1299,5 +1312,6 @@
         isReplyInputProtected,
         bindReplyInputEvents,
         openSentThreadEmailFromInbox,
+        openInboxThreadEmailFromInbox,
     };
 })();

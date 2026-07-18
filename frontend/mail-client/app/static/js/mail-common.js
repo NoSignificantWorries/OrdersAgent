@@ -120,9 +120,9 @@ let signatureDraft = "";
 
 let mailToastTimer = null;
 
-function syncInboxSelectionState() {
+function syncInboxSelectionState(mode = "replace") {
     if (typeof syncInboxSelectionStateFromModule === "function") {
-        return syncInboxSelectionStateFromModule(getMailRenderListState());
+        return syncInboxSelectionStateFromModule(getMailRenderListState(), mode);
     }
 }
 
@@ -611,18 +611,21 @@ function renderEmailList() {
     });
 }
 
-function selectEmail(id) {
-    return selectEmailFromModule(id, {
-        state: getMailRenderListState(),
-        showLoading,
-        highlightSelectedEmail,
-        renderEmailCard,
-        renderChatForEmail,
-        renderEmailList,
-        updateUnreadCount,
-    });
+function selectEmail(id, options = {}) {
+    return selectEmailFromModule(
+        id,
+        {
+            state: getMailRenderListState(),
+            showLoading,
+            highlightSelectedEmail,
+            renderEmailCard,
+            renderChatForEmail,
+            renderEmailList,
+            updateUnreadCount,
+        },
+        options,
+    );
 }
-
 
 // ========== КАРТОЧКА ПИСЬМА ==========
 function getMailRenderCardState() {
@@ -706,10 +709,13 @@ function canUnarchiveTask(email) {
     return canUnarchiveTaskFromModule(email);
 }
 
-function closeOpenedEmail() {
-    return closeOpenedEmailFromModule({
-        state: getMailRenderListState(),
-    });
+function closeOpenedEmail(options = {}) {
+    return closeOpenedEmailFromModule(
+        {
+            state: getMailRenderListState(),
+        },
+        options,
+    );
 }
 
 function closeAndMarkUnread() {

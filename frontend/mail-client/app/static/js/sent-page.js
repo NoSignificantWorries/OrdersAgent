@@ -17,7 +17,18 @@
         };
     }
 
-    function writeSentStateToUrl(state) {
+   function buildSentHistoryState(state) {
+        return {
+            currentPage: Math.max(1, Number(state.currentPage) || 1),
+            currentSearchTerm: String(state.currentSearchTerm || ""),
+            sortNewestFirst: state.sortNewestFirst !== false,
+            selectedEmailId:
+                state.selectedEmailId != null ? Number(state.selectedEmailId) : null,
+            selectedSourceType: String(state.selectedSourceType || "sent"),
+        };
+    }
+
+    function writeSentStateToUrl(state, mode = "replace") {
         const params = new URLSearchParams();
 
         if (Number(state.currentPage) > 1) {
@@ -37,17 +48,104 @@
             params.set("selected_source", String(state.selectedSourceType || "sent"));
         }
 
-        if (state.selectedEmailId != null && Number(state.selectedEmailId) > 0) {
-            params.set("selected_email_id", String(state.selectedEmailId));
-            params.set("selected_source", String(state.selectedSourceType || "sent"));
-        }
-
         const query = params.toString();
         const nextUrl = query
             ? `${window.location.pathname}?${query}`
             : window.location.pathname;
 
-        window.history.replaceState({}, "", nextUrl);
+        const historyState = buildSentHistoryState(state);
+
+        if (mode === "push") {
+            window.history.pushState(historyState, "", nextUrl);
+            return;
+        }
+
+        window.history.replaceState(historyState, "", nextUrl);
+    }
+
+    function syncSentState(state, mode = "replace") {
+        writeSentStateToUrl(state, mode);
+        updateSentSectionNavLinks(state);
+    }
+
+    async function restoreSentStateFromHistory(state, historyState = null) {
+        const urlState = readSentStateFromUrl();
+        const sourceState =
+            historyState && typeof historyState === "object"
+                ? historyState
+                : {};
+
+        state.currentPage = Math.max(
+            1,
+            Number(sourceState.currentPage ?? urlState.currentPage) || 1,
+        );
+        state.currentSearchTerm = String(
+            sourceState.currentSearchTerm ?? urlState.currentSearchTerm ?? "",
+        );
+        state.sortNewestFirst =
+            sourceState.sortNewestFirst ?? urlState.sortNewestFirst ?? true;
+
+        const nextSelectedSourceType = String(
+            sourceState.selectedSourceType ?? urlState.selectedSourceType ?? "sent",
+        );
+        const nextSelectedEmailIdRaw =
+            sourceState.selectedEmailId ?? urlState.selectedEmailId ?? null;
+        const nextSelectedEmailId = Number(nextSelectedEmailIdRaw || 0);
+
+        state.selectedSourceType = nextSelectedSourceType;
+        state.selectedEmailId =
+            nextSelectedSourceType === "sent" && Number.isFinite(nextSelectedEmailId) && nextSelectedEmailId > 0
+                ? nextSelectedEmailId
+                : null;
+
+        const searchInput = document.getElementById("search-input");
+        if (searchInput && searchInput.value !== state.currentSearchTerm) {
+            searchInput.value = state.currentSearchTerm;
+        }
+
+        const newestBtn = document.getElementById("sort-newest-btn");
+        const oldestBtn = document.getElementById("sort-oldest-btn");
+        if (newestBtn && oldestBtn) {
+            newestBtn.classList.toggle("active", state.sortNewestFirst === true);
+            oldestBtn.classList.toggle("active", state.sortNewestFirst === false);
+        }
+
+        await loadSentEmails(state);
+        renderSentEmailList(state);
+        renderSentPagination(state);
+
+        if (state.selectedSourceType === "sent" && state.selectedEmailId != null) {
+            const existingEmail = state.emails.find(
+                (email) => Number(email.id) === Number(state.selectedEmailId),
+            );
+
+            if (existingEmail) {
+                await selectSentEmail(existingEmail.id, state, { historyMode: "replace" });
+                return;
+            }
+
+            try {
+                const detailEmail = await loadSentEmailDetail(state.selectedEmailId);
+                const mergedEmail = mergeSentEmailDetailIntoState(detailEmail, state);
+
+                if (!state.emails.some((email) => Number(email.id) === Number(mergedEmail.id))) {
+                    state.emails.unshift(mergedEmail);
+                    renderSentEmailList(state);
+                }
+
+                await selectSentEmail(mergedEmail.id, state, { historyMode: "replace" });
+                return;
+            } catch (detailError) {
+                console.error("Не удалось восстановить исходящее письмо из истории", detailError);
+            }
+        }
+
+        highlightSelectedEmail(null);
+        const emailView = document.getElementById("emailView");
+        if (emailView) {
+            emailView.innerHTML =
+                '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+        }
     }
 
     function updateSentSectionNavLinks(state) {
@@ -77,11 +175,6 @@
                 console.error("Не удалось обновить ссылку раздела (sent)", error);
             }
         });
-    }
-
-    function syncSentState(state) {
-        writeSentStateToUrl(state);
-        updateSentSectionNavLinks(state);
     }
 
     function openInboxThreadEmailFromSent(threadEmail, state) {
@@ -485,7 +578,9 @@ function renderSentPagination(state) {
             .join("");
 
         document.querySelectorAll(".email-item").forEach((el) => {
-            el.addEventListener("click", () => selectSentEmail(Number(el.dataset.id), state));
+            el.addEventListener("click", () =>
+                selectSentEmail(Number(el.dataset.id), state, { historyMode: "push" })
+            );
         });
 
         if (state.selectedEmailId != null) {
@@ -765,7 +860,7 @@ function renderSentPagination(state) {
                     );
 
                     if (targetEmail) {
-                        await selectSentEmail(targetEmail.id, state);
+                        await selectSentEmail(targetEmail.id, state, { historyMode: "push" });
                         return;
                     }
 
@@ -782,7 +877,7 @@ function renderSentPagination(state) {
                             renderSentEmailList(state);
                         }
 
-                        await selectSentEmail(targetSourceId, state);
+                        await selectSentEmail(targetSourceId, state, { historyMode: "push" });
                         return;
                     } catch (error) {
                         console.error("Не удалось загрузить исходящее письмо из цепочки", error);
@@ -827,10 +922,14 @@ function renderSentPagination(state) {
             }
     }
 
-    async function selectSentEmail(id, state) {
-        state.selectedEmailId = id;
+    async function selectSentEmail(id, state, options = {}) {
+        const {
+            historyMode = "push",
+        } = options;
+
+        state.selectedEmailId = Number(id);
         state.selectedSourceType = "sent";
-        syncSentState(state);
+        syncSentState(state, historyMode);
 
         let email = state.emails.find((e) => Number(e.id) === Number(id));
         if (!email) return;
@@ -862,7 +961,6 @@ function renderSentPagination(state) {
             }
         }
     }
-
 
     async function loadSentEmails(state) {
         const container = document.getElementById("emailsContainer");
@@ -1078,6 +1176,14 @@ function renderSentPagination(state) {
 
         syncSentState(state);
 
+        window.addEventListener("popstate", async (event) => {
+            try {
+                await restoreSentStateFromHistory(state, event.state);
+            } catch (historyError) {
+                console.error("Не удалось восстановить состояние страницы исходящих из истории", historyError);
+            }
+        });
+
         const composeDeps = {
             state,
             sendNewEmail: window.MailApi?.sendNewEmail,
@@ -1117,7 +1223,7 @@ function renderSentPagination(state) {
                 );
 
                 if (existingEmail) {
-                    await selectSentEmail(existingEmail.id, state);
+                    await selectSentEmail(existingEmail.id, state, { historyMode: "replace" });
                 } else {
                     try {
                         const detailEmail = await loadSentEmailDetail(state.selectedEmailId);
@@ -1128,7 +1234,7 @@ function renderSentPagination(state) {
                             renderSentEmailList(state);
                         }
 
-                        await selectSentEmail(mergedEmail.id, state);
+                        await selectSentEmail(mergedEmail.id, state, { historyMode: "replace" });
                     } catch (detailError) {
                         console.error("Не удалось автоматически открыть исходящее письмо", detailError);
                     }

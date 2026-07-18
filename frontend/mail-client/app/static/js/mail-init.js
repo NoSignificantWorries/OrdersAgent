@@ -20,7 +20,66 @@
         };
     }
 
-    function writeListStateToUrl(pageType, state) {
+    function normalizeHistoryState(pageType, rawState = null) {
+        const fallback = readListStateFromUrl(pageType);
+        const source = rawState && typeof rawState === "object" ? rawState : {};
+
+        return {
+            page: Math.max(1, Number(source.currentPage ?? source.page) || fallback.page || 1),
+            perPage: Math.max(1, Number(source.perPage) || fallback.perPage || 100),
+            search: String(source.currentSearchTerm ?? source.search ?? fallback.search ?? ""),
+            sortNewestFirst:
+                source.sortNewestFirst != null
+                    ? source.sortNewestFirst !== false
+                    : fallback.sortNewestFirst,
+            status:
+                pageType === "sent"
+                    ? "all"
+                    : String(
+                        source.currentStatusFilter ??
+                        source.status ??
+                        fallback.status ??
+                        "all"
+                    ),
+            classFilter:
+                pageType === "sent"
+                    ? "all"
+                    : String(
+                        source.currentClassFilter ??
+                        source.classFilter ??
+                        fallback.classFilter ??
+                        "all"
+                    ),
+            selectedEmailId: Math.max(
+                0,
+                Number(source.selectedEmailId ?? fallback.selectedEmailId) || 0,
+            ) || null,
+            selectedSourceType: String(
+                source.selectedSourceType ??
+                fallback.selectedSourceType ??
+                pageType ??
+                "inbox",
+            ),
+        };
+    }
+
+    function buildListHistoryState(pageType, state) {
+        return {
+            currentPage: Math.max(1, Number(state.currentPage) || 1),
+            perPage: Math.max(1, Number(state.perPage) || 100),
+            currentSearchTerm: String(state.currentSearchTerm || ""),
+            sortNewestFirst: state.sortNewestFirst !== false,
+            currentStatusFilter:
+                pageType === "sent" ? "all" : String(state.currentStatusFilter || "all"),
+            currentClassFilter:
+                pageType === "sent" ? "all" : String(state.currentClassFilter || "all"),
+            selectedEmailId:
+                state.selectedEmailId != null ? Number(state.selectedEmailId) : null,
+            selectedSourceType: String(state.selectedSourceType || pageType || "inbox"),
+        };
+    }
+
+    function writeListStateToUrl(pageType, state, mode = "replace") {
         const params = new URLSearchParams();
 
         if (Number(state.currentPage) > 1) {
@@ -55,7 +114,14 @@
             ? `${window.location.pathname}?${query}`
             : window.location.pathname;
 
-        window.history.replaceState({}, "", nextUrl);
+        const historyState = buildListHistoryState(pageType, state);
+
+        if (mode === "push") {
+            window.history.pushState(historyState, "", nextUrl);
+            return;
+        }
+
+        window.history.replaceState(historyState, "", nextUrl);
     }
 
     function updateSectionNavLinks(state) {
@@ -104,8 +170,8 @@
         });
     }
 
-    function syncListState(pageType, state) {
-        writeListStateToUrl(pageType, state);
+    function syncListState(pageType, state, mode = "replace") {
+        writeListStateToUrl(pageType, state, mode);
         updateSectionNavLinks(state);
     }
 
@@ -374,6 +440,30 @@
         }
     }
 
+    function applyListStateSnapshot(pageConfig, state, snapshot) {
+        const hasMatchingSelectedSource =
+            String(snapshot.selectedSourceType || pageConfig.pageType) === pageConfig.pageType;
+
+        state.currentPage = Math.max(1, Number(snapshot.page) || 1);
+        state.perPage = Math.max(1, Number(snapshot.perPage) || 100);
+        state.currentSearchTerm = String(snapshot.search || "");
+        state.currentStatusFilter =
+            pageConfig.pageType === "sent"
+                ? "all"
+                : String(snapshot.status || "all");
+        state.currentClassFilter =
+            pageConfig.pageType === "sent"
+                ? "all"
+                : String(snapshot.classFilter || "all");
+        state.sortNewestFirst = snapshot.sortNewestFirst !== false;
+        state.selectedEmailId = hasMatchingSelectedSource
+            ? (Math.max(0, Number(snapshot.selectedEmailId) || 0) || null)
+            : null;
+        state.selectedSourceType = hasMatchingSelectedSource
+            ? String(snapshot.selectedSourceType || pageConfig.pageType)
+            : pageConfig.pageType;
+    }
+
     function initMailPage(config, deps) {
         const {
             state,
@@ -428,29 +518,93 @@
             refreshIntervalMs: config.refreshIntervalMs ?? 5000,
         };
 
+        const restoreFromHistory = async (historyState = null) => {
+            const snapshot = normalizeHistoryState(pageConfig.pageType, historyState);
+
+            applyListStateSnapshot(pageConfig, state, snapshot);
+
+            const searchInput = document.getElementById("search-input");
+            const statusSelect = document.getElementById("status-filter-select");
+            const classSelect = document.getElementById("class-filter-select");
+            const sortNewestBtn = document.getElementById("sort-newest-btn");
+            const sortOldestBtn = document.getElementById("sort-oldest-btn");
+
+            if (searchInput) {
+                searchInput.value = state.currentSearchTerm || "";
+            }
+
+            if (statusSelect) {
+                statusSelect.value = state.currentStatusFilter || "all";
+            }
+
+            if (classSelect) {
+                classSelect.value = state.currentClassFilter || "all";
+            }
+
+            if (sortNewestBtn && sortOldestBtn) {
+                if (state.sortNewestFirst) {
+                    sortNewestBtn.classList.add("active");
+                    sortOldestBtn.classList.remove("active");
+                } else {
+                    sortOldestBtn.classList.add("active");
+                    sortNewestBtn.classList.remove("active");
+                }
+            }
+
+            const result = await reloadEmails({ showLoadingState: true });
+            if (!result?.ok) return;
+
+            if (
+                state.selectedSourceType === pageConfig.pageType &&
+                state.selectedEmailId != null
+            ) {
+                const selectedEmail = state.emails.find(
+                    (email) => Number(email.id) === Number(state.selectedEmailId),
+                );
+
+                if (selectedEmail) {
+                    await selectEmail(selectedEmail.id, { historyMode: "replace" });
+                    return;
+                }
+            }
+
+            state.selectedEmailId = null;
+            state.selectedSourceType = pageConfig.pageType;
+            syncListState(pageConfig.pageType, state, "replace");
+
+            const emailView = document.getElementById("emailView");
+            if (emailView) {
+                emailView.innerHTML =
+                    state.emails.length === 0
+                        ? '<div class="email-placeholder">Письма отсутствуют</div>'
+                        : '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+            }
+        };
+
         document.addEventListener("DOMContentLoaded", async () => {
             window.MAILPAGECONFIG = pageConfig;
 
-            const initialUrlState = readListStateFromUrl(pageConfig.pageType);
+            if (!window.__mailPopStateBound) {
+                window.__mailPopStateBound = true;
 
-            const hasMatchingSelectedSource =
-                initialUrlState.selectedSourceType === pageConfig.pageType;
+                window.addEventListener("popstate", async (event) => {
+                    if (!window.MAILPAGECONFIG) return;
+                    if ((window.MAILPAGECONFIG.pageType || "inbox") !== pageConfig.pageType) return;
 
-            state.selectedEmailId = hasMatchingSelectedSource
-                ? initialUrlState.selectedEmailId
-                : null;
+                    try {
+                        await restoreFromHistory(event.state);
+                    } catch (error) {
+                        console.error("Не удалось восстановить состояние страницы из истории", error);
+                    }
+                });
+            }
 
-            state.selectedSourceType = hasMatchingSelectedSource
-                ? initialUrlState.selectedSourceType
-                : pageConfig.pageType;
-            state.currentPage = initialUrlState.page;
-            state.perPage = initialUrlState.perPage;
+            const initialUrlState = normalizeHistoryState(pageConfig.pageType);
+
+            applyListStateSnapshot(pageConfig, state, initialUrlState);
+
             state.totalEmails = 0;
             state.totalPages = 1;
-            state.currentSearchTerm = initialUrlState.search;
-            state.currentStatusFilter = initialUrlState.status;
-            state.currentClassFilter = initialUrlState.classFilter;
-            state.sortNewestFirst = initialUrlState.sortNewestFirst;
 
             const emailView = document.getElementById("emailView");
             if (emailView) {
@@ -470,7 +624,7 @@
                 );
 
                 if (selectedEmail) {
-                    await selectEmail(selectedEmail.id);
+                    await selectEmail(selectedEmail.id, { historyMode: "replace" });
                 }
             }
 
