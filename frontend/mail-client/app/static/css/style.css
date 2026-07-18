@@ -611,6 +611,39 @@ body {
     cursor: not-allowed;
 }
 
+.comment-modal-meta {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: -2px;
+}
+
+.comment-modal-counter {
+    font-size: 12px;
+    line-height: 1.4;
+    color: #64748b;
+}
+
+.comment-modal-counter.is-limit {
+    color: #d97706;
+    font-weight: 600;
+}
+
+.comment-modal-textarea[aria-invalid="true"] {
+    border-color: #ef4444;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+
+.comment-modal-error {
+    font-size: 13px;
+    line-height: 1.45;
+    color: #dc2626;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+
 .comment-modal-text {
     font-size: 15px;
     line-height: 1.6;

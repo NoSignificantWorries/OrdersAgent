@@ -10,6 +10,8 @@
     let currentEmail = null;
     let currentDeps = null;
     let draftComment = "";
+    const COMMENT_MAX_LENGTH = 500;
+    let modalErrorMessage = "";
 
     function escapeHtml(value) {
         return String(value || "")
@@ -44,6 +46,7 @@
         currentEmail = null;
         currentDeps = null;
         draftComment = "";
+        modalErrorMessage = "";
         syncProtectedState();
         renderModal();
     }
@@ -85,9 +88,31 @@
                             id="comment-modal-textarea"
                             class="comment-modal-textarea"
                             rows="6"
+                            maxlength="${COMMENT_MAX_LENGTH}"
                             placeholder="Введите комментарий"
+                            aria-describedby="comment-modal-meta${modalErrorMessage ? " comment-modal-error" : ""}"
+                            aria-invalid="${modalErrorMessage ? "true" : "false"}"
                             ${modalSaving ? "disabled" : ""}
                         >${escapeHtml(draftComment)}</textarea>
+
+                        <div id="comment-modal-meta" class="comment-modal-meta">
+                            <span class="comment-modal-counter">
+                                ${String(draftComment || "").length}/${COMMENT_MAX_LENGTH}
+                            </span>
+                        </div>
+
+                        ${modalErrorMessage
+                            ? `
+                                <div
+                                    id="comment-modal-error"
+                                    class="comment-modal-error"
+                                    role="alert"
+                                >
+                                    ${escapeHtml(modalErrorMessage)}
+                                </div>
+                            `
+                            : ""
+                        }
                     </div>
                 `;
 
@@ -197,6 +222,13 @@
         const textarea = document.getElementById("comment-modal-textarea");
         draftComment = textarea ? textarea.value : draftComment;
 
+        if (draftComment.length > COMMENT_MAX_LENGTH) {
+            modalErrorMessage = `Комментарий слишком длинный: максимум ${COMMENT_MAX_LENGTH} символов. Сейчас: ${draftComment.length}.`;
+            renderModal();
+            return;
+        }
+
+        modalErrorMessage = "";
         modalSaving = true;
         syncProtectedState();
         renderModal();
@@ -229,9 +261,16 @@
             modalSaving = false;
             currentEmail = emailRef;
             currentDeps = depsRef;
+
+            const rawMessage = String(error?.message || "").trim();
+            if (rawMessage && /length|max|длин|символ/i.test(rawMessage)) {
+                modalErrorMessage = `Не удалось сохранить комментарий: превышена допустимая длина. Максимум ${COMMENT_MAX_LENGTH} символов.`;
+            } else {
+                modalErrorMessage = rawMessage || "Не удалось сохранить комментарий.";
+            }
+
             syncProtectedState();
             renderModal();
-            alert(error.message || "Не удалось сохранить комментарий");
         }
     }
 
@@ -245,6 +284,18 @@
         if (textarea) {
             textarea.addEventListener("input", (event) => {
                 draftComment = event.target.value;
+
+                if (draftComment.length <= COMMENT_MAX_LENGTH) {
+                    modalErrorMessage = "";
+                }
+
+                const counter = document.querySelector(".comment-modal-counter");
+                if (counter) {
+                    counter.textContent = `${draftComment.length}/${COMMENT_MAX_LENGTH}`;
+                    counter.classList.toggle("is-limit", draftComment.length >= COMMENT_MAX_LENGTH);
+                }
+
+                textarea.setAttribute("aria-invalid", modalErrorMessage ? "true" : "false");
             });
         }
 
