@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from app.db import get_db_pool
 from app.routers import auth
-from app.services.sent import list_sent_for_user
+from app.services.sent import list_sent_for_user, get_sent_email_detail_for_user
 from app.cloud.minio import MinIOClient
 
 
@@ -82,6 +82,26 @@ async def get_sent(
         "total_pages": total_pages,
         "count": len(items),
         "items": items,
+    }
+
+
+@router.get("/sent/{email_id}/detail")
+async def get_sent_detail(email_id: int, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    item = await get_sent_email_detail_for_user(
+        user=user,
+        email_id=email_id,
+    )
+
+    if not item:
+        raise HTTPException(status_code=404, detail="Исходящее письмо не найдено")
+
+    return {
+        "ok": True,
+        "item": item,
     }
 
 

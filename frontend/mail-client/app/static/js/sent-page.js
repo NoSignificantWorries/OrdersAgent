@@ -119,8 +119,8 @@
             cc_header: item.ccheader || "",
             bcc_header: item.bccheader || "",
             content: item.bodytext || item.rawemail || "",
-            body_text: item.bodytext || "",
-            raw_email: item.rawemail || "",
+            body_text: typeof item.bodytext === "string" ? item.bodytext : "",
+            raw_email: typeof item.rawemail === "string" ? item.rawemail : "",
             date,
             read: true,
             archived: false,
@@ -168,6 +168,62 @@
 
         const data = await resp.json();
         return Array.isArray(data?.items) ? data.items : [];
+    }
+
+    async function loadSentEmailDetail(emailId) {
+        const resp = await fetch(`/api/sent/${emailId}/detail`, {
+            credentials: "same-origin",
+        });
+
+        if (!resp.ok) {
+            let detail = `Не удалось загрузить письмо (${resp.status})`;
+
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    detail = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(detail);
+        }
+
+        const data = await resp.json();
+        if (!data?.item || typeof data.item !== "object") {
+            throw new Error("Некорректный ответ деталей письма");
+        }
+
+        return normalizeSentItem(data.item);
+    }
+
+    function hasLoadedSentDetails(email) {
+        if (!email || typeof email !== "object") return false;
+
+        const hasRawEmail = typeof email.raw_email === "string" && email.raw_email.trim() !== "";
+        const hasBodyText = typeof email.body_text === "string" && email.body_text.trim() !== "";
+        const hasDocuments = Array.isArray(email.documents) && email.documents.length > 0;
+
+        return hasRawEmail || hasBodyText || hasDocuments;
+    }
+
+    function mergeSentEmailDetailIntoState(detailEmail, state) {
+        if (!detailEmail || !state || !Array.isArray(state.emails)) {
+            return detailEmail;
+        }
+
+        const index = state.emails.findIndex((item) => Number(item.id) === Number(detailEmail.id));
+        if (index === -1) {
+            return detailEmail;
+        }
+
+        const merged = {
+            ...state.emails[index],
+            ...detailEmail,
+            documents: normalizeDocuments(detailEmail.documents),
+        };
+
+        state.emails[index] = merged;
+        return merged;
     }
 
     function extractDisplayBodyFromRawEmail(value) {
@@ -414,7 +470,7 @@ function renderSentPagination(state) {
         const emailView = document.getElementById("emailView");
         if (!emailView) return;
 
-        const docs = Array.isArray(email.documents) ? email.documents : [];
+        const docs = normalizeDocuments(email.documents);
 
         const realEmailId = email.id;
 
@@ -428,13 +484,6 @@ function renderSentPagination(state) {
         }
 
         threadMessages = threadMessages.map(normalizeSentThreadItem);
-
-        console.log("SENT THREAD DEBUG", {
-            realEmailId,
-            email,
-            threadMessagesRawCount: Array.isArray(threadMessages) ? threadMessages.length : null,
-            threadMessages,
-        });
 
         const hasThread = threadMessages.length > 1;
 
@@ -543,8 +592,6 @@ function renderSentPagination(state) {
                 })
                 .join("") || "<p>...</p>";
 
-        console.log("SENT BODY RAW =", JSON.stringify(email.body_text || email.content || ""));
-
         const attachmentsHtml = docs.length
             ? `
                 <div class="email-attachments">
@@ -565,7 +612,7 @@ function renderSentPagination(state) {
                     <button
                         type="button"
                         class="save-all-attachments-btn"
-                        data-email-id="${email.email_id}"
+                        data-email-id="${email.id}"
                     >
                         ${docs.length === 1 ? "Скачать" : "Скачать все"}
                     </button>
@@ -662,9 +709,7 @@ function renderSentPagination(state) {
                 );
 
                 if (targetEmail) {
-                    state.selectedEmailId = targetEmail.id;
-                    highlightSelectedEmail(targetEmail.id);
-                    await renderSentEmailCard(targetEmail, state);
+                    await selectSentEmail(targetEmail.id, state);
                     return;
                 }
 
@@ -702,11 +747,35 @@ function renderSentPagination(state) {
     async function selectSentEmail(id, state) {
         state.selectedEmailId = id;
 
-        const email = state.emails.find((e) => e.id === id);
+        let email = state.emails.find((e) => e.id === id);
         if (!email) return;
 
         highlightSelectedEmail(id);
-        await renderSentEmailCard(email, state);
+
+        const emailView = document.getElementById("emailView");
+        if (emailView) {
+            emailView.innerHTML =
+                '<div class="email-loading-wrapper"><div class="loading"></div></div>';
+        }
+
+        try {
+            if (!hasLoadedSentDetails(email)) {
+                const detailEmail = await loadSentEmailDetail(id);
+                email = mergeSentEmailDetailIntoState(detailEmail, state);
+            }
+
+            await renderSentEmailCard(email, state);
+        } catch (error) {
+            console.error("Не удалось загрузить детали исходящего письма", error);
+
+            if (emailView) {
+                emailView.innerHTML = `
+                    <div class="email-placeholder" style="padding:20px;text-align:center;">
+                        Ошибка загрузки письма
+                    </div>
+                `;
+            }
+        }
     }
 
 
@@ -737,7 +806,36 @@ function renderSentPagination(state) {
 
         const data = await resp.json();
 
-        state.emails = Array.isArray(data.items) ? data.items.map(normalizeSentItem) : [];
+        const prevEmailsById = new Map(
+            (Array.isArray(state.emails) ? state.emails : []).map((email) => [Number(email.id), email]),
+        );
+
+        state.emails = Array.isArray(data.items)
+            ? data.items.map((item) => {
+                  const normalized = normalizeSentItem(item);
+                  const existing = prevEmailsById.get(Number(normalized.id));
+
+                  if (!existing) {
+                      return normalized;
+                  }
+
+                  return {
+                        ...normalized,
+                        raw_email: existing.raw_email || normalized.raw_email,
+                        body_text: existing.body_text || normalized.body_text,
+                        content:
+                            existing.body_text ||
+                            existing.raw_email ||
+                            existing.content ||
+                            normalized.content,
+                        documents:
+                            Array.isArray(existing.documents) && existing.documents.length
+                                ? existing.documents
+                                : normalized.documents,
+                    };
+              })
+            : [];
+
         state.currentPage = Number(data.page || 1);
         state.perPage = Number(data.per_page || 100);
         state.total = Number(data.total || 0);

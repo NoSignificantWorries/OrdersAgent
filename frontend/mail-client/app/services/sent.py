@@ -154,7 +154,142 @@ async def list_sent_for_user(
         {where_sql}
     """
 
-    page_sql = f"""
+    page_ids_sql = f"""
+        SELECT
+            se.id AS sent_email_id
+        FROM sent_emails se
+        {where_sql}
+        ORDER BY
+            COALESCE(se.sent_at, se.email_date, se.created_at) {sort_sql},
+            se.id {sort_sql}
+        LIMIT ${param_idx}
+        OFFSET ${param_idx + 1}
+    """
+
+    details_sql = """
+        SELECT
+            se.id AS sent_email_id,
+            se.user_id,
+            se.mailbox,
+            se.email_uid,
+            se.message_id,
+            se.in_reply_to,
+            se.references_header AS references,
+            se.parent_email_id,
+            se.email_from,
+            se.reply_to,
+            se.to_header,
+            se.cc_header,
+            se.bcc_header,
+            se.email_subject,
+            se.email_date,
+            se.send_status,
+            se.created_at,
+            se.sent_at
+        FROM sent_emails se
+        WHERE se.id = ANY($1::int[])
+    """
+
+    async with pool.acquire() as conn:
+        total_row = await conn.fetchrow(count_sql, *params)
+        total = int(total_row["total"] or 0)
+
+        page_params = [*params, per_page, offset]
+        page_rows = await conn.fetch(page_ids_sql, *page_params)
+        sent_email_ids = [row["sent_email_id"] for row in page_rows]
+
+        if not sent_email_ids:
+            return {
+                "items": [],
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+            }
+
+        detail_rows = await conn.fetch(details_sql, sent_email_ids)
+
+    rows_by_id = {row["sent_email_id"]: row for row in detail_rows}
+
+    result: list[dict] = []
+
+    for sent_email_id in sent_email_ids:
+        row = rows_by_id.get(sent_email_id)
+        if not row:
+            continue
+
+        item: dict = {
+            "id": row["sent_email_id"],
+            "emailid": row["sent_email_id"],
+            "messageid": row["message_id"],
+            "inreplyto": row["in_reply_to"],
+            "references": row["references"],
+            "parentemailid": row["parent_email_id"],
+            "userid": row["user_id"],
+            "mailbox": row["mailbox"],
+            "emailuid": row["email_uid"],
+            "emailfrom": row["email_from"],
+            "replyto": row["reply_to"],
+            "toheader": row["to_header"],
+            "ccheader": row["cc_header"],
+            "bccheader": row["bcc_header"],
+            "emailsubject": row["email_subject"],
+            "rawemail": None,
+            "bodytext": "",
+            "emaildate": row["email_date"].isoformat() if row["email_date"] else None,
+            "createdat": row["created_at"].isoformat() if row["created_at"] else None,
+            "sentat": row["sent_at"].isoformat() if row["sent_at"] else None,
+            "sendstatus": row["send_status"],
+            "documents": [],
+
+            "archived": False,
+            "is_read": True,
+            "prob1": None,
+            "predictedclass": None,
+            "modeldecision": None,
+            "documentid": None,
+            "type": None,
+            "status": None,
+            "priority": 100,
+            "inputdata": {},
+            "outputdata": {},
+            "assignedto": None,
+            "errormessage": None,
+            "attempts": 0,
+            "maxattempts": 0,
+            "taskcreatedat": None,
+            "taskstartedat": None,
+            "taskcompletedat": None,
+        }
+
+        result.append(item)
+
+    return {
+        "items": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
+
+
+async def get_sent_email_detail_for_user(
+    user: dict,
+    email_id: int,
+) -> dict | None:
+    pool = await get_db_pool()
+
+    is_admin = user.get("role") == "admin"
+
+    where_clauses: list[str] = ["se.id = $1"]
+    params: list[object] = [email_id]
+    param_idx = 2
+
+    if not is_admin:
+        where_clauses.append(f"se.mailbox = ${param_idx}")
+        params.append(user["email"])
+
+    where_sql = "\nWHERE " + "\n  AND ".join(where_clauses)
+
+    detail_sql = f"""
         SELECT
             se.id AS sent_email_id,
             se.user_id,
@@ -224,75 +359,58 @@ async def list_sent_for_user(
             se.send_status,
             se.created_at,
             se.sent_at
-        ORDER BY
-            COALESCE(se.sent_at, se.email_date, se.created_at) {sort_sql},
-            se.id {sort_sql}
-        LIMIT ${param_idx}
-        OFFSET ${param_idx + 1}
+        LIMIT 1
     """
 
     async with pool.acquire() as conn:
-        total_row = await conn.fetchrow(count_sql, *params)
-        total = int(total_row["total"] or 0)
+        row = await conn.fetchrow(detail_sql, *params)
 
-        page_params = [*params, per_page, offset]
-        rows = await conn.fetch(page_sql, *page_params)
+    if not row:
+        return None
 
-    result: list[dict] = []
-
-    for row in rows:
-        documents = _normalize_documents(row["documents"])
-        body_text = _extract_body_text_from_raw_email(row["raw_email"])
-
-        item: dict = {
-            "id": row["sent_email_id"],
-            "emailid": row["sent_email_id"],
-            "messageid": row["message_id"],
-            "inreplyto": row["in_reply_to"],
-            "references": row["references"],
-            "parentemailid": row["parent_email_id"],
-            "userid": row["user_id"],
-            "mailbox": row["mailbox"],
-            "emailuid": row["email_uid"],
-            "emailfrom": row["email_from"],
-            "replyto": row["reply_to"],
-            "toheader": row["to_header"],
-            "ccheader": row["cc_header"],
-            "bccheader": row["bcc_header"],
-            "emailsubject": row["email_subject"],
-            "rawemail": row["raw_email"],
-            "bodytext": body_text,
-            "emaildate": row["email_date"].isoformat() if row["email_date"] else None,
-            "createdat": row["created_at"].isoformat() if row["created_at"] else None,
-            "sentat": row["sent_at"].isoformat() if row["sent_at"] else None,
-            "sendstatus": row["send_status"],
-            "documents": documents,
-
-            "archived": False,
-            "is_read": True,
-            "prob1": None,
-            "predictedclass": None,
-            "modeldecision": None,
-            "documentid": None,
-            "type": None,
-            "status": None,
-            "priority": 100,
-            "inputdata": {},
-            "outputdata": {},
-            "assignedto": None,
-            "errormessage": None,
-            "attempts": 0,
-            "maxattempts": 0,
-            "taskcreatedat": None,
-            "taskstartedat": None,
-            "taskcompletedat": None,
-        }
-
-        result.append(item)
+    documents = _normalize_documents(row["documents"])
+    body_text = _extract_body_text_from_raw_email(row["raw_email"])
 
     return {
-        "items": result,
-        "total": total,
-        "page": page,
-        "per_page": per_page,
+        "id": row["sent_email_id"],
+        "emailid": row["sent_email_id"],
+        "messageid": row["message_id"],
+        "inreplyto": row["in_reply_to"],
+        "references": row["references"],
+        "parentemailid": row["parent_email_id"],
+        "userid": row["user_id"],
+        "mailbox": row["mailbox"],
+        "emailuid": row["email_uid"],
+        "emailfrom": row["email_from"],
+        "replyto": row["reply_to"],
+        "toheader": row["to_header"],
+        "ccheader": row["cc_header"],
+        "bccheader": row["bcc_header"],
+        "emailsubject": row["email_subject"],
+        "rawemail": row["raw_email"],
+        "bodytext": body_text,
+        "emaildate": row["email_date"].isoformat() if row["email_date"] else None,
+        "createdat": row["created_at"].isoformat() if row["created_at"] else None,
+        "sentat": row["sent_at"].isoformat() if row["sent_at"] else None,
+        "sendstatus": row["send_status"],
+        "documents": documents,
+
+        "archived": False,
+        "is_read": True,
+        "prob1": None,
+        "predictedclass": None,
+        "modeldecision": None,
+        "documentid": None,
+        "type": None,
+        "status": None,
+        "priority": 100,
+        "inputdata": {},
+        "outputdata": {},
+        "assignedto": None,
+        "errormessage": None,
+        "attempts": 0,
+        "maxattempts": 0,
+        "taskcreatedat": None,
+        "taskstartedat": None,
+        "taskcompletedat": None,
     }
