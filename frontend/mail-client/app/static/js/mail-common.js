@@ -2,6 +2,7 @@
 let allEmails = [];
 let emails = [];
 let selectedEmailId = null;
+let selectedSourceType = "inbox";
 let unreadCount = 0;
 
 const {
@@ -48,6 +49,7 @@ const {
     selectEmail: selectEmailFromModule,
     closeOpenedEmail: closeOpenedEmailFromModule,
     closeAndMarkUnread: closeAndMarkUnreadFromModule,
+    syncInboxSelectionState: syncInboxSelectionStateFromModule,
 } = window.MailRenderList;
 
 const {
@@ -117,6 +119,12 @@ let signatureModalSaving = false;
 let signatureDraft = "";
 
 let mailToastTimer = null;
+
+function syncInboxSelectionState() {
+    if (typeof syncInboxSelectionStateFromModule === "function") {
+        return syncInboxSelectionStateFromModule(getMailRenderListState());
+    }
+}
 
 function showMailToast(message) {
     const toast = document.getElementById("mail-toast");
@@ -384,10 +392,10 @@ function getThreadMessages(currentEmail) {
         return refs.some((ref) => threadKeys.has(ref));
     });
 
-    const currentRealId = currentEmail.email_id || currentEmail.id;
+    const currentRealId = Number(currentEmail.email_id || currentEmail.id || 0);
 
     if (
-        !related.some((email) => (email.email_id || email.id) === currentRealId)
+        !related.some((email) => Number(email.email_id || email.id) === Number(currentRealId))
     ) {
         related.push(currentEmail);
     }
@@ -531,6 +539,13 @@ function getMailRenderListState() {
             selectedEmailId = value;
         },
 
+        get selectedSourceType() {
+            return selectedSourceType;
+        },
+        set selectedSourceType(value) {
+            selectedSourceType = value;
+        },
+
         get currentSearchTerm() {
             return currentSearchTerm;
         },
@@ -623,6 +638,12 @@ function getMailRenderCardState() {
         },
         set selectedEmailId(value) {
             selectedEmailId = value;
+        },
+        get selectedSourceType() {
+            return selectedSourceType;
+        },
+        set selectedSourceType(value) {
+            selectedSourceType = value;
         },
         get pendingSilentRefresh() {
             return pendingSilentRefresh;
@@ -837,6 +858,12 @@ function getMailChatDeps() {
             set selectedEmailId(value) {
                 selectedEmailId = value;
             },
+            get selectedSourceType() {
+                return selectedSourceType;
+            },
+            set selectedSourceType(value) {
+                selectedSourceType = value;
+            },
             chatStorage,
             get isMaterialInputComposing() {
                 return isMaterialInputComposing;
@@ -888,6 +915,12 @@ function getMailInitState() {
         },
         set selectedEmailId(value) {
             selectedEmailId = value;
+        },
+        get selectedSourceType() {
+            return selectedSourceType;
+        },
+        set selectedSourceType(value) {
+            selectedSourceType = value;
         },
         chatStorage,
         replyDrafts,
@@ -964,7 +997,7 @@ function getMailInitState() {
         set isReplyFileDialogOpen(value) {
             isReplyFileDialogOpen = value;
         },
-                get userSignature() {
+        get userSignature() {
             return userSignature;
         },
         set userSignature(value) {

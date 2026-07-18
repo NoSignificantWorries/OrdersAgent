@@ -12,6 +12,8 @@
             currentPage: Math.max(1, Number(params.get("page")) || 1),
             currentSearchTerm: params.get("search") || "",
             sortNewestFirst: params.get("sort") !== "oldest",
+            selectedEmailId: Math.max(0, Number(params.get("selected_email_id")) || 0) || null,
+            selectedSourceType: params.get("selected_source") || "sent",
         };
     }
 
@@ -28,6 +30,16 @@
 
         if (state.sortNewestFirst === false) {
             params.set("sort", "oldest");
+        }
+
+        if (state.selectedEmailId != null && Number(state.selectedEmailId) > 0) {
+            params.set("selected_email_id", String(state.selectedEmailId));
+            params.set("selected_source", String(state.selectedSourceType || "sent"));
+        }
+
+        if (state.selectedEmailId != null && Number(state.selectedEmailId) > 0) {
+            params.set("selected_email_id", String(state.selectedEmailId));
+            params.set("selected_source", String(state.selectedSourceType || "sent"));
         }
 
         const query = params.toString();
@@ -70,6 +82,29 @@
     function syncSentState(state) {
         writeSentStateToUrl(state);
         updateSentSectionNavLinks(state);
+    }
+
+    function openInboxThreadEmailFromSent(threadEmail, state) {
+        const inboxEmailId = Number(threadEmail?.source_id || 0);
+        if (!Number.isFinite(inboxEmailId) || inboxEmailId <= 0) {
+            alert("Не удалось определить входящее письмо для перехода.");
+            return;
+        }
+
+        const params = new URLSearchParams();
+
+        if (String(state.currentSearchTerm || "").trim()) {
+            params.set("search", String(state.currentSearchTerm).trim());
+        }
+
+        if (state.sortNewestFirst === false) {
+            params.set("sort", "oldest");
+        }
+
+        params.set("selected_email_id", String(inboxEmailId));
+        params.set("selected_source", "inbox");
+
+        window.location.href = `/inbox?${params.toString()}`;
     }
 
     function normalizeDocuments(raw) {
@@ -287,7 +322,7 @@
         return {
             ...threadEmail,
             id: Number(threadEmail?.source_id || threadEmail?.id || threadEmail?.emailid),
-            email_id: Number(threadEmail?.emailid || threadEmail?.email_id || threadEmail?.id),
+            email_id: Number(threadEmail?.emailid || threadEmail?.email_id || 0),
             subject,
             content: rawText,
             preview,
@@ -379,6 +414,7 @@ function renderSentPagination(state) {
             if (item === state.currentPage) return;
             state.currentPage = item;
             state.selectedEmailId = null;
+            state.selectedSourceType = "sent";
             syncSentState(state);
             await reloadSentEmails(state);
         });
@@ -393,6 +429,7 @@ function renderSentPagination(state) {
         if (state.currentPage <= 1) return;
         state.currentPage -= 1;
         state.selectedEmailId = null;
+        state.selectedSourceType = "sent";
         syncSentState(state);
         await reloadSentEmails(state);
     };
@@ -401,6 +438,7 @@ function renderSentPagination(state) {
         if (state.currentPage >= state.totalPages) return;
         state.currentPage += 1;
         state.selectedEmailId = null;
+        state.selectedSourceType = "sent";
         syncSentState(state);
         await reloadSentEmails(state);
     };
@@ -515,20 +553,15 @@ function renderSentPagination(state) {
                         <div class="email-thread-timeline">
                             ${threadMessages
                                 .map((threadEmail) => {
-                                    const threadEmailRealId =
-                                        threadEmail.email_id || threadEmail.id || "";
+                                    const threadSource = String(threadEmail.thread_source || threadEmail.source_type || "inbox");
+                                    const threadSourceId = Number(threadEmail.source_id || 0);
 
                                     const isCurrent =
-                                        String(threadEmail.thread_source || "inbox") === String(currentThreadSource) &&
-                                        Number(threadEmail.source_id || threadEmailRealId) === Number(currentSourceId);
+                                        threadSource === String(currentThreadSource) &&
+                                        threadSourceId === Number(currentSourceId);
 
                                     const previewSource =
                                         threadEmail.preview || threadEmail.content || threadEmail.rawemail || "";
-
-                                    const clickableThreadId =
-                                        threadEmail.thread_source === "sent"
-                                            ? (threadEmail.source_id || threadEmail.id || "")
-                                            : (threadEmail.email_id || threadEmail.id || "");
 
                                     const preview = escapeHtml(String(previewSource).slice(0, 180));
 
@@ -536,7 +569,8 @@ function renderSentPagination(state) {
                                         <button
                                             type="button"
                                             class="email-thread-item ${isCurrent ? "is-current" : ""}"
-                                            data-thread-email-id="${escapeHtml(String(clickableThreadId))}"
+                                            data-thread-source="${escapeHtml(threadSource)}"
+                                            data-thread-source-id="${escapeHtml(String(threadSourceId))}"
                                         >
                                             <span class="email-thread-marker" aria-hidden="true"></span>
 
@@ -694,26 +728,75 @@ function renderSentPagination(state) {
         const threadPanel = emailView.querySelector(".email-thread-panel");
         if (threadPanel) {
             threadPanel.addEventListener("click", async (event) => {
-                const target = event.target.closest("[data-thread-email-id]");
+                const target = event.target.closest("[data-thread-source][data-thread-source-id]");
                 if (!target) return;
 
                 event.stopPropagation();
 
-                const rawTargetId = target.dataset.threadEmailId;
-                const targetId = Number(rawTargetId);
+                const targetSource = String(target.dataset.threadSource || "");
+                const targetSourceId = Number(target.dataset.threadSourceId || 0);
 
-                if (!rawTargetId || Number.isNaN(targetId) || targetId === realEmailId) return;
-
-                const targetEmail = state.emails.find(
-                    (e) => Number(e.id) === targetId,
-                );
-
-                if (targetEmail) {
-                    await selectSentEmail(targetEmail.id, state);
+                if (!targetSource || !Number.isFinite(targetSourceId) || targetSourceId <= 0) {
                     return;
                 }
 
-                alert("Это письмо есть в цепочке, но отсутствует в текущем списке исходящих.");
+                const isCurrentEmail =
+                    targetSource === String(currentThreadSource) &&
+                    targetSourceId === Number(currentSourceId);
+
+                if (isCurrentEmail) {
+                    return;
+                }
+
+                const targetThreadEmail = threadMessages.find(
+                    (item) =>
+                        String(item.thread_source || item.source_type || "inbox") === targetSource &&
+                        Number(item.source_id || 0) === targetSourceId,
+                );
+
+                if (!targetThreadEmail) {
+                    alert("Не удалось найти письмо в цепочке.");
+                    return;
+                }
+
+                if (targetSource === "sent") {
+                    const targetEmail = state.emails.find(
+                        (e) => Number(e.id) === targetSourceId,
+                    );
+
+                    if (targetEmail) {
+                        await selectSentEmail(targetEmail.id, state);
+                        return;
+                    }
+
+                    state.selectedEmailId = targetSourceId;
+                    state.selectedSourceType = "sent";
+                    syncSentState(state);
+
+                    try {
+                        const detailEmail = await loadSentEmailDetail(targetSourceId);
+                        const mergedEmail = mergeSentEmailDetailIntoState(detailEmail, state);
+
+                        if (!state.emails.some((e) => Number(e.id) === Number(mergedEmail.id))) {
+                            state.emails.unshift(mergedEmail);
+                            renderSentEmailList(state);
+                        }
+
+                        await selectSentEmail(targetSourceId, state);
+                        return;
+                    } catch (error) {
+                        console.error("Не удалось загрузить исходящее письмо из цепочки", error);
+                        alert("Не удалось открыть исходящее письмо из цепочки.");
+                        return;
+                    }
+                }
+
+                if (targetSource === "inbox") {
+                    openInboxThreadEmailFromSent(targetThreadEmail, state);
+                    return;
+                }
+
+                alert("Неизвестный тип письма в цепочке.");
             });
         }
 
@@ -746,8 +829,10 @@ function renderSentPagination(state) {
 
     async function selectSentEmail(id, state) {
         state.selectedEmailId = id;
+        state.selectedSourceType = "sent";
+        syncSentState(state);
 
-        let email = state.emails.find((e) => e.id === id);
+        let email = state.emails.find((e) => Number(e.id) === Number(id));
         if (!email) return;
 
         highlightSelectedEmail(id);
@@ -842,10 +927,10 @@ function renderSentPagination(state) {
         state.totalPages = Number(data.total_pages || 1);
 
         if (
+            state.selectedSourceType === "sent" &&
             state.selectedEmailId != null &&
-            !state.emails.some((email) => email.id === state.selectedEmailId)
+            !state.emails.some((email) => Number(email.id) === Number(state.selectedEmailId))
         ) {
-            state.selectedEmailId = null;
             const emailView = document.getElementById("emailView");
             if (emailView) {
                 emailView.innerHTML =
@@ -877,6 +962,7 @@ function renderSentPagination(state) {
             searchTimer = setTimeout(async () => {
                 state.currentPage = 1;
                 state.selectedEmailId = null;
+                state.selectedSourceType = "sent";
                 syncSentState(state);
                 await reloadSentEmails(state);
             }, 300);
@@ -889,6 +975,7 @@ function renderSentPagination(state) {
                 syncClearBtn();
                 state.currentPage = 1;
                 state.selectedEmailId = null;
+                state.selectedSourceType = "sent";
                 syncSentState(state);
                 await reloadSentEmails(state);
             });
@@ -926,6 +1013,7 @@ function renderSentPagination(state) {
         if (applyBtn) {
             applyBtn.addEventListener("click", async () => {
                 state.selectedEmailId = null;
+                state.selectedSourceType = "sent";
                 syncSentState(state);
                 await reloadSentEmails(state);
                 if (filterPanel) {
@@ -953,7 +1041,10 @@ function renderSentPagination(state) {
 
         const state = {
             emails: [],
-            selectedEmailId: null,
+            selectedEmailId: initialUrlState.selectedSourceType === "sent"
+                ? initialUrlState.selectedEmailId
+                : null,
+            selectedSourceType: initialUrlState.selectedSourceType || "sent",
             currentSearchTerm: initialUrlState.currentSearchTerm,
             sortNewestFirst: initialUrlState.sortNewestFirst,
 
@@ -1019,6 +1110,30 @@ function renderSentPagination(state) {
             await loadSentEmails(state);
             renderSentEmailList(state);
             renderSentPagination(state);
+
+            if (state.selectedSourceType === "sent" && state.selectedEmailId != null) {
+                const existingEmail = state.emails.find(
+                    (email) => Number(email.id) === Number(state.selectedEmailId),
+                );
+
+                if (existingEmail) {
+                    await selectSentEmail(existingEmail.id, state);
+                } else {
+                    try {
+                        const detailEmail = await loadSentEmailDetail(state.selectedEmailId);
+                        const mergedEmail = mergeSentEmailDetailIntoState(detailEmail, state);
+
+                        if (!state.emails.some((email) => Number(email.id) === Number(mergedEmail.id))) {
+                            state.emails.unshift(mergedEmail);
+                            renderSentEmailList(state);
+                        }
+
+                        await selectSentEmail(mergedEmail.id, state);
+                    } catch (detailError) {
+                        console.error("Не удалось автоматически открыть исходящее письмо", detailError);
+                    }
+                }
+            }
         } catch (error) {
             console.error(error);
             const container = document.getElementById("emailsContainer");

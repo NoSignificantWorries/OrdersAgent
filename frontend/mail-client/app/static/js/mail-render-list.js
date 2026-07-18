@@ -18,6 +18,58 @@
         }
     }
 
+    function syncInboxSelectionState(state) {
+        const pageType = window.MAILPAGECONFIG?.pageType || "inbox";
+        const params = new URLSearchParams(window.location.search);
+
+        if (Number(state.currentPage) > 1) {
+            params.set("page", String(state.currentPage));
+        } else {
+            params.delete("page");
+        }
+
+        if (String(state.currentSearchTerm || "").trim()) {
+            params.set("search", String(state.currentSearchTerm).trim());
+        } else {
+            params.delete("search");
+        }
+
+        if (state.sortNewestFirst === false) {
+            params.set("sort", "oldest");
+        } else {
+            params.delete("sort");
+        }
+
+        if (pageType !== "sent") {
+            if (state.currentStatusFilter && state.currentStatusFilter !== "all") {
+                params.set("status", state.currentStatusFilter);
+            } else {
+                params.delete("status");
+            }
+
+            if (state.currentClassFilter && state.currentClassFilter !== "all") {
+                params.set("class", state.currentClassFilter);
+            } else {
+                params.delete("class");
+            }
+        }
+
+        if (state.selectedEmailId != null && Number(state.selectedEmailId) > 0) {
+            params.set("selected_email_id", String(state.selectedEmailId));
+            params.set("selected_source", String(state.selectedSourceType || pageType));
+        } else {
+            params.delete("selected_email_id");
+            params.delete("selected_source");
+        }
+
+        const query = params.toString();
+        const nextUrl = query
+            ? `${window.location.pathname}?${query}`
+            : window.location.pathname;
+
+        window.history.replaceState({}, "", nextUrl);
+    }
+
     function renderEmailList(deps) {
         const {
             state,
@@ -102,6 +154,8 @@
         const { state } = deps;
 
         state.selectedEmailId = null;
+        state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
+        syncInboxSelectionState(state);
 
         document.querySelectorAll(".email-item").forEach((item) => {
             item.classList.remove("selected");
@@ -126,7 +180,7 @@
             return;
         }
 
-        const email = state.emails.find((e) => e.id === state.selectedEmailId);
+        const email = state.emails.find((e) => Number(e.id) === Number(state.selectedEmailId));
         if (!email) {
             closeOpenedEmail(deps);
             return;
@@ -196,8 +250,10 @@
         } = deps;
 
         state.selectedEmailId = parseInt(id, 10);
+        state.selectedSourceType = "inbox";
+        syncInboxSelectionState(state);
 
-        const email = state.emails.find((e) => e.id === state.selectedEmailId);
+        const email = state.emails.find((e) => Number(e.id) === Number(state.selectedEmailId));
         if (!email) return;
 
         const realEmailId = email.email_id || email.id;
@@ -233,7 +289,7 @@
         showLoading();
 
         setTimeout(async () => {
-            highlightSelectedEmail(id);
+            highlightSelectedEmail(state.selectedEmailId);
             await renderEmailCard(email);
 
             const chatTab = document.getElementById("tab-chat");
@@ -251,5 +307,6 @@
         selectEmail,
         closeOpenedEmail,
         closeAndMarkUnread,
+        syncInboxSelectionState,
     };
 })();

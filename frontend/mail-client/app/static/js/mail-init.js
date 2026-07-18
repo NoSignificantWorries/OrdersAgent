@@ -5,6 +5,8 @@
         const page = Math.max(1, Number(params.get("page")) || 1);
         const search = params.get("search") || "";
         const sort = params.get("sort") === "oldest" ? "oldest" : "newest";
+        const selectedEmailId = Math.max(0, Number(params.get("selected_email_id")) || 0) || null;
+        const selectedSourceType = params.get("selected_source") || pageType || "inbox";
 
         return {
             page,
@@ -13,6 +15,8 @@
             sortNewestFirst: sort !== "oldest",
             status: pageType === "sent" ? "all" : (params.get("status") || "all"),
             classFilter: pageType === "sent" ? "all" : (params.get("class") || "all"),
+            selectedEmailId,
+            selectedSourceType,
         };
     }
 
@@ -39,6 +43,11 @@
             if (state.currentClassFilter && state.currentClassFilter !== "all") {
                 params.set("class", state.currentClassFilter);
             }
+        }
+
+        if (state.selectedEmailId != null && Number(state.selectedEmailId) > 0) {
+            params.set("selected_email_id", String(state.selectedEmailId));
+            params.set("selected_source", String(state.selectedSourceType || pageType || "inbox"));
         }
 
         const query = params.toString();
@@ -81,6 +90,11 @@
                     }
                 }
 
+                if (state.selectedEmailId != null && Number(state.selectedEmailId) > 0) {
+                    params.set("selected_email_id", String(state.selectedEmailId));
+                    params.set("selected_source", String(state.selectedSourceType || "inbox"));
+                }
+
                 link.href = params.toString()
                     ? `${url.pathname}?${params.toString()}`
                     : url.pathname;
@@ -117,11 +131,15 @@
             });
 
             if (tabId === "chat") {
-                const email = state.emails.find((e) => e.id === state.selectedEmailId);
+                const email = state.emails.find(
+                    (e) => Number(e.id) === Number(state.selectedEmailId),
+                );
                 renderChatForEmail(email);
             } else if (tabId === "emails") {
                 if (state.selectedEmailId) {
-                    const email = state.emails.find((e) => e.id === state.selectedEmailId);
+                    const email = state.emails.find(
+                        (e) => Number(e.id) === Number(state.selectedEmailId),
+                    );
                     if (email) {
                         await renderEmailCard(email);
                         return;
@@ -212,6 +230,7 @@
 
                 state.currentPage = page;
                 state.selectedEmailId = null;
+                state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
                 syncListState(window.MAILPAGECONFIG?.pageType || "inbox", state);
 
                 await reloadEmails({ showLoadingState: true });
@@ -233,6 +252,7 @@
             if (state.currentPage <= 1) return;
             state.currentPage -= 1;
             state.selectedEmailId = null;
+            state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
             syncListState(window.MAILPAGECONFIG?.pageType || "inbox", state);
             await reloadEmails({ showLoadingState: true });
         };
@@ -241,6 +261,7 @@
             if (state.currentPage >= state.totalPages) return;
             state.currentPage += 1;
             state.selectedEmailId = null;
+            state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
             syncListState(window.MAILPAGECONFIG?.pageType || "inbox", state);
             await reloadEmails({ showLoadingState: true });
         };
@@ -321,8 +342,8 @@
         }
 
         const inChat = isChatTabActive();
-        const currentEmail = prevId
-            ? state.emails.find((e) => e.id === prevId)
+        const currentEmail = prevId != null
+            ? state.emails.find((e) => Number(e.id) === Number(prevId))
             : null;
 
         if (currentEmail) {
@@ -337,6 +358,7 @@
             renderChatForEmail(null);
         } else {
             state.selectedEmailId = null;
+            state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
 
             const emailView = document.getElementById("emailView");
             if (emailView) {
@@ -411,7 +433,16 @@
 
             const initialUrlState = readListStateFromUrl(pageConfig.pageType);
 
-            state.selectedEmailId = null;
+            const hasMatchingSelectedSource =
+                initialUrlState.selectedSourceType === pageConfig.pageType;
+
+            state.selectedEmailId = hasMatchingSelectedSource
+                ? initialUrlState.selectedEmailId
+                : null;
+
+            state.selectedSourceType = hasMatchingSelectedSource
+                ? initialUrlState.selectedSourceType
+                : pageConfig.pageType;
             state.currentPage = initialUrlState.page;
             state.perPage = initialUrlState.perPage;
             state.totalEmails = 0;
@@ -430,7 +461,18 @@
             await reloadEmails({ showLoadingState: true });
             initCompose();
 
-            state.selectedEmailId = null;
+            if (
+                state.selectedSourceType === pageConfig.pageType &&
+                state.selectedEmailId != null
+            ) {
+                const selectedEmail = state.emails.find(
+                    (email) => Number(email.id) === Number(state.selectedEmailId),
+                );
+
+                if (selectedEmail) {
+                    await selectEmail(selectedEmail.id);
+                }
+            }
 
             if (state.emails.length === 0) {
                 const emailView = document.getElementById("emailView");
@@ -438,7 +480,7 @@
                     emailView.innerHTML =
                         '<div class="email-placeholder">Письма отсутствуют</div>';
                 }
-            } else {
+            } else if (state.selectedEmailId == null) {
                 const emailView = document.getElementById("emailView");
                 if (emailView) {
                     emailView.innerHTML =
@@ -484,6 +526,8 @@
                 searchInput.addEventListener("input", (e) => {
                     state.currentSearchTerm = e.target.value;
                     state.currentPage = 1;
+                    state.selectedEmailId = null;
+                    state.selectedSourceType = pageConfig.pageType;
                     updateSearchClearButton();
                     syncListState(pageConfig.pageType, state);
 
@@ -499,6 +543,8 @@
                     searchInput.value = "";
                     state.currentSearchTerm = "";
                     state.currentPage = 1;
+                    state.selectedEmailId = null;
+                    state.selectedSourceType = pageConfig.pageType;
                     updateSearchClearButton();
                     syncListState(pageConfig.pageType, state);
                     reloadEmails({ showLoadingState: true });
@@ -568,6 +614,8 @@
                 }
 
                 state.currentPage = 1;
+                state.selectedEmailId = null;
+                state.selectedSourceType = pageConfig.pageType;
                 syncListState(pageConfig.pageType, state);
                 closeFilterPanelFn();
                 reloadEmails({ showLoadingState: true });

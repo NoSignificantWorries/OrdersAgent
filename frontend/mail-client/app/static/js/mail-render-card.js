@@ -231,6 +231,11 @@
 
         return {
             ...threadEmail,
+            id: Number(threadEmail?.source_id || threadEmail?.id || threadEmail?.emailid || 0),
+            email_id: Number(threadEmail?.emailid || threadEmail?.email_id || 0),
+            source_id: Number(threadEmail?.source_id || threadEmail?.id || threadEmail?.emailid || 0),
+            source_type: threadEmail?.thread_source || threadEmail?.source_type || "inbox",
+            thread_source: threadEmail?.thread_source || threadEmail?.source_type || "inbox",
             subject,
             content: rawText,
             preview,
@@ -240,6 +245,19 @@
         };
     }
 
+    function openSentThreadEmailFromInbox(threadEmail) {
+        const sentEmailId = Number(threadEmail?.source_id || 0);
+        if (!Number.isFinite(sentEmailId) || sentEmailId <= 0) {
+            alert("Не удалось определить исходящее письмо для перехода.");
+            return;
+        }
+
+        const params = new URLSearchParams();
+        params.set("selected_email_id", String(sentEmailId));
+        params.set("selected_source", "sent");
+
+        window.location.href = `/sent?${params.toString()}`;
+    }
 
     async function renderEmailCard(email, deps) {
         const {
@@ -337,30 +355,27 @@
                         <div class="email-thread-timeline">
                             ${threadMessages
                                 .map((threadEmail) => {
-                                    const threadEmailRealId =
-                                        threadEmail.emailid || threadEmail.email_id || threadEmail.id;
+                                    const threadSource = String(threadEmail.thread_source || threadEmail.source_type || "inbox");
+                                    const threadSourceId = Number(threadEmail.source_id || 0);
 
-                                    const currentThreadSource = email.thread_source || "inbox";
-                                    const currentSourceId = email.source_id || realEmailId;
+                                    const currentThreadSource = String(email.thread_source || email.source_type || "inbox");
+                                    const currentSourceId = Number(email.source_id || realEmailId || 0);
 
                                     const isCurrent =
-                                        String(threadEmail.thread_source || "inbox") === String(currentThreadSource) &&
-                                        Number(threadEmail.source_id || threadEmailRealId) === Number(currentSourceId);
+                                        threadSource === currentThreadSource &&
+                                        threadSourceId === currentSourceId;
+
                                     const previewSource =
                                         threadEmail.preview || threadEmail.content || threadEmail.rawemail || "";
 
-                                    const clickableThreadId =
-                                        threadEmail.emailid ||
-                                        threadEmail.email_id ||
-                                        threadEmail.id ||
-                                        "";
-                                    const preview = escapeHtml(previewSource.slice(0, 180));
+                                    const preview = escapeHtml(String(previewSource).slice(0, 180));
 
                                     return `
                                         <button
                                             type="button"
                                             class="email-thread-item ${isCurrent ? "is-current" : ""}"
-                                            data-thread-email-id="${escapeHtml(String(clickableThreadId))}"
+                                            data-thread-source="${escapeHtml(threadSource)}"
+                                            data-thread-source-id="${escapeHtml(String(threadSourceId))}"
                                         >
                                             <span class="email-thread-marker" aria-hidden="true"></span>
 
@@ -654,18 +669,52 @@
                 }
             });
 
-            threadPanel.addEventListener("click", (event) => {
-                const target = event.target.closest("[data-thread-email-id]");
+            threadPanel.addEventListener("click", async (event) => {
+                const target = event.target.closest("[data-thread-source][data-thread-source-id]");
                 if (!target) return;
 
                 event.stopPropagation();
 
-                const rawTargetId = target.dataset.threadEmailId;
-                const targetId = Number(rawTargetId);
+                const targetSource = String(target.dataset.threadSource || "");
+                const targetSourceId = Number(target.dataset.threadSourceId || 0);
 
-                if (!rawTargetId || Number.isNaN(targetId) || targetId === realEmailId) return;
+                if (!targetSource || !Number.isFinite(targetSourceId) || targetSourceId <= 0) {
+                    return;
+                }
 
-                selectEmail(targetId);
+                const currentThreadSource = String(email.thread_source || email.source_type || "inbox");
+                const currentSourceId = Number(email.source_id || realEmailId || 0);
+
+                const isCurrentEmail =
+                    targetSource === currentThreadSource &&
+                    targetSourceId === currentSourceId;
+
+                if (isCurrentEmail) {
+                    return;
+                }
+
+                const targetThreadEmail = threadMessages.find(
+                    (item) =>
+                        String(item.thread_source || item.source_type || "inbox") === targetSource &&
+                        Number(item.source_id || 0) === targetSourceId,
+                );
+
+                if (!targetThreadEmail) {
+                    alert("Не удалось найти письмо в цепочке.");
+                    return;
+                }
+
+                if (targetSource === "inbox") {
+                    await selectEmail(targetSourceId);
+                    return;
+                }
+
+                if (targetSource === "sent") {
+                    openSentThreadEmailFromInbox(targetThreadEmail);
+                    return;
+                }
+
+                alert("Неизвестный тип письма в цепочке.");
             });
         }
 
@@ -1218,13 +1267,10 @@
                     }
 
                     renderEmailList();
-                    highlightSelectedEmail(email.id);
-                    await renderEmailCard(email, deps);
 
-                    if (typeof closeOpenedEmail === 'function') {
+                    if (typeof closeOpenedEmail === "function") {
                         closeOpenedEmail();
                     }
-
 
                 } catch (e) {
                     console.error(e);
@@ -1252,5 +1298,6 @@
         isEditingReplyInput,
         isReplyInputProtected,
         bindReplyInputEvents,
+        openSentThreadEmailFromInbox,
     };
 })();
