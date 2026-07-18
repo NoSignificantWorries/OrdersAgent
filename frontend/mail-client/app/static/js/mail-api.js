@@ -436,6 +436,58 @@
         return await response.json();
     }
 
+    async function getEmailComment(emailId) {
+        const resp = await fetch(`/api/emails/${emailId}/comment`, {
+            method: "GET",
+            headers: {
+                Accept: "application/json",
+            },
+            credentials: "same-origin",
+        });
+
+        if (!resp.ok) {
+            let message = "Не удалось загрузить комментарий";
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    message = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(message);
+        }
+
+        return await resp.json();
+    }
+
+    async function updateEmailComment(emailId, commentText) {
+        const resp = await fetch(`/api/emails/${emailId}/comment`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+            },
+            credentials: "same-origin",
+            body: JSON.stringify({
+                comment_text: String(commentText || ""),
+            }),
+        });
+
+        if (!resp.ok) {
+            let message = "Не удалось сохранить комментарий";
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    message = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(message);
+        }
+
+        return await resp.json();
+    }
+
     window.MailApi = {
         downloadBlob,
         downloadEmailAttachments,
@@ -447,5 +499,7 @@
         sendForwardEmail,
         getMySignature,
         updateMySignature,
+        getEmailComment,
+        updateEmailComment,
     };
 })();

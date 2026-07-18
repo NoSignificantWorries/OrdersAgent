@@ -342,6 +342,7 @@
             isReplyInputProtected = () => false,
             isComposeInputProtected = () => false,
             isDecisionSelectProtected = () => false,
+            isCommentModalProtected = () => false,
             loadEmailsFromApi,
             renderEmailList,
             updateUnreadCount,
@@ -357,7 +358,8 @@
             isMaterialInputProtected() ||
             isReplyInputProtected(state) ||
             isComposeInputProtected(state) ||
-            isDecisionSelectProtected();
+            isDecisionSelectProtected() ||
+            isCommentModalProtected();
 
         if (isProtectedBeforeLoad) {
             state.pendingSilentRefresh = true;
@@ -400,7 +402,8 @@
         const isProtectedBeforeRender =
             isMaterialInputProtected() ||
             isReplyInputProtected(state) ||
-            isComposeInputProtected(state);
+            isComposeInputProtected(state) ||
+            isCommentModalProtected();
 
         if (isProtectedBeforeRender) {
             state.pendingSilentRefresh = true;
@@ -649,6 +652,8 @@
                     archived: pageConfig.archived,
                     renderPagination: () => renderPagination({ state, reloadEmails }),
                     isDecisionSelectProtected: () => state.isDecisionSelectFocused === true,
+                    isCommentModalProtected: () =>
+                        state.isCommentModalOpen === true || state.isCommentModalSaving === true,
                 });
             }, pageConfig.refreshIntervalMs);
 

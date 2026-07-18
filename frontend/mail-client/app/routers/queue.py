@@ -41,6 +41,9 @@ class MaterialsManualDecisionUpdate(BaseModel):
 class EmailReadUpdate(BaseModel):
     is_read: bool
 
+class EmailCommentUpdate(BaseModel):
+    comment_text: str = ""
+
 class ForwardAttachmentItem(BaseModel):
     document_id: int
     filename: str
@@ -1114,6 +1117,123 @@ async def update_email_read_status(
         "ok": True,
         "email_id": email_id,
         "is_read": payload.is_read,
+    }
+
+
+@router.get("/emails/{email_id}/comment")
+async def get_email_comment(
+    email_id: int,
+    request: Request,
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            row = await conn.fetchrow(
+                """
+                SELECT id, mailbox, comment_text
+                FROM emails
+                WHERE id = $1
+                LIMIT 1
+                """,
+                email_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                SELECT id, mailbox, comment_text
+                FROM emails
+                WHERE id = $1
+                  AND mailbox = $2
+                LIMIT 1
+                """,
+                email_id,
+                user["email"],
+            )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+    comment_text = row["comment_text"]
+
+    return {
+        "ok": True,
+        "email_id": email_id,
+        "comment_text": comment_text,
+        "has_comment": bool((comment_text or "").strip()),
+    }
+
+
+@router.patch("/emails/{email_id}/comment")
+async def update_email_comment(
+    email_id: int,
+    payload: EmailCommentUpdate,
+    request: Request,
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    normalized_comment = _normalize_text(payload.comment_text)
+    comment_to_save = normalized_comment or None
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if user.get("role") == "admin":
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, mailbox, comment_text
+                    FROM emails
+                    WHERE id = $1
+                    LIMIT 1
+                    """,
+                    email_id,
+                )
+            else:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, mailbox, comment_text
+                    FROM emails
+                    WHERE id = $1
+                      AND mailbox = $2
+                    LIMIT 1
+                    """,
+                    email_id,
+                    user["email"],
+                )
+
+            if not row:
+                raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+            if row["comment_text"] == comment_to_save:
+                return {
+                    "ok": True,
+                    "email_id": email_id,
+                    "comment_text": comment_to_save,
+                    "has_comment": bool(comment_to_save),
+                }
+
+            await conn.execute(
+                """
+                UPDATE emails
+                SET comment_text = $1
+                WHERE id = $2
+                """,
+                comment_to_save,
+                email_id,
+            )
+
+    return {
+        "ok": True,
+        "email_id": email_id,
+        "comment_text": comment_to_save,
+        "has_comment": bool(comment_to_save),
     }
 
 

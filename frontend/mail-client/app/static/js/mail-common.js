@@ -27,6 +27,8 @@ const {
     sendForwardEmail,
     getMySignature,
     updateMySignature,
+    getEmailComment,
+    updateEmailComment,
 } = window.MailApi;
 
 const {
@@ -93,6 +95,8 @@ const replyDrafts = new Map();
 let isReplyInputFocused = false;
 let isReplyFileDialogOpen = false;
 let isDecisionSelectFocused = false;
+let isCommentModalOpen = false;
+let isCommentModalSaving = false;
 const openReplyForms = new Set();
 const expandedThreads = new Set();
 let composeDraft = {
@@ -461,6 +465,9 @@ function normalizeApiItem(item, idx) {
 
         archived: item.archived === true,
         read: item.is_read === true,
+        comment_text: item.comment_text ?? null,
+        has_comment: item.has_comment === true || Boolean(String(item.comment_text || "").trim()),
+
 
         prob_1: output.prob_1 ?? item.prob1 ?? null,
         predicted_class: output.predicted_class ?? item.predictedclass ?? null,
@@ -672,6 +679,18 @@ function getMailRenderCardState() {
         set isDecisionSelectFocused(value) {
             isDecisionSelectFocused = value;
         },
+        get isCommentModalOpen() {
+            return isCommentModalOpen;
+        },
+        set isCommentModalOpen(value) {
+            isCommentModalOpen = value;
+        },
+        get isCommentModalSaving() {
+            return isCommentModalSaving;
+        },
+        set isCommentModalSaving(value) {
+            isCommentModalSaving = value;
+        },
         get isReplyFileDialogOpen() {
             return isReplyFileDialogOpen;
         },
@@ -774,6 +793,10 @@ function isReplyInputProtected(state) {
 
 function isDecisionSelectProtected() {
     return isDecisionSelectFocused === true;
+}
+
+function isCommentModalProtected() {
+    return isCommentModalOpen === true || isCommentModalSaving === true;
 }
 
 function getMailComposeState() {
@@ -997,6 +1020,18 @@ function getMailInitState() {
         set isDecisionSelectFocused(value) {
             isDecisionSelectFocused = value;
         },
+        get isCommentModalOpen() {
+            return isCommentModalOpen;
+        },
+        set isCommentModalOpen(value) {
+            isCommentModalOpen = value;
+        },
+        get isCommentModalSaving() {
+            return isCommentModalSaving;
+        },
+        set isCommentModalSaving(value) {
+            isCommentModalSaving = value;
+        },
         get isReplyFileDialogOpen() {
             return isReplyFileDialogOpen;
         },
@@ -1034,6 +1069,7 @@ function refreshEmailsSilently() {
         isReplyInputProtected,
         isComposeInputProtected,
         isDecisionSelectProtected,
+        isCommentModalProtected,
         loadEmailsFromApi,
         renderEmailList,
         updateUnreadCount,
@@ -1064,6 +1100,7 @@ function initMailPage(config) {
         isReplyInputProtected,
         isComposeInputProtected,
         isDecisionSelectProtected,
+        isCommentModalProtected,
         highlightSelectedEmail,
         renderChatForEmail,
         renderEmailCard,

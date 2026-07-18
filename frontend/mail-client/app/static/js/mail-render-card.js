@@ -298,6 +298,8 @@
             toggleThreadExpanded,
         } = deps;
 
+        const commentApi = window.MailComments || {};
+
         const cfg = window.MAILPAGECONFIG || {};
 
         const emailSubject = email.subject || email.emailsubject || "(без темы)";
@@ -513,7 +515,29 @@
             <div class="email-card">
                 <div class="email-header">
                     <div class="email-header-top">
-                        <div class="email-subject">${escapeHtml(emailSubject)}</div>
+                        <div class="email-subject-row">
+                            ${
+                                email.has_comment
+                                    ? `
+                                        <button
+                                            type="button"
+                                            class="email-comment-indicator-btn"
+                                            id="email-comment-indicator-btn"
+                                            aria-label="Просмотреть комментарий"
+                                            title="Просмотреть комментарий"
+                                        >
+                                            <img
+                                                src="/static/images/comment.svg"
+                                                alt=""
+                                                aria-hidden="true"
+                                                class="email-comment-indicator-icon"
+                                            >
+                                        </button>
+                                    `
+                                    : ""
+                            }
+                            <div class="email-subject">${escapeHtml(emailSubject)}</div>
+                        </div>
 
                         <div class="email-header-actions">
                             <div class="status-block">
@@ -541,6 +565,14 @@
                                             </button>
 
                                             <div class="email-actions-menu" id="email-actions-menu" hidden>
+                                                <button
+                                                    type="button"
+                                                    class="email-actions-menu-item"
+                                                    id="email-comment-btn"
+                                                >
+                                                    Комментарий
+                                                </button>
+
                                                 <button
                                                     type="button"
                                                     class="email-actions-menu-item"
@@ -1059,6 +1091,8 @@
         const actionsToggleBtn = document.getElementById("email-actions-toggle-btn");
         const actionsMenu = document.getElementById("email-actions-menu");
         const markUnreadBtn = document.getElementById("mark-unread-btn");
+        const emailCommentBtn = document.getElementById("email-comment-btn");
+        const emailCommentIndicatorBtn = document.getElementById("email-comment-indicator-btn");
 
         if (actionsToggleBtn && actionsMenu) {
             actionsToggleBtn.addEventListener("click", (e) => {
@@ -1088,6 +1122,48 @@
                     console.error(e);
                     alert(e.message || "Не удалось пометить письмо непрочитанным");
                     markUnreadBtn.disabled = false;
+                }
+            });
+        }
+
+        if (emailCommentBtn) {
+            emailCommentBtn.addEventListener("click", async () => {
+                try {
+                    actionsMenu.hidden = true;
+
+                    if (typeof commentApi.openCommentEditor !== "function") {
+                        throw new Error("Модуль комментариев не подключен");
+                    }
+
+                    await commentApi.openCommentEditor(email, {
+                        state,
+                        renderEmailList,
+                        renderEmailCard: (targetEmail) => renderEmailCard(targetEmail, deps),
+                    });
+                } catch (e) {
+                    console.error(e);
+                    alert(e.message || "Не удалось открыть комментарий");
+                }
+            });
+        }
+
+        if (emailCommentIndicatorBtn) {
+            emailCommentIndicatorBtn.addEventListener("click", async (event) => {
+                event.stopPropagation();
+
+                try {
+                    if (typeof commentApi.openCommentViewer !== "function") {
+                        throw new Error("Модуль комментариев не подключен");
+                    }
+
+                    await commentApi.openCommentViewer(email, {
+                        state,
+                        renderEmailList,
+                        renderEmailCard: (targetEmail) => renderEmailCard(targetEmail, deps),
+                    });
+                } catch (e) {
+                    console.error(e);
+                    alert(e.message || "Не удалось открыть просмотр комментария");
                 }
             });
         }

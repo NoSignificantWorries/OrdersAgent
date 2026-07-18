@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE emails
+ADD COLUMN IF NOT EXISTS comment_text VARCHAR(500);
+
+COMMIT;

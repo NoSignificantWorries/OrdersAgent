@@ -233,3 +233,7 @@ CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);
 
 ALTER TABLE users
 ADD COLUMN IF NOT EXISTS mail_signature TEXT;
+
+-- Комментарий к письму
+ALTER TABLE emails
+ADD COLUMN IF NOT EXISTS comment_text VARCHAR(500);
