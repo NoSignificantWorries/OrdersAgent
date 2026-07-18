@@ -129,7 +129,22 @@
                         data-id="${email.id}"
                         data-email-id="${mailParityId}"
                     >
-                        <div class="subject">${escapeHtml(email.subject)}</div>
+                        <div class="email-item-subject-row">
+                            <div class="subject">${escapeHtml(email.subject)}</div>
+                            ${email.has_comment
+                                ? `
+                                    <span class="email-item-comment-indicator" aria-hidden="true">
+                                        <img
+                                            src="/static/images/comment.svg"
+                                            alt=""
+                                            class="email-item-comment-indicator-icon"
+                                        >
+                                    </span>
+                                `
+                                : ""
+                            }
+                        </div>
+
                         <div class="email-item-header">
                             <div class="sender">От: ${escapeHtml(email.sender)}</div>
                             <div class="status-badge status-${escapeHtml(email.status)}">
