@@ -2928,16 +2928,16 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 5px;
     flex: 1;
     flex-wrap: wrap;
 }
 
 .pagination-btn,
 .pagination-page-btn {
-    min-width: 36px;
-    height: 36px;
-    padding: 0 10px;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 8px;
     border: 1px solid #d7dbe3;
     border-radius: 8px;
     background: #fff;
@@ -2985,7 +2985,7 @@ body {
     align-items: center;
     justify-content: center;
     min-width: 24px;
-    height: 36px;
+    height: 1px;
     color: #7b8391;
     font-size: 14px;
 }
