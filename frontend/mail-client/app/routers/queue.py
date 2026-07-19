@@ -14,7 +14,7 @@ from math import ceil
 
 from app.db import get_db_pool
 from app.routers import auth
-from app.services.queue import list_queue_for_user, get_email_thread_for_user
+from app.services.queue import list_queue_for_user, get_email_thread_for_user, get_email_detail_for_user
 from app.services.users import get_user_signature, update_user_signature
 from app.cloud.minio import MinIOClient
 
@@ -488,6 +488,20 @@ async def get_email_thread(
         "items": list(result.get("items", [])),
     }
 
+@router.get("/emails/{email_id}/detail")
+async def get_email_detail(
+    email_id: int,
+    request: Request,
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    item = await get_email_detail_for_user(user, email_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+    return {"item": item}
 
 async def _download_document_by_id(
     document_id: int,

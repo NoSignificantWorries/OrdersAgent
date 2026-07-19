@@ -200,6 +200,7 @@
 
         state.selectedEmailId = null;
         state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
+        state.selectedEmailSnapshot = null;
         syncInboxSelectionState(state, historyMode);
 
         document.querySelectorAll(".email-item").forEach((item) => {
@@ -283,6 +284,57 @@
         countSpan.textContent = formatUnreadCount(state.unreadCount);
     }
 
+    async function loadInboxEmailDetail(emailId) {
+        const response = await fetch(`/api/emails/${emailId}/detail`, {
+            credentials: "same-origin",
+        });
+
+        if (!response.ok) {
+            let detail = `Не удалось загрузить письмо (${response.status})`;
+
+            try {
+                const data = await response.json();
+                if (data?.detail) {
+                    detail = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(detail);
+        }
+
+        const data = await response.json();
+        if (!data?.item || typeof data.item !== "object") {
+            throw new Error("Некорректный ответ деталей письма");
+        }
+
+        return data.item;
+    }
+
+    async function resolveInboxEmailById(emailId, deps) {
+        const {
+            state,
+            normalizeInboxDetailItem,
+        } = deps;
+
+        const normalizedId = Number(emailId);
+
+        let email = state.emails.find(
+            (e) =>
+                Number(e.email_id || e.emailid || e.id) === normalizedId
+        );
+        if (email) {
+            return { email, fromList: true };
+        }
+
+        const rawItem = await loadInboxEmailDetail(normalizedId);
+        email =
+            typeof normalizeInboxDetailItem === "function"
+                ? normalizeInboxDetailItem(rawItem)
+                : rawItem;
+
+        return { email, fromList: false };
+    }
+
     async function selectEmail(id, deps, options = {}) {
         const {
             state,
@@ -302,8 +354,28 @@
         state.selectedSourceType = "inbox";
         syncInboxSelectionState(state, historyMode);
 
-        const email = state.emails.find((e) => Number(e.id) === Number(state.selectedEmailId));
+        let resolved;
+        try {
+            resolved = await resolveInboxEmailById(state.selectedEmailId, deps);
+        } catch (error) {
+            console.error("Не удалось загрузить письмо", error);
+
+            const emailView = document.getElementById("emailView");
+            if (emailView) {
+                emailView.innerHTML =
+                    '<div class="email-placeholder" style="padding:20px;text-align:center;">Ошибка загрузки письма</div>';
+            }
+            return;
+        }
+
+        const { email, fromList } = resolved;
         if (!email) return;
+
+        if (fromList) {
+            state.selectedEmailSnapshot = null;
+        } else {
+            state.selectedEmailSnapshot = email;
+        }
 
         const realEmailId = email.email_id || email.id;
 
@@ -318,19 +390,21 @@
             updateEmailReadStatus(realEmailId, true).catch((error) => {
                 console.error("Не удалось отметить письмо прочитанным:", error);
 
-                email.read = false;
-                state.unreadCount += 1;
+                if (fromList) {
+                    email.read = false;
+                    state.unreadCount += 1;
 
-                if (typeof updateUnreadCount === "function") {
-                    updateUnreadCount();
-                }
+                    if (typeof updateUnreadCount === "function") {
+                        updateUnreadCount();
+                    }
 
-                if (typeof renderEmailList === "function") {
-                    renderEmailList();
-                }
+                    if (typeof renderEmailList === "function") {
+                        renderEmailList();
+                    }
 
-                if (typeof highlightSelectedEmail === "function") {
-                    highlightSelectedEmail(id);
+                    if (typeof highlightSelectedEmail === "function") {
+                        highlightSelectedEmail(id);
+                    }
                 }
             });
         }
@@ -338,7 +412,14 @@
         showLoading();
 
         setTimeout(async () => {
-            highlightSelectedEmail(state.selectedEmailId);
+            if (fromList) {
+                highlightSelectedEmail(state.selectedEmailId);
+            } else {
+                document.querySelectorAll(".email-item").forEach((itemEl) => {
+                    itemEl.classList.remove("selected");
+                });
+            }
+
             await renderEmailCard(email);
 
             const chatTab = document.getElementById("tab-chat");

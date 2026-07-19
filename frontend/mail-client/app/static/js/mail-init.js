@@ -411,9 +411,57 @@
         }
 
         const inChat = isChatTabActive();
-        const currentEmail = prevId != null
-            ? state.emails.find((e) => Number(e.id) === Number(prevId))
+
+        const currentEmailFromList = prevId != null
+            ? state.emails.find(
+                (e) => Number(e.email_id || e.emailid || e.id) === Number(prevId)
+            )
             : null;
+
+        const snapshotEmail =
+            prevId != null &&
+            state.selectedEmailSnapshot &&
+            Number(
+                state.selectedEmailSnapshot.email_id ||
+                state.selectedEmailSnapshot.emailid ||
+                state.selectedEmailSnapshot.id
+            ) === Number(prevId)
+                ? state.selectedEmailSnapshot
+                : null;
+
+        const currentEmail = currentEmailFromList || snapshotEmail;
+
+        if (currentEmailFromList) {
+            state.selectedEmailSnapshot = null;
+        }
+
+        if (currentEmail) {
+            if (currentEmailFromList) {
+                highlightSelectedEmail(prevId);
+            } else {
+                document.querySelectorAll(".email-item").forEach((item) => {
+                    item.classList.remove("selected");
+                });
+            }
+
+            if (inChat) {
+                renderChatForEmail(currentEmail);
+            } else {
+                await renderEmailCard(currentEmail);
+            }
+        } else if (inChat) {
+            renderChatForEmail(null);
+        } else {
+            state.selectedEmailId = null;
+            state.selectedEmailSnapshot = null;
+            state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
+
+            const emailView = document.getElementById("emailView");
+            if (emailView) {
+                emailView.innerHTML =
+                    '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+            }
+        }
 
         if (currentEmail) {
             highlightSelectedEmail(prevId);

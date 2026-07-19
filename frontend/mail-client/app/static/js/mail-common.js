@@ -4,6 +4,7 @@ let emails = [];
 let selectedEmailId = null;
 let selectedSourceType = "inbox";
 let unreadCount = 0;
+let selectedEmailSnapshot = null;
 
 const {
     formatDate,
@@ -509,6 +510,9 @@ function normalizeApiItem(item, idx) {
     return normalized;
 }
 
+function normalizeSingleInboxDetailItem(item) {
+    return normalizeApiItem(item, 0);
+}
 
 // ========== ЗАГРУЗКА ПИСЕМ ИЗ API ==========
 async function loadEmailsFromApi(options = {}) {
@@ -538,56 +542,54 @@ function getMailRenderListState() {
         set emails(value) {
             emails = value;
         },
-
         get selectedEmailId() {
             return selectedEmailId;
         },
         set selectedEmailId(value) {
             selectedEmailId = value;
         },
-
+        get selectedEmailSnapshot() {
+            return selectedEmailSnapshot;
+        },
+        set selectedEmailSnapshot(value) {
+            selectedEmailSnapshot = value;
+        },
         get selectedSourceType() {
             return selectedSourceType;
         },
         set selectedSourceType(value) {
             selectedSourceType = value;
         },
-
         get currentSearchTerm() {
             return currentSearchTerm;
         },
         set currentSearchTerm(value) {
             currentSearchTerm = value;
         },
-
         get currentStatusFilter() {
             return currentStatusFilter;
         },
         set currentStatusFilter(value) {
             currentStatusFilter = value;
         },
-
         get currentClassFilter() {
             return currentClassFilter;
         },
         set currentClassFilter(value) {
             currentClassFilter = value;
         },
-
         get sortNewestFirst() {
             return sortNewestFirst;
         },
         set sortNewestFirst(value) {
             sortNewestFirst = value;
         },
-
         get unreadCount() {
             return unreadCount;
         },
         set unreadCount(value) {
             unreadCount = value;
         },
-
         openReplyForms,
     };
 }
@@ -629,6 +631,7 @@ function selectEmail(id, options = {}) {
             renderChatForEmail,
             renderEmailList,
             updateUnreadCount,
+            normalizeInboxDetailItem: normalizeSingleInboxDetailItem,
         },
         options,
     );
@@ -648,6 +651,12 @@ function getMailRenderCardState() {
         },
         set selectedEmailId(value) {
             selectedEmailId = value;
+        },
+        get selectedEmailSnapshot() {
+            return selectedEmailSnapshot;
+        },
+        set selectedEmailSnapshot(value) {
+            selectedEmailSnapshot = value;
         },
         get selectedSourceType() {
             return selectedSourceType;
@@ -944,6 +953,12 @@ function getMailInitState() {
         },
         set selectedEmailId(value) {
             selectedEmailId = value;
+        },
+        get selectedEmailSnapshot() {
+            return selectedEmailSnapshot;
+        },
+        set selectedEmailSnapshot(value) {
+            selectedEmailSnapshot = value;
         },
         get selectedSourceType() {
             return selectedSourceType;
