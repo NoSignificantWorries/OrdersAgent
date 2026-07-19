@@ -2984,7 +2984,7 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 24px;
+    min-width: 1px;
     height: 1px;
     color: #7b8391;
     font-size: 14px;
