@@ -1,13 +1,11 @@
 package parser
 
 import (
-	//"encoding/base64"
 	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"mime"
-	//"strconv"
 	"strings"
 	"bufio"
     "net/mail"
@@ -58,41 +56,6 @@ func decodeBodyBytes(b []byte, contentType string) string {
     }
     return string(b)
 }
-
-// func decodeBodyBytes(b []byte, contentType string) string {
-//     if len(b) == 0 {
-//         return ""
-//     }
-
-//     // Пытаемся вытащить charset из Content-Type
-//     _, params, err := mime.ParseMediaType(contentType)
-//     charsetName := ""
-//     if err == nil {
-//         charsetName = strings.ToLower(strings.TrimSpace(params["charset"]))
-//     }
-
-//     // По умолчанию считаем UTF-8
-//     if charsetName == "" || charsetName == "utf-8" || charsetName == "us-ascii" {
-// 		return string(b)
-// 	}
-
-//     switch charsetName {
-//     case "windows-1251", "cp1251":
-//         decoded, err := charmap.Windows1251.NewDecoder().Bytes(b)
-//         if err == nil {
-//             return string(decoded)
-//         }
-//     case "koi8-r":
-//         decoded, err := charmap.KOI8R.NewDecoder().Bytes(b)
-//         if err == nil {
-//             return string(decoded)
-//         }
-//     // при необходимости можно добавить другие чарсеты
-//     }
-
-//     // Fallback — возвращаем как есть
-//     return string(b)
-// }
 
 func extractNestedMessageText(raw []byte) string {
     r := bytes.NewReader(raw)
@@ -319,95 +282,135 @@ func extractEmailFromString(s string) string {
 }
 
 func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand, mailbox string) (*Email, error) {
-    msg := fetchCmd.Next()
-    if msg == nil {
-        return nil, fmt.Errorf("no message")
-    }
+	msg := fetchCmd.Next()
+	if msg == nil {
+		if err := fetchCmd.Close(); err != nil {
+			return nil, fmt.Errorf("uid=%d: fetch failed: %w", uid, err)
+		}
 
-    email := &Email{
-        UID: uid,
-        Mailbox: mailbox,
-    }
+		return nil, fmt.Errorf("uid=%d: fetch returned no message data", uid)
+	}
 
-    var bodyError error
+	defer func() {
+		if err := fetchCmd.Close(); err != nil {
+			log.Printf("uid=%d: fetch close error: %v", uid, err)
+		}
+	}()
 
-    for {
-        item := msg.Next()
-        if item == nil {
-            break
-        }
+	email := &Email{
+		UID:     uid,
+		Mailbox: mailbox,
+	}
 
-        if env, ok := item.(imapclient.FetchItemDataEnvelope); ok {
-            email.Subject = decodeHeader(env.Envelope.Subject)
-            email.From = joinAddresses(env.Envelope.From)
+	var bodyError error
 
-            if !env.Envelope.Date.IsZero() {
-                email.Date = env.Envelope.Date.Format(time.RFC3339)
-            } else {
-                email.Date = ""
-            }
+	hasEnvelope := false
+	hasHeaderSection := false
+	hasBodySection := false
+	hasBodyLiteral := false
 
-            email.MessageID = strings.TrimSpace(env.Envelope.MessageID)
-            if len(env.Envelope.InReplyTo) > 0 {
+	for {
+		item := msg.Next()
+		if item == nil {
+			break
+		}
+
+		if env, ok := item.(imapclient.FetchItemDataEnvelope); ok {
+			hasEnvelope = true
+
+			email.Subject = decodeHeader(env.Envelope.Subject)
+			email.From = joinAddresses(env.Envelope.From)
+
+			if !env.Envelope.Date.IsZero() {
+				email.Date = env.Envelope.Date.Format(time.RFC3339)
+			} else {
+				email.Date = ""
+			}
+
+			email.MessageID = strings.TrimSpace(env.Envelope.MessageID)
+			if len(env.Envelope.InReplyTo) > 0 {
 				email.InReplyTo = strings.TrimSpace(env.Envelope.InReplyTo[0])
 			}
-            email.ReplyTo = firstAddress(env.Envelope.ReplyTo)
+			email.ReplyTo = firstAddress(env.Envelope.ReplyTo)
 
-            continue
-        }
+			continue
+		}
 
-        if bodyData, ok := item.(imapclient.FetchItemDataBodySection); ok && bodyData.Literal != nil {
-            section := bodyData.Section
+		if bodyData, ok := item.(imapclient.FetchItemDataBodySection); ok {
+			section := bodyData.Section
+			isHeader := section != nil && section.Specifier == imap.PartSpecifierHeader
 
-            if section != nil && section.Specifier == imap.PartSpecifierHeader {
-                msgID, inReplyTo, refs, replyTo, to, cc, deliveredTo, 
-                xOriginalTo, envelopeTo, xEnvelopeTo, err := parseHeaderFields(bodyData.Literal)
-                if err != nil {
-                    log.Printf("parseHeaderFields: UID=%d err=%v", email.UID, err)
-                    continue
-                }
+			if isHeader {
+				if bodyData.Literal != nil {
+					hasHeaderSection = true
 
-                if email.MessageID == "" {
-                    email.MessageID = msgID
-                }
-                if email.InReplyTo == "" {
-                    email.InReplyTo = inReplyTo
-                }
-				log.Printf("InReplyTo: %s", email.InReplyTo)
-                if email.ReferencesHeader == "" {
-                    email.ReferencesHeader = refs
-                }
-				log.Printf("ReferencesHeader: %s", email.ReferencesHeader)
-                if email.ReplyTo == "" {
-                    email.ReplyTo = replyTo
-                }
-				log.Printf("ReplyTo: %s", email.ReplyTo)
-                email.To = to
-                email.Cc = cc
-                email.DeliveredTo = deliveredTo
-                email.XOriginalTo = xOriginalTo
-                email.EnvelopeTo = envelopeTo
-                email.XEnvelopeTo = xEnvelopeTo
-                
-                log.Printf("To: %s", email.To)
-                log.Printf("Cc: %s", email.Cc)
-                log.Printf("Delivered-To: %s", email.DeliveredTo)
+					msgID, inReplyTo, refs, replyTo, to, cc, deliveredTo,
+						xOriginalTo, envelopeTo, xEnvelopeTo, err := parseHeaderFields(bodyData.Literal)
+					if err != nil {
+						log.Printf("parseHeaderFields: UID=%d err=%v", email.UID, err)
+						continue
+					}
 
-                resolveRecipient(email, email.Mailbox)
-                log.Printf("RecipientEmail: %s, Source: %s, IsPrimary: %v", 
-                    email.RecipientEmail, email.RecipientSource, email.IsPrimaryRecipient)
+					if email.MessageID == "" {
+						email.MessageID = msgID
+					}
+					if email.InReplyTo == "" {
+						email.InReplyTo = inReplyTo
+					}
+					log.Printf("InReplyTo: %s", email.InReplyTo)
+					if email.ReferencesHeader == "" {
+						email.ReferencesHeader = refs
+					}
+					log.Printf("ReferencesHeader: %s", email.ReferencesHeader)
+					if email.ReplyTo == "" {
+						email.ReplyTo = replyTo
+					}
+					log.Printf("ReplyTo: %s", email.ReplyTo)
+					email.To = to
+					email.Cc = cc
+					email.DeliveredTo = deliveredTo
+					email.XOriginalTo = xOriginalTo
+					email.EnvelopeTo = envelopeTo
+					email.XEnvelopeTo = xEnvelopeTo
 
-                continue
-            }
+					log.Printf("To: %s", email.To)
+					log.Printf("Cc: %s", email.Cc)
+					log.Printf("Delivered-To: %s", email.DeliveredTo)
 
-            if err := parseBody(email, bodyData.Literal); err != nil {
-                bodyError = err
-            }
-            continue
-        }
-    }
+					resolveRecipient(email, email.Mailbox)
+					log.Printf("RecipientEmail: %s, Source: %s, IsPrimary: %v",
+						email.RecipientEmail, email.RecipientSource, email.IsPrimaryRecipient)
+				}
 
-    return email, bodyError
+				continue
+			}
+
+			hasBodySection = true
+
+			if bodyData.Literal != nil {
+				hasBodyLiteral = true
+
+				if err := parseBody(email, bodyData.Literal); err != nil {
+					bodyError = err
+				}
+			}
+
+			continue
+		}
+	}
+
+	log.Printf(
+		"uid=%d fetch summary | envelope=%v header=%v body_section=%v body_literal=%v body_len=%d attachments=%d",
+		uid,
+		hasEnvelope,
+		hasHeaderSection,
+		hasBodySection,
+		hasBodyLiteral,
+		len(strings.TrimSpace(email.Body)),
+		len(email.Files),
+	)
+
+	return email, bodyError
 }
 
 func cleanBodyText(body string) string {

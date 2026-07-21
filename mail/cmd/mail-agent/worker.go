@@ -242,7 +242,9 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
         email, err := parser.ParseMessage(uid, fetchCmd, userEmail)
         if err != nil {
             log.Printf("parse uid=%d: %v", uid, err)
-            fetchCmd.Close()
+            if isReconnectableError(err) {
+				return err
+			}
             continue
         }
 
@@ -255,7 +257,7 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
             log.Printf("ProcessEmails | email=%s session_id=%s processed uid=%d", imap.Email(), imap.SessionID(), uid)
         }
 
-        fetchCmd.Close()
+        //fetchCmd.Close()
 
         if err := imap.MarkRead(uid); err != nil {
             log.Printf("mark read uid=%d: %v", uid, err)
