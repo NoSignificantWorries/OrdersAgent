@@ -57,6 +57,8 @@ func decodeBodyBytes(b []byte, contentType string) string {
     return string(b)
 }
 
+var imagePlaceholderRe = regexp.MustCompile(`\s*\[image:[^\]]+\]`)
+
 func extractNestedMessageText(raw []byte) string {
     r := bytes.NewReader(raw)
     mr, err := msgmail.CreateReader(r)
@@ -422,9 +424,8 @@ func cleanBodyText(body string) string {
 
     for _, raw := range lines {
         line := strings.TrimRight(raw, " \t\r")
-
-        // Удаляем явный техмусор
         trimmed := strings.TrimSpace(line)
+
         if trimmed == "" {
             // схлопываем пачки пустых строк в одну
             if !prevEmpty {
@@ -435,10 +436,17 @@ func cleanBodyText(body string) string {
         }
         prevEmpty = false
 
-        // CSS/HTML‑мусор
-        if strings.Contains(trimmed, "blockquote.rt") ||
-            strings.HasPrefix(trimmed, "p {") ||
-            strings.Contains(trimmed, ".email-signature") {
+        lower := strings.ToLower(trimmed)
+        if strings.Contains(lower, "blockquote.rt") ||
+            strings.HasPrefix(lower, "p {") ||
+            strings.Contains(lower, ".email-signature") {
+            continue
+        }
+
+        trimmed = imagePlaceholderRe.ReplaceAllString(trimmed, "")
+        trimmed = strings.TrimSpace(trimmed)
+
+        if trimmed == "" {
             continue
         }
 
@@ -451,6 +459,25 @@ func cleanBodyText(body string) string {
     // Убираем ведущие/замыкающие пустые строки
     res = strings.Trim(res, "\n")
     return res
+}
+
+func isInlinePart(contentType, disposition, contentID string) bool {
+    ctLower := strings.ToLower(contentType)
+    dispLower := strings.ToLower(disposition)
+
+    if strings.Contains(dispLower, "inline") {
+        return true
+    }
+
+    if contentID != "" && !strings.Contains(dispLower, "attachment") {
+        return true
+    }
+
+    if strings.HasPrefix(ctLower, "image/") && contentID != "" {
+        return true
+    }
+
+    return false
 }
 
 func parseBody(email *Email, literal io.Reader) error {
@@ -512,18 +539,27 @@ func parseBody(email *Email, literal io.Reader) error {
 
         // ---------------- вложения ----------------
         default:
-            if strings.Contains(strings.ToLower(disp), "attachment") ||
-                strings.HasPrefix(ctLower, "application/") ||
-                strings.HasPrefix(ctLower, "image/") {
+            contentID := strings.TrimSpace(p.Header.Get("Content-ID"))
 
-                name := extractFilename(disp, contentType)
-                if name == "" {
-                    continue
-                }
-                att := Attachment{Name: name}
-                att.Data, _ = io.ReadAll(p.Body)
-                email.Files = append(email.Files, att)
+            if isInlinePart(contentType, disp, contentID) {
+                continue
             }
+
+            isAttachment := strings.Contains(strings.ToLower(disp), "attachment") ||
+                strings.HasPrefix(ctLower, "application/")
+
+            if !isAttachment {
+                continue
+            }
+
+            name := extractFilename(disp, contentType)
+            if name == "" {
+                continue
+            }
+
+            att := Attachment{Name: name}
+            att.Data, _ = io.ReadAll(p.Body)
+            email.Files = append(email.Files, att)
         }
     }
 
@@ -573,6 +609,7 @@ func extractTextFromHTML(htmlStr string) string {
 		"script": true,
 		"style":  true,
 		"noscript": true,
+        "img": true,
 	}
 
 	var walk func(*htmllib.Node, bool)
