@@ -116,7 +116,7 @@
 
         if (state.selectedSourceType === "sent" && state.selectedEmailId != null) {
             const existingEmail = state.emails.find(
-                (email) => Number(email.id) === Number(state.selectedEmailId),
+                (email) => Number(email.email_id || email.id) === Number(state.selectedEmailId),
             );
 
             if (existingEmail) {
@@ -178,11 +178,19 @@
     }
 
     function openInboxThreadEmailFromSent(threadEmail, state) {
-        const inboxEmailId = Number(threadEmail?.source_id || 0);
-        if (!Number.isFinite(inboxEmailId) || inboxEmailId <= 0) {
+        const targetEmailId = Number(
+            threadEmail?.email_id ||
+            threadEmail?.emailid ||
+            threadEmail?.source_id ||
+            0,
+        );
+
+        if (!Number.isFinite(targetEmailId) || targetEmailId <= 0) {
             alert("Не удалось определить входящее письмо для перехода.");
             return;
         }
+
+        const targetPageType = threadEmail?.archived === true ? "archived" : "inbox";
 
         const params = new URLSearchParams();
 
@@ -194,10 +202,10 @@
             params.set("sort", "oldest");
         }
 
-        params.set("selected_email_id", String(inboxEmailId));
-        params.set("selected_source", "inbox");
+        params.set("selected_email_id", String(targetEmailId));
+        params.set("selected_source", targetPageType);
 
-        window.location.href = `/inbox?${params.toString()}`;
+        window.location.href = `/${targetPageType}?${params.toString()}`;
     }
 
     function normalizeDocuments(raw) {
@@ -606,6 +614,7 @@ function renderSentPagination(state) {
         const docs = normalizeDocuments(email.documents);
 
         const realEmailId = email.id;
+        state.selectedEmailSnapshot = email;
 
         let threadMessages = [];
 
@@ -931,8 +940,31 @@ function renderSentPagination(state) {
         state.selectedSourceType = "sent";
         syncSentState(state, historyMode);
 
-        let email = state.emails.find((e) => Number(e.id) === Number(id));
-        if (!email) return;
+        let email = state.emails.find(
+            (e) => Number(e.email_id || e.id) === Number(id),
+        );
+
+        let fromList = true;
+
+        if (!email) {
+            fromList = false;
+            try {
+                const detailEmail = await loadSentEmailDetail(id);
+                email = mergeSentEmailDetailIntoState(detailEmail, state);
+
+                if (!state.emails.some((e) => Number(e.id) === Number(email.id))) {
+                    state.emails.unshift(email);
+                    renderSentEmailList(state);
+                }
+
+                state.selectedEmailSnapshot = email;
+            } catch (detailError) {
+                console.error("Не удалось загрузить детали исходящего письма", detailError);
+                return;
+            }
+        } else {
+            state.selectedEmailSnapshot = null;
+        }
 
         highlightSelectedEmail(id);
 
@@ -1027,12 +1059,21 @@ function renderSentPagination(state) {
         if (
             state.selectedSourceType === "sent" &&
             state.selectedEmailId != null &&
-            !state.emails.some((email) => Number(email.id) === Number(state.selectedEmailId))
+            !state.emails.some(
+                (email) => Number(email.email_id || email.id) === Number(state.selectedEmailId),
+            )
         ) {
-            const emailView = document.getElementById("emailView");
-            if (emailView) {
-                emailView.innerHTML =
-                    '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+            const snapshotId = state.selectedEmailSnapshot
+                ? Number(state.selectedEmailSnapshot.email_id || state.selectedEmailSnapshot.id)
+                : null;
+
+            if (snapshotId !== Number(state.selectedEmailId)) {
+                const emailView = document.getElementById("emailView");
+                if (emailView) {
+                    emailView.innerHTML =
+                        '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+                }
+                state.selectedEmailId = null;
             }
         }
 
@@ -1143,6 +1184,7 @@ function renderSentPagination(state) {
                 ? initialUrlState.selectedEmailId
                 : null,
             selectedSourceType: initialUrlState.selectedSourceType || "sent",
+            selectedEmailSnapshot: null,
             currentSearchTerm: initialUrlState.currentSearchTerm,
             sortNewestFirst: initialUrlState.sortNewestFirst,
 

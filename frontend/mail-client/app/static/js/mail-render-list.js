@@ -226,7 +226,7 @@
             return;
         }
 
-        const email = state.emails.find((e) => Number(e.id) === Number(state.selectedEmailId));
+        const email = state.emails.find((e) => Number(e.email_id || e.emailid || e.id) === Number(state.selectedEmailId),);
         if (!email) {
             closeOpenedEmail(deps);
             return;

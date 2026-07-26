@@ -605,17 +605,46 @@
             const result = await reloadEmails({ showLoadingState: true });
             if (!result?.ok) return;
 
+            if (state.selectedEmailSnapshot && snapshotIdMatches) {
+                await renderEmailCard(state.selectedEmailSnapshot);
+                return;
+            }
+
             if (
                 state.selectedSourceType === pageConfig.pageType &&
                 state.selectedEmailId != null
             ) {
                 const selectedEmail = state.emails.find(
-                    (email) => Number(email.id) === Number(state.selectedEmailId),
+                    (email) =>
+                        Number(email.email_id || email.emailid || email.id) === Number(state.selectedEmailId),
                 );
 
                 if (selectedEmail) {
                     await selectEmail(selectedEmail.id, { historyMode: "replace" });
                     return;
+                }
+
+                if (
+                    state.selectedEmailSnapshot &&
+                    Number(
+                        state.selectedEmailSnapshot.email_id ||
+                        state.selectedEmailSnapshot.emailid ||
+                        state.selectedEmailSnapshot.id
+                    ) === Number(state.selectedEmailId)
+                ) {
+                    await renderEmailCard(state.selectedEmailSnapshot);
+                    return;
+                }
+
+                try {
+                    const detailEmail = await window.MailApi.loadEmailDetail?.(state.selectedEmailId);
+                    if (detailEmail) {
+                        state.selectedEmailSnapshot = detailEmail;
+                        await renderEmailCard(detailEmail);
+                        return;
+                    }
+                } catch (error) {
+                    console.error("Не удалось загрузить detail письма при восстановлении истории", error);
                 }
             }
 
@@ -671,11 +700,22 @@
                 state.selectedEmailId != null
             ) {
                 const selectedEmail = state.emails.find(
-                    (email) => Number(email.id) === Number(state.selectedEmailId),
+                    (email) =>
+                        Number(email.email_id || email.emailid || email.id) === Number(state.selectedEmailId),
                 );
 
                 if (selectedEmail) {
                     await selectEmail(selectedEmail.id, { historyMode: "replace" });
+                } else {
+                    try {
+                        const detailEmail = await window.MailApi.loadEmailDetail?.(state.selectedEmailId);
+                        if (detailEmail) {
+                            state.selectedEmailSnapshot = detailEmail;
+                            await renderEmailCard(detailEmail);
+                        }
+                    } catch (error) {
+                        console.error("Не удалось загрузить detail письма при старте страницы", error);
+                    }
                 }
             }
 
