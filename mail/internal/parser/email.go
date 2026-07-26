@@ -9,7 +9,6 @@ import (
 	"strings"
 	"bufio"
     "net/mail"
-    "unicode/utf8"
     "regexp"
     "time"
 
@@ -59,14 +58,16 @@ func decodeBodyBytes(b []byte, contentType string) string {
 
 var imagePlaceholderRe = regexp.MustCompile(`\s*\[image:[^\]]+\]`)
 
-func extractNestedMessageText(raw []byte) string {
+func extractNestedMessage(raw []byte) (text string, attachments []Attachment) {
     r := bytes.NewReader(raw)
     mr, err := msgmail.CreateReader(r)
     if err != nil {
-        return strings.TrimSpace(extractTextFromHTML(string(raw)))
+        return strings.TrimSpace(extractTextFromHTML(string(raw))), nil
     }
 
-    var plainPart, htmlPart string
+    var plainPart string
+    var htmlPart string
+    var atts []Attachment
 
     for {
         p, err := mr.NextPart()
@@ -78,6 +79,7 @@ func extractNestedMessageText(raw []byte) string {
         }
 
         contentType := p.Header.Get("Content-Type")
+        disp := p.Header.Get("Content-Disposition")
         ctLower := strings.ToLower(contentType)
         bodyBytes, _ := io.ReadAll(p.Body)
 
@@ -92,16 +94,43 @@ func extractNestedMessageText(raw []byte) string {
             if txt != "" && htmlPart == "" {
                 htmlPart = txt
             }
+        } else {
+            contentID := strings.TrimSpace(p.Header.Get("Content-ID"))
+            
+            if isInlinePart(contentType, disp, contentID) {
+                continue
+            }
+
+            isAttachment := strings.Contains(strings.ToLower(disp), "attachment") ||
+                strings.HasPrefix(ctLower, "application/") ||
+                strings.HasPrefix(ctLower, "image/") ||
+                strings.HasPrefix(ctLower, "video/") ||
+                strings.HasPrefix(ctLower, "audio/")
+
+            if !isAttachment {
+                continue
+            }
+
+            name := extractFilename(disp, contentType)
+            if name == "" {
+                continue
+            }
+
+            att := Attachment{
+                Name: name,
+                Data: bodyBytes,
+            }
+            atts = append(atts, att)
         }
     }
 
     if plainPart != "" {
-        return plainPart
+        text = plainPart
+    } else if htmlPart != "" {
+        text = htmlPart
     }
-    if htmlPart != "" {
-        return htmlPart
-    }
-    return ""
+
+    return text, atts
 }
 
 func joinAddresses(addrs []imap.Address) string {
@@ -486,9 +515,10 @@ func parseBody(email *Email, literal io.Reader) error {
         return fmt.Errorf("parsing body: %w", err)
     }
 
-    var plainPart string
-    var htmlPart string
-    var nestedPart string
+    var plainParts []string
+    var htmlParts []string
+    var nestedAttachments []Attachment
+    var htmlProcessed bool
 
     for {
         p, err := mr.NextPart()
@@ -508,81 +538,75 @@ func parseBody(email *Email, literal io.Reader) error {
         // ---------------- text/plain ----------------
         case strings.HasPrefix(ctLower, "text/plain"):
             bodyBytes, _ := io.ReadAll(p.Body)
-
-            log.Printf("UID=%d part=%s utf8_valid=%v", email.UID, contentType, utf8.Valid(bodyBytes))
-
             txt := strings.TrimSpace(string(bodyBytes))
             if txt != "" {
-                if plainPart == "" {
-                    plainPart = txt
-                } else {
-                    log.Printf("UID=%d: extra text/plain part skipped", email.UID)
-                }
+                plainParts = append(plainParts, txt)
             }
+
         // ---------------- text/html ----------------
         case strings.HasPrefix(ctLower, "text/html"):
             bodyBytes, _ := io.ReadAll(p.Body)
             html := string(bodyBytes)
             txt := strings.TrimSpace(extractTextFromHTML(html))
-            if txt != "" && htmlPart == "" {
-                htmlPart = txt
-            }
-        // ---------------- вложенное письмо message/rfc822 ----------------
-        case strings.HasPrefix(ctLower, "message/rfc822"):
-            nestedBytes, _ := io.ReadAll(p.Body)
-            if len(nestedBytes) > 0 && nestedPart == "" {
-                nestedText := extractNestedMessageText(nestedBytes)
-                if nestedText != "" {
-                    nestedPart = nestedText
+            if txt != "" {
+                if !htmlProcessed {
+                    htmlParts = append(htmlParts, txt)
+                    htmlProcessed = true
                 }
             }
 
-        // ---------------- вложения ----------------
+        // ---------------- вложенное письмо message/rfc822 ----------------
+        case strings.HasPrefix(ctLower, "message/rfc822"):
+            nestedBytes, _ := io.ReadAll(p.Body)
+            
+            if len(nestedBytes) > 0 {
+                nestedText, attachments := extractNestedMessage(nestedBytes)
+                
+                if nestedText != "" {
+                    plainParts = append(plainParts, "\n--- Пересланное письмо ---\n"+nestedText)
+                }
+                
+                nestedAttachments = append(nestedAttachments, attachments...)
+            }
+
+        // ---------------- обычные вложения ----------------
         default:
             contentID := strings.TrimSpace(p.Header.Get("Content-ID"))
-
-            if isInlinePart(contentType, disp, contentID) {
+            dispLower := strings.ToLower(disp)
+            
+            isInlineImage := strings.HasPrefix(ctLower, "image/") && 
+                            contentID != "" && 
+                            !strings.Contains(dispLower, "attachment")
+            
+            if isInlineImage {
                 continue
             }
 
-            isAttachment := strings.Contains(strings.ToLower(disp), "attachment") ||
-                strings.HasPrefix(ctLower, "application/")
-
-            if !isAttachment {
-                continue
+            if !strings.HasPrefix(ctLower, "text/") && !strings.HasPrefix(ctLower, "message/") {
+                name := extractFilename(disp, contentType)
+                if name != "" {
+                    att := Attachment{Name: name}
+                    att.Data, _ = io.ReadAll(p.Body)
+                    email.Files = append(email.Files, att)
+                }
             }
-
-            name := extractFilename(disp, contentType)
-            if name == "" {
-                continue
-            }
-
-            att := Attachment{Name: name}
-            att.Data, _ = io.ReadAll(p.Body)
-            email.Files = append(email.Files, att)
         }
     }
 
-    // Выбор лучшей ветки
     var body string
-    plain := strings.TrimSpace(plainPart)
-	html := strings.TrimSpace(htmlPart)
-	nested := strings.TrimSpace(nestedPart)
+    
+    if len(plainParts) > 0 {
+        body = strings.Join(plainParts, "\n\n")
+    } else if len(htmlParts) > 0 {
+        body = strings.Join(htmlParts, "\n\n")
+    }
 
-	switch {
-	case plain != "" && len([]rune(plain)) > 30:
-		body = plain
-	case nested != "":
-		body = nested
-	case html != "":
-		body = html
-	case plain != "":
-		body = plain
-	default:
-		body = ""
-	}
-
+    email.Files = append(email.Files, nestedAttachments...)
     email.Body = cleanBodyText(body)
+    
+    log.Printf("UID=%d: body length=%d, plain parts=%d, html parts=%d, attachments=%d", 
+        email.UID, len(email.Body), len(plainParts), len(htmlParts), len(email.Files))
+    
     return nil
 }
 
