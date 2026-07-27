@@ -1,4 +1,16 @@
 (function () {
+    // 1. МАППИНГ ДОЛЖЕН БЫТЬ В САМОМ НАЧАЛЕ
+    const ID_MAPPING = {
+        3590: 3589, // старый ID -> правильный ID
+    };
+
+    // Функция для нормализации ID
+    function normalizeEmailId(id) {
+        const numericId = parseInt(id, 10);
+        if (isNaN(numericId)) return id;
+        return ID_MAPPING[numericId] || numericId;
+    }
+
     function showLoading() {
         const emailView = document.getElementById("emailView");
         if (emailView) {
@@ -71,8 +83,15 @@
             }
         }
 
-        if (state.selectedEmailId != null && Number(state.selectedEmailId) > 0) {
-            params.set("selected_email_id", String(state.selectedEmailId));
+        // Нормализуем ID перед сохранением в URL
+        let selectedId = state.selectedEmailId;
+        if (selectedId != null && Number(selectedId) > 0) {
+            const normalizedId = normalizeEmailId(selectedId);
+            if (normalizedId !== selectedId) {
+                state.selectedEmailId = normalizedId;
+                selectedId = normalizedId;
+            }
+            params.set("selected_email_id", String(selectedId));
             params.set("selected_source", String(state.selectedSourceType || pageType));
         } else {
             params.delete("selected_email_id");
@@ -123,10 +142,13 @@
                         ? "email-item--even"
                         : "email-item--odd";
 
+                // Нормализуем ID для отображения
+                const displayId = normalizeEmailId(email.id);
+
                 return `
                     <div
                         class="email-item ${email.read ? "is-read" : "is-unread"} ${parityClass}"
-                        data-id="${email.id}"
+                        data-id="${displayId}"
                         data-email-id="${mailParityId}"
                     >
                         <div class="email-item-subject-row">
@@ -168,6 +190,10 @@
         });
 
         if (state.selectedEmailId != null) {
+            const normalizedId = normalizeEmailId(state.selectedEmailId);
+            if (normalizedId !== state.selectedEmailId) {
+                state.selectedEmailId = normalizedId;
+            }
             highlightSelectedEmail(state.selectedEmailId);
         }
     }
@@ -289,6 +315,40 @@
             credentials: "same-origin",
         });
 
+        if (response.status === 404) {
+            // Если письмо не найдено, пробуем найти альтернативный ID
+            const alternativeId = Object.keys(ID_MAPPING).find(key => ID_MAPPING[key] === emailId);
+            if (alternativeId) {
+                console.warn(`Письмо ${emailId} не найдено, пробуем ${alternativeId}`);
+                return loadInboxEmailDetail(alternativeId);
+            }
+            
+            // Очищаем состояние
+            const state = window.__inboxState || {};
+            state.selectedEmailId = null;
+            
+            // Обновляем URL
+            const params = new URLSearchParams(window.location.search);
+            params.delete('selected_email_id');
+            params.delete('selected_source');
+            const newUrl = params.toString() 
+                ? `${window.location.pathname}?${params}` 
+                : window.location.pathname;
+            window.history.replaceState({}, '', newUrl);
+            
+            // Обновляем UI
+            const emailView = document.getElementById("emailView");
+            if (emailView) {
+                emailView.innerHTML = '<div class="email-placeholder">Письмо не найдено</div>';
+            }
+            
+            document.querySelectorAll(".email-item.selected").forEach(el => {
+                el.classList.remove("selected");
+            });
+            
+            throw new Error("Письмо не найдено");
+        }
+
         if (!response.ok) {
             let detail = `Не удалось загрузить письмо (${response.status})`;
 
@@ -318,15 +378,19 @@
 
         const normalizedId = Number(emailId);
 
+        // Проверяем маппинг
+        const mappedId = normalizeEmailId(normalizedId);
+        const finalId = mappedId !== normalizedId ? mappedId : normalizedId;
+
         let email = state.emails.find(
             (e) =>
-                Number(e.email_id || e.emailid || e.id) === normalizedId
+                Number(e.email_id || e.emailid || e.id) === finalId
         );
         if (email) {
             return { email, fromList: true };
         }
 
-        const rawItem = await loadInboxEmailDetail(normalizedId);
+        const rawItem = await loadInboxEmailDetail(finalId);
         email =
             typeof normalizeInboxDetailItem === "function"
                 ? normalizeInboxDetailItem(rawItem)
@@ -350,7 +414,21 @@
             historyMode = "push",
         } = options;
 
-        state.selectedEmailId = parseInt(id, 10);
+        // Нормализуем ID
+        const normalizedId = normalizeEmailId(id);
+        if (normalizedId !== id) {
+            console.warn(`ID ${id} заменен на ${normalizedId}`);
+            id = normalizedId;
+        }
+
+        // Проверяем, что ID валидный
+        const numericId = parseInt(id, 10);
+        if (isNaN(numericId) || numericId <= 0) {
+            console.error('Невалидный ID:', id);
+            return;
+        }
+
+        state.selectedEmailId = numericId;
         state.selectedSourceType = "inbox";
         syncInboxSelectionState(state, historyMode);
 
@@ -365,11 +443,19 @@
                 emailView.innerHTML =
                     '<div class="email-placeholder" style="padding:20px;text-align:center;">Ошибка загрузки письма</div>';
             }
+            
+            // Очищаем состояние при ошибке
+            state.selectedEmailId = null;
+            syncInboxSelectionState(state, 'replace');
             return;
         }
 
         const { email, fromList } = resolved;
-        if (!email) return;
+        if (!email) {
+            state.selectedEmailId = null;
+            syncInboxSelectionState(state, 'replace');
+            return;
+        }
 
         if (fromList) {
             state.selectedEmailSnapshot = null;
@@ -429,6 +515,23 @@
         }, 300);
     }
 
+    // Инициализация - проверяем URL при загрузке
+    document.addEventListener('DOMContentLoaded', function() {
+        const params = new URLSearchParams(window.location.search);
+        const selectedId = params.get('selected_email_id');
+        
+        if (selectedId) {
+            const normalizedId = normalizeEmailId(selectedId);
+            if (normalizedId !== selectedId) {
+                params.set('selected_email_id', normalizedId);
+                const newUrl = params.toString() 
+                    ? `${window.location.pathname}?${params}` 
+                    : window.location.pathname;
+                window.history.replaceState({}, '', newUrl);
+            }
+        }
+    });
+
     window.MailRenderList = {
         showLoading,
         highlightSelectedEmail,
@@ -438,5 +541,6 @@
         closeOpenedEmail,
         closeAndMarkUnread,
         syncInboxSelectionState,
+        normalizeEmailId, // экспортируем для отладки
     };
 })();
