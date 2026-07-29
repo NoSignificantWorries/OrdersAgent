@@ -708,7 +708,8 @@ async def get_email_detail_for_user(
     if row["task_id"]:
         item.update(
             {
-                "id": row["task_id"],
+                "id": row["email_id"],
+                "taskid": row["task_id"],
                 "documentid": row["task_document_id"],
                 "type": row["task_type"],
                 "status": row["task_status"],
