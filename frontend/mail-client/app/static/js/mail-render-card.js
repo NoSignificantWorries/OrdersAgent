@@ -75,7 +75,7 @@
         if (!input) return;
 
         const { state, refreshEmailsSilently } = deps;
-        const realEmailId = email.email_id || email.id;
+        const realEmailId = Number(email.email_id || email.emailid || email.id);
 
         if (!state.replyDrafts) {
             state.replyDrafts = new Map();
@@ -321,7 +321,7 @@
                 .join("") || "<p>...</p>";
 
         const docsWithName = getDisplayDocuments(email);
-        const realEmailId = email.email_id || email.id;
+        const realEmailId = Number(email.email_id || email.emailid || email.id);
 
         let threadMessages = [];
 
@@ -443,7 +443,7 @@
                             )
                             .join("")}
                     </ul>
-                    <button class="save-all-attachments-btn" data-email-id="${email.id}">
+                    <button class="save-all-attachments-btn" data-email-id="${realEmailId}">
                         Скачать
                     </button>
                 </div>
@@ -1174,7 +1174,7 @@
                 closeTaskBtn.disabled = true;
 
                 try {
-                    const realEmailId = email.email_id || email.id;
+                    const realEmailId = Number(email.email_id || email.emailid || email.id);
 
                     const resp = await fetch(`/api/emails/${realEmailId}/archive`, {
                         method: "POST",
@@ -1218,7 +1218,7 @@
                 unarchiveTaskBtn.disabled = true;
 
                 try {
-                    const realEmailId = email.email_id || email.id;
+                    const realEmailId = Number(email.email_id || email.emailid || email.id);
 
                     const resp = await fetch(`/api/emails/${realEmailId}/unarchive`, {
                         method: "POST",
@@ -1342,7 +1342,7 @@
                     }
 
                     try {
-                        const realEmailId = email.email_id || email.id;
+                        const realEmailId = Number(email.email_id || email.emailid || email.id);
                         await fetch(`/api/emails/${realEmailId}/read`, {
                             method: "PATCH",
                             headers: {

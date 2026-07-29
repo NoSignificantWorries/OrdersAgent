@@ -136,20 +136,20 @@
 
         container.innerHTML = filtered
             .map((email) => {
-                const mailParityId = Number(email.email_id || email.emailid || email.id);
+                const primaryEmailId = Number(email.email_id || email.emailid || email.id);
                 const parityClass =
-                    Number.isFinite(mailParityId) && mailParityId % 2 === 0
+                    Number.isFinite(primaryEmailId) && primaryEmailId % 2 === 0
                         ? "email-item--even"
                         : "email-item--odd";
 
-                // Нормализуем ID для отображения
-                const displayId = normalizeEmailId(email.id);
+                // Нормализуем реальный ID письма для отображения и клика
+                const displayId = normalizeEmailId(primaryEmailId);
 
                 return `
                     <div
                         class="email-item ${email.read ? "is-read" : "is-unread"} ${parityClass}"
                         data-id="${displayId}"
-                        data-email-id="${mailParityId}"
+                        data-email-id="${primaryEmailId}"
                     >
                         <div class="email-item-subject-row">
                             <div class="subject">${escapeHtml(email.subject)}</div>
@@ -263,7 +263,7 @@
             return;
         }
 
-        const realEmailId = email.email_id || email.id;
+        const realEmailId = Number(email.email_id || email.emailid || email.id);
 
         email.read = false;
         state.unreadCount += 1;
@@ -463,7 +463,7 @@
             state.selectedEmailSnapshot = email;
         }
 
-        const realEmailId = email.email_id || email.id;
+        const realEmailId = Number(email.email_id || email.emailid || email.id);
 
         if (!email.read) {
             email.read = true;
