@@ -778,6 +778,8 @@ async def update_queue_decision(
                 next_status = payload.status
             elif model_decision == "question":
                 next_status = "question"
+            elif model_decision == "claim":
+                next_status = "claim"
             else:
                 next_status = "ml_classified"
 
@@ -788,19 +790,21 @@ async def update_queue_decision(
                     predicted_class = 1
                 elif model_decision == "calculation":
                     predicted_class = 0
+                elif model_decision == "claim":
+                    predicted_class = 3
                 elif model_decision == "review":
                     predicted_class = None
 
-            if model_decision not in {"request", "calculation", "question"}:
+            if model_decision not in {"request", "calculation", "question", "claim"}:
                 raise HTTPException(
                     status_code=400,
-                    detail="Нужно выбрать итоговый класс: 'Заявка', 'Расчёт' или 'Вопрос'"
+                    detail="Нужно выбрать итоговый класс: 'Заявка', 'Расчёт', 'Вопрос' или 'Претензия'"
                 )
 
-            if predicted_class not in {0, 1, 2}:
+            if predicted_class not in {0, 1, 2, 3}:
                 raise HTTPException(
                     status_code=400,
-                    detail="Итоговый класс должен быть 0, 1 или 2"
+                    detail="Итоговый класс должен быть 0, 1, 2 или 3"
                 )
 
             output_patch = {

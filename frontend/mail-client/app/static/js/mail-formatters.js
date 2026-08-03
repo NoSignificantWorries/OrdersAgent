@@ -5,6 +5,7 @@
         ml_review: { name: "Выберите класс" },
         materials_review: { name: "Требуются материалы" },
         question: { name: "Вопрос" },
+        claim: { name: "Претензия" },
         completed: { name: "Завершено" },
         error: { name: "Ошибка" },
     };
@@ -118,6 +119,9 @@
 
             case "question":
                 return "question";
+
+            case "claim":
+                return "claim";
 
             case "completed":
                 return "completed";

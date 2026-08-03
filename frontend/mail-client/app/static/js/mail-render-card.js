@@ -1305,16 +1305,21 @@
                 if (
                     newVal !== "request" &&
                     newVal !== "calculation" &&
-                    newVal !== "question"
+                    newVal !== "question" &&
+                    newVal !== "claim"
                 ) {
                     alert(
-                        "Выберите итоговый класс: «Заявка», «Расчёт» или «Вопрос».",
+                        "Выберите итоговый класс: «Заявка», «Расчёт», «Вопрос» или «Претензия».",
                     );
                     return;
                 }
 
                 const nextStatus =
-                    newVal === "question" ? "question" : "ml_classified";
+                    newVal === "question"
+                        ? "question"
+                        : newVal === "claim"
+                            ? "claim"
+                            : "ml_classified";
 
                 try {
                     const resp = await fetch(

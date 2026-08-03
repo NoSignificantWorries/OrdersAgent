@@ -2574,6 +2574,12 @@ body {
     border-color: #ef4444;
 }
 
+.status-claim {
+    color: #9a3412;
+    background: #ffedd5;
+    border-color: #fb923c;
+}
+
 /* Badge статуса в списке */
 .status-badge {
     padding: 4px 10px;

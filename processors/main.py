@@ -39,6 +39,10 @@ RESULTS_BUCKET = "results"
 logger = logging.getLogger("mail_processor")
 
 
+def detect_claim_class(text: str) -> bool:
+    return "претензия" in text.lower()
+
+
 def process_new(
     task, email_repo, task_repo, doc_repo, material_repo, cloud, classify_worker
 ) -> None:
@@ -53,6 +57,20 @@ def process_new(
 
     parts = [email.email_subject or "", email.raw_email or "", files or ""]
     text = "\n\n".join(part for part in parts if part).strip()
+
+    if detect_claim_class(text):
+        model_decision = "claim"
+        predicted_class = "3"
+        new_status = "classified"
+        proba = 1.0
+
+        logger.info(
+            f"Task {task.id}: prob={proba:.3f} decision={model_decision} class={predicted_class} status={new_status} source=rule"
+        )
+
+        email_repo.set_ml_result(email.id, proba, predicted_class, model_decision)
+        task_repo.update_status(task.id, "ml_classified")
+        return
 
     features = FeaturesExtractor.extract_text_features(text)
     files_features = FeaturesExtractor.extract_files_features(file_names)
@@ -108,6 +126,8 @@ def process_classified_excel(
             )
         case "question":
             task_repo.update_status(task.id, "question")
+        case "claim":
+            task_repo.update_status(task.id, "claim")
         case _:
             logger.error(f"Task {task.id}: Unsupported class")
             task_repo.mark_error(task.id, "Неподдерживаемый класс письма.")

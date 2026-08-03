@@ -429,6 +429,7 @@ const decisionOptions = [
     { value: "request", label: "Заявка" },
     { value: "calculation", label: "Расчёт" },
     { value: "question", label: "Вопрос" },
+    { value: "claim", label: "Претензия" },
 ];
 
 function recalculateUnreadCount() {

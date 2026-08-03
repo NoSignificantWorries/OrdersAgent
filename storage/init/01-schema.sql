@@ -12,6 +12,7 @@ BEGIN
             'ml_processing',
             'ml_classified',
             'question',
+            'claim',
             'ml_review',
             'materials_review',
             'manual_review_done',
