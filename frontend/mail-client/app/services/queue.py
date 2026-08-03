@@ -180,7 +180,7 @@ async def list_queue_for_user(
                         OR LOWER(BTRIM(e.model_decision)) = 'review'
                     )"""
                 )
-            elif normalized_class_filter in {"request", "calculation", "question"}:
+            elif normalized_class_filter in {"request", "calculation", "question", "claim"}:
                 where_clauses.append(f"LOWER(COALESCE(e.model_decision, '')) = ${param_idx}")
                 params.append(normalized_class_filter)
                 param_idx += 1
