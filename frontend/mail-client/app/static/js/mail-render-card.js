@@ -293,6 +293,7 @@
             closeOpenedEmail,
             closeAndMarkUnread,
             refreshEmailsSilently,
+            loadReplyDraft,
             getThreadMessages,
             isThreadExpanded,
             toggleThreadExpanded,
@@ -773,17 +774,16 @@
         const replyFilesList = document.getElementById("reply-files-list");
 
         if (replyBodyInput) {
-            const initialReplyBody = appendSignatureIfMissing(
-                savedReplyDraft,
-                state.userSignature || "",
-            );
+            const initialReplyBody = String(savedReplyDraft || "");
 
             replyBodyInput.value = initialReplyBody;
 
             if (!state.replyDrafts) {
                 state.replyDrafts = new Map();
             }
-            state.replyDrafts.set(realEmailId, initialReplyBody);
+            if (initialReplyBody) {
+                state.replyDrafts.set(realEmailId, initialReplyBody);
+            }
 
             bindReplyInputEvents({
                 input: replyBodyInput,
@@ -922,12 +922,36 @@
         if (replyToggleBtn && replyFormBlock && replyBodyInput) {
             replyToggleBtn.addEventListener("click", async () => {
                 try {
-                    await ensureUserSignature(state);
+                    if (state.pendingSilentRefresh === true) {
+                        state.pendingSilentRefresh = false;
+                    }
 
-                    const nextValue = appendSignatureIfMissing(
-                        replyBodyInput.value,
-                        state.userSignature || "",
-                    );
+                    replyToggleBtn.disabled = true;
+
+                    let nextValue = String(replyBodyInput.value || "");
+                    const hasSavedDraft = String(nextValue).trim() !== "";
+
+                    if (!hasSavedDraft) {
+                        if (typeof loadReplyDraft !== "function") {
+                            throw new Error("Загрузка черновика ответа не подключена");
+                        }
+
+                        const sourceType =
+                            String(email.thread_source || email.source_type || "inbox") === "sent"
+                                ? "sent"
+                                : "inbox";
+
+                        const draft = await loadReplyDraft(realEmailId, {
+                            sourceType,
+                        });
+
+                        await ensureUserSignature(state);
+
+                        nextValue = appendSignatureIfMissing(
+                            String(draft?.body || ""),
+                            state.userSignature || "",
+                        );
+                    }
 
                     replyBodyInput.value = nextValue;
 
@@ -943,6 +967,8 @@
                 } catch (error) {
                     console.error(error);
                     alert(error.message || "Не удалось открыть форму ответа");
+                } finally {
+                    replyToggleBtn.disabled = false;
                 }
             });
         }

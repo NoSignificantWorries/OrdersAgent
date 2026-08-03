@@ -113,6 +113,14 @@ type ForwardEmailRequest struct {
     SourceType          string
 }
 
+type ReplyDraft struct {
+    EmailID int64  `json:"email_id"`
+    Mailbox string `json:"mailbox"`
+    To      string `json:"to"`
+    Subject string `json:"subject"`
+    Body    string `json:"body"`
+}
+
 // DBRepo — пишет метаданные в Postgres и файлы в MinIO.
 type DBRepo struct {
 	db    *api.DB
@@ -336,6 +344,17 @@ func buildForwardSubject(subject string) string {
 	return "Fwd: " + subject
 }
 
+func buildReplySubject(subject string) string {
+    subject = strings.TrimSpace(subject)
+    if subject == "" {
+        return "Re:"
+    }
+    if strings.HasPrefix(strings.ToLower(subject), "re:") {
+        return subject
+    }
+    return "Re: " + subject
+}
+
 func normalizeEmailText(s string) string {
     s = strings.ReplaceAll(s, "\r\n", "\n")
     s = strings.ReplaceAll(s, "\r", "\n")
@@ -556,6 +575,24 @@ func extractBodyFromRawEmail(raw string) string {
     return normalizeEmailText(raw)
 }
 
+func quoteEmailBody(text string) string {
+    normalized := normalizeEmailText(text)
+    if normalized == "" {
+        return ""
+    }
+
+    lines := strings.Split(normalized, "\n")
+    for i, line := range lines {
+        if strings.TrimSpace(line) == "" {
+            lines[i] = ">"
+        } else {
+            lines[i] = "> " + line
+        }
+    }
+
+    return strings.Join(lines, "\n")
+}
+
 func buildForwardBody(ctx *EmailReplyContext) string {
 	var sb strings.Builder
 
@@ -588,6 +625,39 @@ func buildForwardBody(ctx *EmailReplyContext) string {
     }
 
 	return sb.String()
+}
+
+func buildReplyBody(ctx *EmailReplyContext) string {
+    var sb strings.Builder
+
+    originalBody := extractBodyFromRawEmail(ctx.RawEmail)
+
+    sb.WriteString("\n\n")
+
+    if !ctx.EmailDate.IsZero() || strings.TrimSpace(ctx.EmailFrom) != "" {
+        if !ctx.EmailDate.IsZero() {
+            sb.WriteString("Дата: ")
+            sb.WriteString(ctx.EmailDate.Format(time.RFC1123Z))
+        }
+
+        if strings.TrimSpace(ctx.EmailFrom) != "" {
+            if !ctx.EmailDate.IsZero() {
+                sb.WriteString("\n")
+            }
+            sb.WriteString("От: ")
+            sb.WriteString(strings.TrimSpace(ctx.EmailFrom))
+        }
+
+        sb.WriteString("\n")
+    }
+
+    sb.WriteString("--------------------------\n")
+
+    if quoted := quoteEmailBody(originalBody); strings.TrimSpace(quoted) != "" {
+        sb.WriteString(quoted)
+    }
+
+    return strings.TrimRight(sb.String(), "\n")
 }
 
 // NewDBRepo — создаёт репозиторий с Postgres и MinIO.
@@ -1187,6 +1257,28 @@ func BuildForwardDraft(db *api.DB, emailID int64, sourceType string) (*ForwardDr
         Subject:     buildForwardSubject(ctx.EmailSubject),
         Body:        buildForwardBody(ctx),
         Attachments: attachments,
+    }, nil
+}
+
+func BuildReplyDraft(db *api.DB, emailID int64, sourceType string) (*ReplyDraft, error) {
+    normalizedSource := normalizeSourceType(sourceType)
+
+    ctx, err := GetForwardContext(db, emailID, normalizedSource)
+    if err != nil {
+        return nil, err
+    }
+
+    to, err := extractReplyAddress(ctx.ReplyTo, ctx.EmailFrom)
+    if err != nil {
+        return nil, fmt.Errorf("build reply draft recipient: %w", err)
+    }
+
+    return &ReplyDraft{
+        EmailID: ctx.EmailID,
+        Mailbox: ctx.Mailbox,
+        To:      to,
+        Subject: buildReplySubject(ctx.EmailSubject),
+        Body:    buildReplyBody(ctx),
     }, nil
 }
 

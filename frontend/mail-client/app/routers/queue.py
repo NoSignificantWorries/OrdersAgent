@@ -60,6 +60,13 @@ class ForwardDraftResponse(BaseModel):
     body: str = ""
     attachments: list[ForwardAttachmentItem] = Field(default_factory=list)
 
+class ReplyDraftResponse(BaseModel):
+    email_id: int
+    mailbox: str
+    to: str = ""
+    subject: str = ""
+    body: str = ""
+    
 class SignatureUpdatePayload(BaseModel):
     signature: str = ""
 
@@ -1396,6 +1403,64 @@ async def get_forward_draft(
 
     if resp.status_code >= 400:
         detail = "Не удалось получить черновик пересылки"
+
+        try:
+            data = resp.json()
+            if isinstance(data, dict) and data.get("detail"):
+                detail = data["detail"]
+            elif resp.text and resp.text.strip():
+                detail = resp.text.strip()
+        except Exception:
+            if resp.text and resp.text.strip():
+                detail = resp.text.strip()
+
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+
+    try:
+        payload = resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Некорректный ответ mail service: {e}") from e
+
+    return payload
+
+@router.get("/emails/{email_id}/reply-draft", response_model=ReplyDraftResponse)
+async def get_reply_draft(
+    email_id: int,
+    request: Request,
+    source_type: str | None = Query(default=None),
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    normalized_source_type = normalize_source_type(source_type)
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        row = await get_email_access_row(
+            conn,
+            email_id=email_id,
+            user=user,
+            source_type=normalized_source_type,
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+    mail_service_url = f"http://mail:8080/emails/{email_id}/reply-draft"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(
+                mail_service_url,
+                params={"source_type": normalized_source_type},
+            )
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
+
+    if resp.status_code >= 400:
+        detail = "Не удалось получить черновик ответа"
 
         try:
             data = resp.json()

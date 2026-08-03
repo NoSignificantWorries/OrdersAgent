@@ -132,6 +132,34 @@ func main() {
             return
         }
 
+		if len(parts) == 2 && parts[1] == "reply-draft" {
+            if r.Method != http.MethodGet && r.Method != http.MethodPost {
+                http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+                return
+            }
+
+            emailID, err := strconv.ParseInt(parts[0], 10, 64)
+            if err != nil || emailID <= 0 {
+                writeJSONError(w, http.StatusBadRequest, "invalid email id")
+                return
+            }
+
+            sourceType := strings.TrimSpace(r.URL.Query().Get("source_type"))
+
+            draft, err := storage.BuildReplyDraft(db, emailID, sourceType)
+            if err != nil {
+                log.Printf("reply draft failed | email_id=%d err=%v", emailID, err)
+                writeJSONError(w, http.StatusInternalServerError, "failed to build reply draft")
+                return
+            }
+
+            w.Header().Set("Content-Type", "application/json; charset=utf-8")
+            if err := json.NewEncoder(w).Encode(draft); err != nil {
+                log.Printf("reply draft encode failed | email_id=%d err=%v", emailID, err)
+            }
+            return
+        }
+
 		if r.Method != http.MethodPost {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return

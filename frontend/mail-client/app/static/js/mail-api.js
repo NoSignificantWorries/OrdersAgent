@@ -353,6 +353,43 @@
         return await resp.json();
     }
 
+    async function loadReplyDraft(emailId, options = {}) {
+        const sourceType = options?.sourceType === "sent" ? "sent" : "inbox";
+
+        const url = new URL(`/api/emails/${emailId}/reply-draft`, window.location.origin);
+        url.search = new URLSearchParams({
+            source_type: sourceType,
+        }).toString();
+
+        const resp = await fetch(url.toString(), {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            credentials: "same-origin",
+        });
+
+        if (!resp.ok) {
+            let message = "Не удалось получить черновик ответа";
+
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    message = data.detail;
+                }
+            } catch (_) {
+                try {
+                    const text = await resp.text();
+                    if (text?.trim()) {
+                        message = text.trim();
+                    }
+                } catch (_) {}
+            }
+
+            throw new Error(message);
+        }
+
+        return await resp.json();
+    }
+
     async function sendForwardEmail(emailId, formData) {
         const resp = await fetch(`/api/emails/${emailId}/forward`, {
             method: "POST",
@@ -496,6 +533,7 @@
         loadEmailsFromApi,
         sendNewEmail,
         loadForwardDraft,
+        loadReplyDraft,
         sendForwardEmail,
         getMySignature,
         updateMySignature,
