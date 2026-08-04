@@ -14,6 +14,25 @@
         };
     }
 
+    function prependSignatureToReplyDraft(draftBody, signatureText) {
+        const body = String(draftBody || "").trim();
+        const rawSignature = String(signatureText || "").trim();
+
+        if (!rawSignature) {
+            return body;
+        }
+
+        const formattedSignature = /^--(?:\r?\n|$)/.test(rawSignature)
+            ? rawSignature
+            : `--\n${rawSignature}`;
+
+        if (!body) {
+            return formattedSignature;
+        }
+
+        return `${formattedSignature}\n\n${body}`;
+    }
+
     function getDisplayDocuments(email) {
         const docs = Array.isArray(email?.documents) ? email.documents : [];
         const seenNames = new Set();
@@ -508,7 +527,7 @@
         const emailView = document.getElementById("emailView");
         if (!emailView) return;
 
-        const { appendSignatureIfMissing, ensureUserSignature } = getReplySignatureHelpers();
+        const { ensureUserSignature } = getReplySignatureHelpers();
         const savedReplyDraft = state.replyDrafts?.get(realEmailId) || "";
         const shouldShowReplyForm = state.openReplyForms?.has(realEmailId) === true;
 
@@ -947,8 +966,8 @@
 
                         await ensureUserSignature(state);
 
-                        nextValue = appendSignatureIfMissing(
-                            String(draft?.body || ""),
+                        nextValue = prependSignatureToReplyDraft(
+                            draft?.body,
                             state.userSignature || "",
                         );
                     }
@@ -1028,12 +1047,7 @@
 
         if (replySendBtn && replyBodyInput) {
             replySendBtn.addEventListener("click", async () => {
-                await ensureUserSignature(state);
-
-                const body = appendSignatureIfMissing(
-                    replyBodyInput.value,
-                    state.userSignature || "",
-                ).trim();
+                const body = String(replyBodyInput.value || "").trim();
 
                 replyBodyInput.value = body;
 

@@ -326,6 +326,29 @@
         return `${normalizedBody}\n\n${signatureBlock}`;
     }
 
+    function prependSignatureToDraft(draftBody, signature) {
+        const body = String(draftBody || "")
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .trim();
+
+        const rawSignature = normalizeSignature(signature);
+
+        if (!rawSignature) {
+            return body;
+        }
+
+        const signatureBlock = /^--(?:\r?\n|$)/.test(rawSignature)
+            ? rawSignature
+            : `--\n${rawSignature}`;
+
+        if (!body) {
+            return signatureBlock;
+        }
+
+        return `${signatureBlock}\n\n${body}`;
+    }
+
     async function ensureUserSignature(state) {
         if (state._signatureLoaded) {
             return state.userSignature || "";
@@ -421,7 +444,7 @@
         state.composeDraft.to = typeof draftData?.to === "string" ? draftData.to : "";
         state.composeDraft.subject =
             typeof draftData?.subject === "string" ? draftData.subject : "";
-        state.composeDraft.body = appendSignatureIfMissing(
+        state.composeDraft.body = prependSignatureToDraft(
             typeof draftData?.body === "string" ? draftData.body : "",
             state.userSignature,
         );
@@ -554,7 +577,10 @@
         const { mode, emailId, recipients, subject, body, selectedDocumentIds } =
             validateComposeDraft(state);
 
-        const finalBody = appendSignatureIfMissing(body, state.userSignature);
+        const finalBody =
+            mode === "forward"
+                ? body
+                : appendSignatureIfMissing(body, state.userSignature);
 
         const formData = new FormData();
         formData.append("to", recipients.join(","));
@@ -592,11 +618,13 @@
         if (state.composeDraft.isSending) return;
 
         try {
-            state.composeDraft.body = appendSignatureIfMissing(
-                state.composeDraft.body,
-                state.userSignature,
-            );
-            
+            if (state.composeDraft.mode !== "forward") {
+                state.composeDraft.body = appendSignatureIfMissing(
+                    state.composeDraft.body,
+                    state.userSignature,
+                );
+            }
+
             const draftMeta = validateComposeDraft(state);
             const formData = buildComposeFormData(state);
 

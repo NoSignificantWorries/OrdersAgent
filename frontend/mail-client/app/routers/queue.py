@@ -1283,9 +1283,6 @@ async def reply_to_email(
 
     if not body.strip():
         raise HTTPException(status_code=400, detail="body is empty")
-    
-    signature = await get_user_signature(user["id"])
-    body = append_signature_if_missing(body, signature)
 
     pool = await get_db_pool()
 
@@ -1512,9 +1509,6 @@ async def forward_email(
 
     if not body.strip():
         raise HTTPException(status_code=400, detail="body is empty")
-    
-    signature = await get_user_signature(user["id"])
-    body = append_signature_if_missing(body, signature)
 
     pool = await get_db_pool()
 
