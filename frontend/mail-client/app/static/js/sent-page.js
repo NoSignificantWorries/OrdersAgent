@@ -864,35 +864,10 @@ function renderSentPagination(state) {
                 }
 
                 if (targetSource === "sent") {
-                    const targetEmail = state.emails.find(
-                        (e) => Number(e.id) === targetSourceId,
-                    );
-
-                    if (targetEmail) {
-                        await selectSentEmail(targetEmail.id, state, { historyMode: "push" });
-                        return;
-                    }
-
-                    state.selectedEmailId = targetSourceId;
-                    state.selectedSourceType = "sent";
-                    syncSentState(state);
-
-                    try {
-                        const detailEmail = await loadSentEmailDetail(targetSourceId);
-                        const mergedEmail = mergeSentEmailDetailIntoState(detailEmail, state);
-
-                        if (!state.emails.some((e) => Number(e.id) === Number(mergedEmail.id))) {
-                            state.emails.unshift(mergedEmail);
-                            renderSentEmailList(state);
-                        }
-
-                        await selectSentEmail(targetSourceId, state, { historyMode: "push" });
-                        return;
-                    } catch (error) {
-                        console.error("Не удалось загрузить исходящее письмо из цепочки", error);
-                        alert("Не удалось открыть исходящее письмо из цепочки.");
-                        return;
-                    }
+                    await selectSentEmail(targetSourceId, state, {
+                        historyMode: "push",
+                    });
+                    return;
                 }
 
                 if (targetSource === "inbox") {
@@ -941,7 +916,7 @@ function renderSentPagination(state) {
         syncSentState(state, historyMode);
 
         let email = state.emails.find(
-            (e) => Number(e.email_id || e.id) === Number(id),
+            (e) => Number(e.id) === Number(id),
         );
 
         let fromList = true;
@@ -1056,26 +1031,26 @@ function renderSentPagination(state) {
         state.total = Number(data.total || 0);
         state.totalPages = Number(data.total_pages || 1);
 
-        if (
-            state.selectedSourceType === "sent" &&
-            state.selectedEmailId != null &&
-            !state.emails.some(
-                (email) => Number(email.email_id || email.id) === Number(state.selectedEmailId),
-            )
-        ) {
-            const snapshotId = state.selectedEmailSnapshot
-                ? Number(state.selectedEmailSnapshot.email_id || state.selectedEmailSnapshot.id)
-                : null;
+        // if (
+        //     state.selectedSourceType === "sent" &&
+        //     state.selectedEmailId != null &&
+        //     !state.emails.some(
+        //         (email) => Number(email.email_id || email.id) === Number(state.selectedEmailId),
+        //     )
+        // ) {
+        //     const snapshotId = state.selectedEmailSnapshot
+        //         ? Number(state.selectedEmailSnapshot.email_id || state.selectedEmailSnapshot.id)
+        //         : null;
 
-            if (snapshotId !== Number(state.selectedEmailId)) {
-                const emailView = document.getElementById("emailView");
-                if (emailView) {
-                    emailView.innerHTML =
-                        '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
-                }
-                state.selectedEmailId = null;
-            }
-        }
+        //     if (snapshotId !== Number(state.selectedEmailId)) {
+        //         const emailView = document.getElementById("emailView");
+        //         if (emailView) {
+        //             emailView.innerHTML =
+        //                 '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+        //         }
+        //         state.selectedEmailId = null;
+        //     }
+        // }
 
         syncSentState(state);
     }
