@@ -17,20 +17,17 @@
     function prependSignatureToReplyDraft(draftBody, signatureText) {
         const body = String(draftBody || "").trim();
         const rawSignature = String(signatureText || "").trim();
+        const replySpace = "\n\n";
 
         if (!rawSignature) {
-            return body;
+            return body ? `${replySpace}${body}` : "";
         }
 
         const formattedSignature = /^--(?:\r?\n|$)/.test(rawSignature)
             ? rawSignature
             : `--\n${rawSignature}`;
 
-        if (!body) {
-            return formattedSignature;
-        }
-
-        return `${formattedSignature}\n\n${body}`;
+        return `${replySpace}${formattedSignature}\n\n${body}`;
     }
 
     function getDisplayDocuments(email) {
@@ -983,6 +980,7 @@
                     replyFormBlock.hidden = false;
                     replyToggleBtn.hidden = true;
                     replyBodyInput.focus();
+                    replyBodyInput.setSelectionRange(0, 0);
                 } catch (error) {
                     console.error(error);
                     alert(error.message || "Не удалось открыть форму ответа");

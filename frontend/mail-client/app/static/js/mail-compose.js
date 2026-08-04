@@ -333,20 +333,19 @@
             .trim();
 
         const rawSignature = normalizeSignature(signature);
+        const replySpace = "\n\n";
 
         if (!rawSignature) {
-            return body;
+            return body ? `${replySpace}${body}` : "";
         }
 
         const signatureBlock = /^--(?:\r?\n|$)/.test(rawSignature)
             ? rawSignature
             : `--\n${rawSignature}`;
 
-        if (!body) {
-            return signatureBlock;
-        }
-
-        return `${signatureBlock}\n\n${body}`;
+        return body
+            ? `${replySpace}${signatureBlock}\n\n${body}`
+            : `${replySpace}${signatureBlock}`;
     }
 
     async function ensureUserSignature(state) {

@@ -651,7 +651,7 @@ func buildReplyBody(ctx *EmailReplyContext) string {
         sb.WriteString("\n")
     }
 
-    sb.WriteString("--------------------------\n")
+    sb.WriteString("---------- Ответ на письмо ----------\n")
 
     if quoted := quoteEmailBody(originalBody); strings.TrimSpace(quoted) != "" {
         sb.WriteString(quoted)
