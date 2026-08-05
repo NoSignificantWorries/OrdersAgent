@@ -133,10 +133,6 @@ async def list_queue_for_user(
         params: list[object] = []
         param_idx = 1
 
-        print("QUEUE USER =", user)
-        print("QUEUE USER ROLE =", user.get("role"))
-        print("QUEUE USER EMAIL =", user.get("email"))
-
         is_admin = user.get("role") == "admin"
         ui_statuses = [s.strip() for s in status.split(",") if s.strip()]
         statuses = _map_ui_statuses_to_task_statuses(ui_statuses)
@@ -162,10 +158,10 @@ async def list_queue_for_user(
         if normalized_search:
             where_clauses.append(
                 f"""(
-                    LOWER(COALESCE(e.email_subject, '')) LIKE ${param_idx}
-                    OR LOWER(COALESCE(e.email_from, '')) LIKE ${param_idx}
-                    OR LOWER(COALESCE(e.mailbox, '')) LIKE ${param_idx}
-                    OR LOWER(COALESCE(e.raw_email, '')) LIKE ${param_idx}
+                    e.email_subject ILIKE ${param_idx}
+                    OR e.email_from ILIKE ${param_idx}
+                    OR e.mailbox ILIKE ${param_idx}
+                    OR e.raw_email ILIKE ${param_idx}
                 )"""
             )
             params.append(f"%{normalized_search}%")
@@ -209,30 +205,22 @@ async def list_queue_for_user(
             """
 
         base_cte = f"""
-            WITH latest_task AS (
-                SELECT
-                    e.id AS email_id,
-                    t.id AS task_id,
-                    t.status,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY e.id
-                        ORDER BY
-                            {_task_status_order_sql("t")},
-                            t.created_at DESC
-                    ) AS rn
-                FROM emails e
-                LEFT JOIN tasks t
-                    ON t.email_id = e.id
-            ),
-            filtered AS (
+            WITH filtered AS (
                 SELECT
                     e.id,
                     COALESCE(e.email_date, e.created_at) AS sort_date,
                     COALESCE(NULLIF(e.message_id, ''), 'no_id_' || e.id::text) AS dedupe_key
                 FROM emails e
-                LEFT JOIN latest_task lt
-                    ON lt.email_id = e.id
-                   AND lt.rn = 1
+                LEFT JOIN LATERAL (
+                    SELECT
+                        tt.status
+                    FROM tasks tt
+                    WHERE tt.email_id = e.id
+                    ORDER BY
+                        {_task_status_order_sql("tt")},
+                        tt.created_at DESC
+                    LIMIT 1
+                ) lt ON TRUE
                 {where_sql}
             )
         """
@@ -265,7 +253,8 @@ async def list_queue_for_user(
                         {dedupe_pick_order_sql}
                 )
                 SELECT
-                    id
+                    id,
+                    COUNT(*) OVER() AS total
                 FROM deduped
                 ORDER BY
                     {page_order_sql}
@@ -280,7 +269,8 @@ async def list_queue_for_user(
 
             page_sql = base_cte + f"""
                 SELECT
-                    id
+                    id,
+                    COUNT(*) OVER() AS total
                 FROM filtered
                 ORDER BY
                     {page_order_sql}
@@ -288,10 +278,8 @@ async def list_queue_for_user(
                 OFFSET ${param_idx + 1}
             """
 
-        total_row = await conn.fetchrow(count_sql, *params)
-        total = int(total_row["total"] or 0)
-
         page_rows = await conn.fetch(page_sql, *params, per_page, offset)
+        total = int(page_rows[0]["total"] or 0) if page_rows else 0
         email_ids = [row["id"] for row in page_rows]
 
         if not email_ids:
@@ -315,7 +303,7 @@ async def list_queue_for_user(
                 e.references_header AS references,
                 e.email_from,
                 e.email_subject,
-                e.raw_email,
+                NULL::text AS raw_email,
                 e.email_date,
                 e.model_decision AS email_model_decision,
                 e.archived AS email_archived,
@@ -394,7 +382,6 @@ async def list_queue_for_user(
                 e.email_uid,
                 e.email_from,
                 e.email_subject,
-                e.raw_email,
                 e.email_date,
                 e.message_id,
                 e.in_reply_to,

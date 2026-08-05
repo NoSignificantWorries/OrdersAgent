@@ -130,13 +130,14 @@ async def list_sent_for_user(
         param_idx += 1
 
     normalized_search = (search or "").strip()
+
     if normalized_search:
         where_clauses.append(
             f"""(
-                COALESCE(se.email_subject, '') ILIKE ${param_idx}
-                OR COALESCE(se.to_header, '') ILIKE ${param_idx}
-                OR COALESCE(se.email_from, '') ILIKE ${param_idx}
-                OR COALESCE(se.raw_email, '') ILIKE ${param_idx}
+                se.email_subject ILIKE ${param_idx}
+                OR se.to_header ILIKE ${param_idx}
+                OR se.email_from ILIKE ${param_idx}
+                OR se.raw_email ILIKE ${param_idx}
             )"""
         )
         params.append(f"%{normalized_search}%")
@@ -148,15 +149,10 @@ async def list_sent_for_user(
 
     sort_sql = "ASC" if sort == "oldest" else "DESC"
 
-    count_sql = f"""
-        SELECT COUNT(*) AS total
-        FROM sent_emails se
-        {where_sql}
-    """
-
     page_ids_sql = f"""
         SELECT
-            se.id AS sent_email_id
+            se.id AS sent_email_id,
+            COUNT(*) OVER() AS total
         FROM sent_emails se
         {where_sql}
         ORDER BY
@@ -191,11 +187,10 @@ async def list_sent_for_user(
     """
 
     async with pool.acquire() as conn:
-        total_row = await conn.fetchrow(count_sql, *params)
-        total = int(total_row["total"] or 0)
-
         page_params = [*params, per_page, offset]
         page_rows = await conn.fetch(page_ids_sql, *page_params)
+
+        total = int(page_rows[0]["total"] or 0) if page_rows else 0
         sent_email_ids = [row["sent_email_id"] for row in page_rows]
 
         if not sent_email_ids:
