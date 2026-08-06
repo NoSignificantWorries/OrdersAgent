@@ -600,14 +600,6 @@ function normalizeSingleInboxDetailItem(item) {
     );
     chatStorage.set(normalized.id, normalized.chatItems);
 
-    console.log("[DEBUG] normalizeSingleInboxDetailItem:", {
-        id: normalized.id,
-        email_id: normalized.email_id,
-        hasContent: !!(normalized.content || normalized.rawemail),
-        hasDocuments: Array.isArray(normalized.documents) && normalized.documents.length > 0,
-        keys: Object.keys(normalized),
-    });
-
     return normalized;
 }
 
@@ -632,7 +624,7 @@ async function loadEmailsFromApi(options = {}) {
 
 // ========== ОТРИСОВКА СПИСКА ==========
 function getMailRenderListState() {
-    return {
+    const state = {
         get emails() {
             return emails;
         },
@@ -689,6 +681,11 @@ function getMailRenderListState() {
         },
         openReplyForms,
     };
+
+    // DEBUG: ссылка на состояние списка
+    window.__inboxState = state;
+
+    return state;
 }
 
 function showLoading() {
@@ -838,6 +835,8 @@ function closeOpenedEmail(options = {}) {
     return closeOpenedEmailFromModule(
         {
             state: getMailRenderListState(),
+            threadCache,
+            chatStorage,
         },
         options,
     );
@@ -1198,6 +1197,11 @@ function initSignatureSettings() {
 }
 
 function initMailPage(config) {
+    threadCache.clear();
+    chatStorage.clear();
+    selectedEmailSnapshot = null;
+    selectedEmailId = null;
+    
     initSignatureSettings();
 
     return initMailPageFromModule(config, {

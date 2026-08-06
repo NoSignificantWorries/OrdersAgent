@@ -467,15 +467,6 @@
             return;
         }
 
-        console.log("[DEBUG] refreshEmailsSilently currentEmail (forced snapshot):", {
-            id: currentEmail.id,
-            email_id: currentEmail.email_id,
-            hasContent: !!(currentEmail.content || currentEmail.rawemail),
-            hasDocuments:
-                Array.isArray(currentEmail.documents) &&
-                currentEmail.documents.length > 0,
-        });
-
         if (typeof highlightSelectedEmail === "function" && prevId != null) {
             highlightSelectedEmail(prevId);
         }

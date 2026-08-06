@@ -218,11 +218,15 @@
     function closeOpenedEmail(deps, options = {}) {
         const {
             state,
+            threadCache,
+            chatStorage,
         } = deps;
 
         const {
             historyMode = "replace",
         } = options;
+
+        const closedEmailId = state.selectedEmailId;
 
         state.selectedEmailId = null;
         state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
@@ -237,6 +241,18 @@
         if (emailView) {
             emailView.innerHTML =
                 '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+        }
+
+        if (closedEmailId != null) {
+            const normalizedId = Number(closedEmailId);
+
+            if (threadCache && typeof threadCache.delete === "function") {
+                threadCache.delete(normalizedId);
+            }
+
+            if (chatStorage && typeof chatStorage.delete === "function") {
+                chatStorage.delete(normalizedId);
+            }
         }
     }
 
