@@ -5,6 +5,10 @@
         formatTimeOnly,
     } = window.MailFormatters;
 
+    const sentThreadCache = new Map();
+    // DEBUG: проверка кэша тредов исходящих для консоли
+    window.__sentThreadCache = sentThreadCache;
+
     function readSentStateFromUrl() {
         const params = new URLSearchParams(window.location.search);
 
@@ -617,15 +621,23 @@ function renderSentPagination(state) {
         state.selectedEmailSnapshot = email;
 
         let threadMessages = [];
+        const cacheKey = realEmailId;
 
-        try {
-            threadMessages = await loadSentThread(realEmailId);
-        } catch (error) {
-            console.error("Не удалось загрузить цепочку исходящего письма", error);
-            threadMessages = [email];
+        if (sentThreadCache.has(cacheKey)) {
+            // Берём уже нормализованный тред из кэша
+            threadMessages = sentThreadCache.get(cacheKey);
+        } else {
+            try {
+                const rawThreadItems = await loadSentThread(realEmailId);
+                threadMessages = rawThreadItems.map(normalizeSentThreadItem);
+                sentThreadCache.set(cacheKey, threadMessages);
+            } catch (error) {
+                console.error("Не удалось загрузить цепочку исходящего письма", error);
+                const fallback = [email];
+                threadMessages = fallback.map(normalizeSentThreadItem);
+                sentThreadCache.set(cacheKey, threadMessages);
+            }
         }
-
-        threadMessages = threadMessages.map(normalizeSentThreadItem);
 
         const hasThread = threadMessages.length > 1;
 
@@ -1151,6 +1163,8 @@ function renderSentPagination(state) {
     }
 
     async function initSentPage() {
+        sentThreadCache.clear();
+
         const initialUrlState = readSentStateFromUrl();
 
         const state = {

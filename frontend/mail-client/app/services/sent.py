@@ -103,7 +103,7 @@ def _extract_body_text_from_raw_email(raw_email: str | None) -> str:
 async def list_sent_for_user(
     user: dict,
     page: int = 1,
-    per_page: int = 100,
+    per_page: int = 50,
     search: str = "",
     sort: str = "newest",
 ) -> dict:
@@ -114,8 +114,8 @@ async def list_sent_for_user(
 
     if per_page < 1:
         per_page = 1
-    if per_page > 100:
-        per_page = 100
+    if per_page > 50:
+        per_page = 50
 
     offset = (page - 1) * per_page
     is_admin = user.get("role") == "admin"
