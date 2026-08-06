@@ -83,6 +83,7 @@ const {
 } = window.MailCompose;
 
 const chatStorage = new Map();
+const threadCache = new Map();
 
 let currentStatusFilter = "all";
 let currentClassFilter = "all";
@@ -440,26 +441,108 @@ function recalculateUnreadCount() {
 
 // ========== НОРМАЛИЗАЦИЯ ДАННЫХ API ==========
 function normalizeApiItem(item, idx) {
+    const taskStatus = item.status || "";
+    const uiStatus = mapTaskStatusToUiStatus
+        ? mapTaskStatusToUiStatus(taskStatus)
+        : taskStatus;
+
+    const dateValue =
+        item.date ||
+        item.created_at ||
+        item.emaildate ||
+        item.createdat ||
+        new Date().toISOString();
+
+    const normalized = {
+        id: item.id ?? idx + 1,
+        email_id: item.email_id ?? item.emailid ?? null,
+        mailbox: item.mailbox || "",
+        uid: item.email_uid ?? item.emailuid ?? null,
+
+        sender: item.sender || item.emailfrom || "Неизвестный отправитель",
+        subject: item.subject || item.emailsubject || "(без темы)",
+        date: dateValue,
+
+        message_id: item.message_id || item.messageid || null,
+        in_reply_to: item.in_reply_to || item.inreplyto || null,
+        references: item.references || item.emailreferences || "",
+
+        archived: item.archived === true,
+        read: item.is_read === true,
+        comment_text: item.comment_text ?? null,
+        has_comment:
+            item.has_comment === true ||
+            Boolean(String(item.comment_text || "").trim()),
+
+        prob_1: null,
+        predicted_class:
+            item.predicted_class ??
+            item.predictedclass ??
+            null,
+        model_decision: item.class || item.modeldecision || "",
+
+        task: {
+            id: item.id ?? null,
+            document_id: null,
+            type: null,
+            status: item.status || null,
+            priority: 100,
+            input_data: {},
+            output_data: {},
+            assigned_to: null,
+            error_message: "",
+            attempts: 0,
+            max_attempts: 3,
+            created_at: null,
+            started_at: null,
+            completed_at: null,
+        },
+
+        task_status: taskStatus,
+        status: uiStatus,
+        documents: [],
+        document_names: [],
+    };
+
+    return normalized;
+}
+
+function normalizeSingleInboxDetailItem(item) {
     const output =
         item.outputdata && typeof item.outputdata === "object"
             ? item.outputdata
-            : {};
+            : item.output_data && typeof item.output_data === "object"
+                ? item.output_data
+                : {};
     const documents = Array.isArray(item.documents) ? item.documents : [];
 
-    const taskStatus = item.status || "";
-    const uiStatus = mapTaskStatusToUiStatus(taskStatus);
+    const taskStatus = item.status || item.task_status || "";
+    const uiStatus = mapTaskStatusToUiStatus
+        ? mapTaskStatusToUiStatus(taskStatus)
+        : taskStatus;
 
-    const emailContent = item.rawemail || item.emailbody || "";
+    const emailContent = item.rawemail || item.raw_email || item.emailbody || "";
+
     const normalized = {
-        id: item.id ?? idx + 1,
-        email_id: item.emailid ?? null,
+        id: item.taskid ?? item.id ?? item.emailid ?? item.email_id ?? 0,
+        email_id: item.emailid ?? item.email_id ?? null,
         mailbox: item.mailbox || "",
-        uid: item.emailuid ?? null,
-        sender: item.emailfrom || "Неизвестный отправитель",
-        subject: item.emailsubject || "(без темы)",
-        date: item.emaildate || item.createdat || new Date().toISOString(),
+        uid: item.emailuid ?? item.email_uid ?? null,
+
+        sender: item.emailfrom || item.email_from || "Неизвестный отправитель",
+        subject: item.emailsubject || item.email_subject || "(без темы)",
+        date:
+            item.emaildate ||
+            item.email_date ||
+            item.createdat ||
+            item.created_at ||
+            new Date().toISOString(),
         content: emailContent,
-        preview: emailContent.replace(/\s+/g, " ").trim().slice(0, 140),
+        preview: emailContent
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 140),
+
         message_id: item.messageid || item.message_id || null,
         in_reply_to: item.inreplyto || item.in_reply_to || null,
         references: Array.isArray(item.references)
@@ -469,33 +552,41 @@ function normalizeApiItem(item, idx) {
         archived: item.archived === true,
         read: item.is_read === true,
         comment_text: item.comment_text ?? null,
-        has_comment: item.has_comment === true || Boolean(String(item.comment_text || "").trim()),
-
+        has_comment:
+            item.has_comment === true ||
+            Boolean(String(item.comment_text || "").trim()),
 
         prob_1: output.prob_1 ?? item.prob1 ?? null,
-        predicted_class: output.predicted_class ?? item.predictedclass ?? null,
-        model_decision: output.model_decision ?? item.modeldecision ?? "",
+        predicted_class:
+            output.predicted_class ??
+            item.predictedclass ??
+            item.predicted_class ??
+            null,
+        model_decision:
+            output.model_decision ??
+            item.modeldecision ??
+            item.model_decision ??
+            "",
 
         task: {
-            id: item.id ?? null,
-            document_id: item.documentid ?? null,
+            id: item.taskid ?? item.id ?? null,
+            document_id: item.documentid ?? item.document_id ?? null,
             type: item.type || null,
-            status: item.status || null,
-            priority: item.priority ?? 100,
-            input_data: item.inputdata || {},
+            status: taskStatus || null,
+            priority: item.task_priority ?? item.priority ?? 100,
+            input_data: item.inputdata || item.input_data || {},
             output_data: output,
-            assigned_to: item.assignedto ?? null,
-            error_message: item.errormessage || "",
+            assigned_to: item.assignedto ?? item.assigned_to ?? null,
+            error_message: item.errormessage || item.error_message || "",
             attempts: item.attempts ?? 0,
             max_attempts: item.maxattempts ?? 3,
-            created_at: item.taskcreatedat || null,
-            started_at: item.taskstartedat || null,
-            completed_at: item.taskcompletedat || null,
+            created_at: item.taskcreatedat || item.task_created_at || null,
+            started_at: item.taskstartedat || item.task_started_at || null,
+            completed_at: item.taskcompletedat || item.task_completed_at || null,
         },
 
         task_status: taskStatus,
         status: uiStatus,
-
         documents,
         document_names: documents
             .map((doc) => doc?.document_name)
@@ -509,11 +600,15 @@ function normalizeApiItem(item, idx) {
     );
     chatStorage.set(normalized.id, normalized.chatItems);
 
-    return normalized;
-}
+    console.log("[DEBUG] normalizeSingleInboxDetailItem:", {
+        id: normalized.id,
+        email_id: normalized.email_id,
+        hasContent: !!(normalized.content || normalized.rawemail),
+        hasDocuments: Array.isArray(normalized.documents) && normalized.documents.length > 0,
+        keys: Object.keys(normalized),
+    });
 
-function normalizeSingleInboxDetailItem(item) {
-    return normalizeApiItem(item, 0);
+    return normalized;
 }
 
 // ========== ЗАГРУЗКА ПИСЕМ ИЗ API ==========
@@ -781,6 +876,7 @@ async function renderEmailCard(email) {
         getThreadMessages,
         isThreadExpanded,
         toggleThreadExpanded,
+        threadCache,
     });
 }
 

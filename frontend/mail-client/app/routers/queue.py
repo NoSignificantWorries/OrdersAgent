@@ -434,7 +434,7 @@ async def get_queue(
     status: str = "",
     archived: bool | None = None,
     page: int = Query(default=1, ge=1),
-    per_page: int = Query(default=100, ge=1, le=100),
+    per_page: int = Query(default=50, ge=1, le=50),
     search: str = "",
     class_filter: str = Query(default="", alias="class"),
     sort: str = Query(default="newest"),

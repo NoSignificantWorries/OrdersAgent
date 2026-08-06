@@ -112,7 +112,7 @@ async def list_queue_for_user(
     status: str = "",
     archived: bool | None = None,
     page: int = 1,
-    per_page: int = 100,
+    per_page: int = 50,
     search: str = "",
     class_filter: str = "",
     sort: str = "newest",
@@ -123,8 +123,8 @@ async def list_queue_for_user(
         page = 1
     if per_page < 1:
         per_page = 1
-    if per_page > 100:
-        per_page = 100
+    if per_page > 50:
+        per_page = 50
 
     offset = (page - 1) * per_page
 
@@ -298,70 +298,31 @@ async def list_queue_for_user(
                 e.id AS email_id,
                 e.mailbox,
                 e.email_uid,
-                e.message_id,
-                e.in_reply_to,
-                e.references_header AS references,
                 e.email_from,
                 e.email_subject,
-                e.raw_email,
                 e.email_date,
+                e.created_at AS email_created_at,
                 e.model_decision AS email_model_decision,
                 e.archived AS email_archived,
                 e.is_read AS email_is_read,
                 e.comment_text AS email_comment_text,
-                e.created_at AS email_created_at,
                 e.is_primary_recipient,
 
                 t.id AS task_id,
-                t.document_id AS task_document_id,
-                NULL::text AS task_type,
                 t.status AS task_status,
-                100 AS task_priority,
-                NULL::jsonb AS input_data,
                 t.output_data,
-                t.assigned_to,
-                t.error_message,
-                t.attempts AS attempts,
-                3 AS max_attempts,
-                t.created_at AS task_created_at,
-                NULL::timestamptz AS task_started_at,
-                t.completed_at AS task_completed_at,
 
-                COALESCE(
-                    jsonb_agg(
-                        DISTINCT jsonb_build_object(
-                            'id', d.id,
-                            'document_name', d.filename,
-                            'object_bucket', NULL,
-                            'object_key', d.minio_object_key,
-                            'has_document_data',
-                                CASE WHEN d.size_bytes IS NOT NULL AND d.size_bytes > 0 THEN true ELSE false END,
-                            'result_document_name', NULL,
-                            'has_result_document_data', false,
-                            'created_at', d.created_at
-                        )
-                    ) FILTER (WHERE d.id IS NOT NULL),
-                    '[]'::jsonb
-                ) AS documents
+                COUNT(d.id) AS documents_count
 
             FROM emails e
 
             LEFT JOIN LATERAL (
                 SELECT
                     tt.id,
-                    tt.document_id,
-                    NULL::text AS type,
                     tt.status,
-                    100 AS priority,
-                    NULL::jsonb AS input_data,
                     tt.output_data,
                     tt.assigned_to,
-                    tt.error_message,
-                    COALESCE(tt.retry_count, 0) AS attempts,
-                    3 AS max_attempts,
-                    tt.created_at,
-                    NULL::timestamptz AS started_at,
-                    tt.completed_at
+                    tt.created_at
                 FROM tasks tt
                 WHERE tt.email_id = e.id
                 ORDER BY
@@ -377,29 +338,20 @@ async def list_queue_for_user(
 
             GROUP BY
                 e.id,
-                t.document_id,
                 e.mailbox,
                 e.email_uid,
                 e.email_from,
                 e.email_subject,
-                e.raw_email,
                 e.email_date,
-                e.message_id,
-                e.in_reply_to,
-                e.references_header,
+                e.created_at,
+                e.model_decision,
                 e.archived,
                 e.is_read,
                 e.comment_text,
-                e.created_at,
                 e.is_primary_recipient,
                 t.id,
                 t.status,
-                t.output_data,
-                t.assigned_to,
-                t.error_message,
-                t.attempts,
-                t.created_at,
-                t.completed_at
+                t.output_data
         """
 
         detail_rows = await conn.fetch(details_sql, email_ids)
@@ -422,90 +374,34 @@ async def list_queue_for_user(
                 except Exception:
                     task_output = {}
 
-            if not isinstance(task_output, (dict, list)):
+            if not isinstance(task_output, dict):
                 task_output = {}
 
-            predicted_class = None
-            prob_1 = None
+            predicted_class = task_output.get("predicted_class")
 
-            if isinstance(task_output, dict):
-                predicted_class = task_output.get("predicted_class")
-                prob_1 = task_output.get("prob_1")
-
-            model_decision = row["email_model_decision"]
-            documents = _normalize_documents(row["documents"])
+            base_dt = row["email_date"] or row["email_created_at"]
+            if base_dt is not None:
+                date_iso = base_dt.isoformat()
+            else:
+                date_iso = None
 
             item: dict = {
-                "emailid": row["email_id"],
-                "messageid": row["message_id"],
-                "inreplyto": row["in_reply_to"],
-                "references": row["references"],
+                "id": row["task_id"] or row["email_id"],
+                "email_id": row["email_id"],
                 "mailbox": row["mailbox"],
-                "emailuid": row["email_uid"],
-                "emailfrom": row["email_from"],
-                "emailsubject": row["email_subject"],
-                "rawemail": row["raw_email"],
-                "emaildate": row["email_date"].isoformat()
-                if row["email_date"]
-                else None,
-                "createdat": row["email_created_at"].isoformat()
+                "email_uid": row["email_uid"],
+                "subject": row["email_subject"],
+                "sender": row["email_from"],
+                "status": row["task_status"],
+                "class": (row["email_model_decision"] or "").strip() or None,
+                "is_read": bool(row["email_is_read"]),
+                "has_comment": bool((row["email_comment_text"] or "").strip()),
+                "date": date_iso,
+                "created_at": row["email_created_at"].isoformat()
                 if row["email_created_at"]
                 else None,
-                "archived": bool(row["email_archived"]),
-                "is_read": bool(row["email_is_read"]),
-                "comment_text": row["email_comment_text"],
-                "has_comment": bool((row["email_comment_text"] or "").strip()),
-                "prob1": prob_1,
-                "predictedclass": predicted_class,
-                "modeldecision": model_decision,
-                "documents": documents,
-                "is_primary_recipient": row["is_primary_recipient"],
+                "predicted_class": predicted_class,
             }
-
-            if row["task_id"]:
-                item.update(
-                    {
-                        "id": row["task_id"],
-                        "documentid": row["task_document_id"],
-                        "type": row["task_type"],
-                        "status": row["task_status"],
-                        "priority": row["task_priority"],
-                        "inputdata": row["input_data"] or {},
-                        "outputdata": task_output,
-                        "assignedto": row["assigned_to"],
-                        "errormessage": row["error_message"],
-                        "attempts": row["attempts"],
-                        "maxattempts": row["max_attempts"],
-                        "taskcreatedat": row["task_created_at"].isoformat()
-                        if row["task_created_at"]
-                        else None,
-                        "taskstartedat": row["task_started_at"].isoformat()
-                        if row["task_started_at"]
-                        else None,
-                        "taskcompletedat": row["task_completed_at"].isoformat()
-                        if row["task_completed_at"]
-                        else None,
-                    }
-                )
-            else:
-                item.update(
-                    {
-                        "id": row["email_id"],
-                        "documentid": None,
-                        "type": None,
-                        "status": None,
-                        "priority": 100,
-                        "inputdata": {},
-                        "outputdata": {},
-                        "assignedto": None,
-                        "errormessage": None,
-                        "attempts": 0,
-                        "maxattempts": 3,
-                        "taskcreatedat": None,
-                        "taskstartedat": None,
-                        "taskcompletedat": None,
-                    }
-                )
 
             result.append(item)
 

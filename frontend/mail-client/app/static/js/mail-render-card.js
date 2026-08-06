@@ -313,6 +313,7 @@
             getThreadMessages,
             isThreadExpanded,
             toggleThreadExpanded,
+            threadCache,
         } = deps;
 
         const commentApi = window.MailComments || {};
@@ -341,21 +342,34 @@
         const realEmailId = Number(email.email_id || email.emailid || email.id);
 
         let threadMessages = [];
+        const cacheKey = realEmailId;
 
-        try {
-            threadMessages = await loadEmailThread(realEmailId);
-        } catch (error) {
-            console.error("Не удалось загрузить цепочку через API, используем локальный fallback", error);
+        if (threadCache && threadCache.has(cacheKey)) {
+            threadMessages = threadCache.get(cacheKey);
+        } else {
+            try {
+                const rawThreadItems = await loadEmailThread(realEmailId);
+                threadMessages = rawThreadItems.map(normalizeThreadItem);
+                if (threadCache) {
+                    threadCache.set(cacheKey, threadMessages);
+                }
+            } catch (error) {
+                console.error("Не удалось загрузить цепочку через API, используем локальный fallback", error);
 
-            const threadMessagesRaw =
-                typeof getThreadMessages === "function" ? getThreadMessages(email) : [email];
+                const threadMessagesRaw =
+                    typeof getThreadMessages === "function" ? getThreadMessages(email) : [email];
 
-            threadMessages = Array.isArray(threadMessagesRaw) && threadMessagesRaw.length
-                ? threadMessagesRaw
-                : [email];
+                const fallback = Array.isArray(threadMessagesRaw) && threadMessagesRaw.length
+                    ? threadMessagesRaw
+                    : [email];
+
+                threadMessages = fallback.map(normalizeThreadItem);
+
+                if (threadCache) {
+                    threadCache.set(cacheKey, threadMessages);
+                }
+            }
         }
-
-        threadMessages = threadMessages.map(normalizeThreadItem);
 
         const hasThread = threadMessages.length > 1;
         const threadExpanded =

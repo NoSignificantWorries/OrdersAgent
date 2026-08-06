@@ -153,7 +153,7 @@
             showLoadingState = true,
             normalizeApiItem = (item) => item,
             page = 1,
-            perPage = 100,
+            perPage = 50,
             extraParams = {},
         } = options || {};
 

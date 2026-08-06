@@ -378,23 +378,26 @@
 
         const normalizedId = Number(emailId);
 
-        // Проверяем маппинг
         const mappedId = normalizeEmailId(normalizedId);
         const finalId = mappedId !== normalizedId ? mappedId : normalizedId;
 
-        let email = state.emails.find(
-            (e) =>
-                Number(e.email_id || e.emailid || e.id) === finalId
-        );
-        if (email) {
-            return { email, fromList: true };
-        }
-
         const rawItem = await loadInboxEmailDetail(finalId);
-        email =
+        let email =
             typeof normalizeInboxDetailItem === "function"
                 ? normalizeInboxDetailItem(rawItem)
                 : rawItem;
+
+        const listEmail = state.emails.find(
+            (e) => Number(e.email_id || e.emailid || e.id) === finalId
+        );
+        if (listEmail) {
+            email.read = listEmail.read;
+            email.has_comment = listEmail.has_comment;
+            email.mailbox = email.mailbox || listEmail.mailbox;
+            email.subject = email.subject || listEmail.subject;
+            email.sender = email.sender || listEmail.sender;
+            email.date = email.date || listEmail.date;
+        }
 
         return { email, fromList: false };
     }

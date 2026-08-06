@@ -10,7 +10,7 @@
 
         return {
             page,
-            perPage: 100,
+            perPage: 50,
             search,
             sortNewestFirst: sort !== "oldest",
             status: pageType === "sent" ? "all" : (params.get("status") || "all"),
@@ -26,7 +26,7 @@
 
         return {
             page: Math.max(1, Number(source.currentPage ?? source.page) || fallback.page || 1),
-            perPage: Math.max(1, Number(source.perPage) || fallback.perPage || 100),
+            perPage: Math.max(1, Number(source.perPage) || fallback.perPage || 50),
             search: String(source.currentSearchTerm ?? source.search ?? fallback.search ?? ""),
             sortNewestFirst:
                 source.sortNewestFirst != null
@@ -370,7 +370,7 @@
 
         const result = await loadEmailsFromApi({
             showLoadingState: false,
-            normalizeApiItem: deps.normalizeApiItem,
+            // normalizeApiItem брать не нужно — он уже прокинут через deps.loadEmailsFromApi
             page: state.currentPage,
             perPage: state.perPage,
             extraParams: {
@@ -412,13 +412,8 @@
 
         const inChat = isChatTabActive();
 
-        const currentEmailFromList = prevId != null
-            ? state.emails.find(
-                (e) => Number(e.email_id || e.emailid || e.id) === Number(prevId)
-            )
-            : null;
-
-        const snapshotEmail =
+        // Базой для карточки берём snapshot, если он соответствует выбранному письму
+        const snapshot =
             prevId != null &&
             state.selectedEmailSnapshot &&
             Number(
@@ -429,59 +424,66 @@
                 ? state.selectedEmailSnapshot
                 : null;
 
-        const currentEmail = currentEmailFromList || snapshotEmail;
+        // Запись из списка — только для подмердживания "лёгких" полей
+        const currentEmailFromList = prevId != null
+            ? state.emails.find(
+                (e) => Number(e.email_id || e.emailid || e.id) === Number(prevId)
+            )
+            : null;
 
-        if (currentEmailFromList) {
-            state.selectedEmailSnapshot = null;
+        let currentEmail = snapshot;
+
+        // Если есть и snapshot, и элемент из списка — подмердживаем свежие флаги
+        if (currentEmail && currentEmailFromList) {
+            currentEmail = {
+                ...currentEmail,
+                mailbox: currentEmail.mailbox || currentEmailFromList.mailbox,
+                subject: currentEmail.subject || currentEmailFromList.subject,
+                sender: currentEmail.sender || currentEmailFromList.sender,
+                date: currentEmail.date || currentEmailFromList.date,
+                read: currentEmailFromList.read,
+                has_comment: currentEmailFromList.has_comment,
+                status: currentEmailFromList.status,
+                task_status:
+                    currentEmailFromList.task_status || currentEmail.task_status,
+                model_decision:
+                    currentEmailFromList.model_decision || currentEmail.model_decision,
+                predicted_class:
+                    currentEmailFromList.predicted_class ?? currentEmail.predicted_class,
+                archived:
+                    typeof currentEmailFromList.archived === "boolean"
+                        ? currentEmailFromList.archived
+                        : currentEmail.archived,
+            };
         }
 
-        if (currentEmail) {
-            if (currentEmailFromList) {
-                highlightSelectedEmail(prevId);
-            } else {
-                document.querySelectorAll(".email-item").forEach((item) => {
-                    item.classList.remove("selected");
-                });
+        // Если snapshot нет — не трогаем карточку
+        if (!currentEmail) {
+            const submitContainer = document.querySelector(".chat-submit");
+            if (submitContainer) {
+                submitContainer.style.display =
+                    state.emails.length === 0 ? "none" : submitContainer.style.display;
             }
-
-            if (inChat) {
-                renderChatForEmail(currentEmail);
-            } else {
-                await renderEmailCard(currentEmail);
-            }
-        } else if (inChat) {
-            renderChatForEmail(null);
-        } else {
-            state.selectedEmailId = null;
-            state.selectedEmailSnapshot = null;
-            state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
-
-            const emailView = document.getElementById("emailView");
-            if (emailView) {
-                emailView.innerHTML =
-                    '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
-            }
+            return;
         }
 
-        if (currentEmail) {
+        console.log("[DEBUG] refreshEmailsSilently currentEmail (forced snapshot):", {
+            id: currentEmail.id,
+            email_id: currentEmail.email_id,
+            hasContent: !!(currentEmail.content || currentEmail.rawemail),
+            hasDocuments:
+                Array.isArray(currentEmail.documents) &&
+                currentEmail.documents.length > 0,
+        });
+
+        if (typeof highlightSelectedEmail === "function" && prevId != null) {
             highlightSelectedEmail(prevId);
+        }
 
-            if (inChat) {
-                renderChatForEmail(currentEmail);
-            } else {
-                await renderEmailCard(currentEmail);
-            }
-        } else if (inChat) {
-            renderChatForEmail(null);
+        if (inChat) {
+            renderChatForEmail(currentEmail);
         } else {
-            state.selectedEmailId = null;
-            state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
-
-            const emailView = document.getElementById("emailView");
-            if (emailView) {
-                emailView.innerHTML =
-                    '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
-            }
+            await renderEmailCard(currentEmail);
         }
 
         const submitContainer = document.querySelector(".chat-submit");
@@ -566,7 +568,7 @@
             allowCloseTask: config.allowCloseTask ?? true,
             allowDecisionEdit: config.allowDecisionEdit ?? true,
             allowChat: config.allowChat ?? true,
-            refreshIntervalMs: config.refreshIntervalMs ?? 5000,
+            refreshIntervalMs: config.refreshIntervalMs ?? 10000,
         };
 
         const restoreFromHistory = async (historyState = null) => {
