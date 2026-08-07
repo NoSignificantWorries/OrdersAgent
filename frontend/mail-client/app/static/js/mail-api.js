@@ -95,9 +95,15 @@
                 return;
             }
 
+            const emailId = Number(email.email_id || email.emailid || email.id);
+
+            if (!Number.isFinite(emailId) || emailId <= 0) {
+                throw new Error("Не удалось определить ID письма");
+            }
+
             await downloadBlob(
-                `/api/emails/${email.id}/attachments/download-all`,
-                `email-${email.id}-attachments.zip`,
+                `/api/emails/${emailId}/attachments/download-all`,
+                `email-${emailId}-attachments.zip`,
             );
         } catch (e) {
             console.error(e);
