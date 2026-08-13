@@ -994,6 +994,12 @@ function getMailChatDeps() {
             set selectedEmailId(value) {
                 selectedEmailId = value;
             },
+            get selectedEmailSnapshot() {
+                return selectedEmailSnapshot;
+            },
+            set selectedEmailSnapshot(value) {
+                selectedEmailSnapshot = value;
+            },
             get selectedSourceType() {
                 return selectedSourceType;
             },

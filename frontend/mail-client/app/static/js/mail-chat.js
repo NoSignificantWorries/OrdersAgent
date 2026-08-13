@@ -302,7 +302,26 @@
             renderChatForEmail,
         } = deps;
 
-        const email = state.emails.find((e) => e.id === state.selectedEmailId);
+        const selectedEmailId = Number(state.selectedEmailId);
+
+        const emailFromList = state.emails.find(
+            (item) => Number(item.id) === selectedEmailId,
+        );
+
+        const selectedSnapshot =
+            state.selectedEmailSnapshot &&
+            Number(
+                state.selectedEmailSnapshot.email_id ||
+                state.selectedEmailSnapshot.emailid ||
+                state.selectedEmailSnapshot.id,
+            ) === selectedEmailId
+                ? state.selectedEmailSnapshot
+                : null;
+
+        const email =
+            selectedSnapshot && Array.isArray(selectedSnapshot.chatItems)
+                ? selectedSnapshot
+                : emailFromList;
 
         if (!email) {
             alert("Письмо не выбрано");
@@ -322,7 +341,15 @@
             return;
         }
 
-        if (!email.chatItems || email.chatItems.length === 0) {
+        console.log("Материалы перед отправкой:", {
+            selectedEmailId,
+            emailFromList,
+            selectedSnapshot,
+            email,
+            chatItems: email?.chatItems,
+        });
+
+        if (!Array.isArray(email.chatItems) || email.chatItems.length === 0) {
             alert("Нет данных для отправки");
             return;
         }
