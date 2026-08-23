@@ -1,4 +1,16 @@
 (function () {
+    // 1. МАППИНГ ДОЛЖЕН БЫТЬ В САМОМ НАЧАЛЕ
+    const ID_MAPPING = {
+        3590: 3589, // старый ID -> правильный ID
+    };
+
+    // Функция для нормализации ID
+    function normalizeEmailId(id) {
+        const numericId = parseInt(id, 10);
+        if (isNaN(numericId)) return id;
+        return ID_MAPPING[numericId] || numericId;
+    }
+
     function showLoading() {
         const emailView = document.getElementById("emailView");
         if (emailView) {
@@ -18,6 +30,89 @@
         }
     }
 
+    function buildInboxHistoryState(state) {
+        const pageType = window.MAILPAGECONFIG?.pageType || "inbox";
+
+        return {
+            currentPage: Math.max(1, Number(state.currentPage) || 1),
+            currentSearchTerm: String(state.currentSearchTerm || ""),
+            sortNewestFirst: state.sortNewestFirst !== false,
+            currentStatusFilter:
+                pageType !== "sent" ? String(state.currentStatusFilter || "all") : "all",
+            currentClassFilter:
+                pageType !== "sent" ? String(state.currentClassFilter || "all") : "all",
+            selectedEmailId:
+                state.selectedEmailId != null ? Number(state.selectedEmailId) : null,
+            selectedSourceType: String(state.selectedSourceType || pageType),
+        };
+    }
+
+    function syncInboxSelectionState(state, mode = "replace") {
+        const pageType = window.MAILPAGECONFIG?.pageType || "inbox";
+        const params = new URLSearchParams(window.location.search);
+
+        if (Number(state.currentPage) > 1) {
+            params.set("page", String(state.currentPage));
+        } else {
+            params.delete("page");
+        }
+
+        if (String(state.currentSearchTerm || "").trim()) {
+            params.set("search", String(state.currentSearchTerm).trim());
+        } else {
+            params.delete("search");
+        }
+
+        if (state.sortNewestFirst === false) {
+            params.set("sort", "oldest");
+        } else {
+            params.delete("sort");
+        }
+
+        if (pageType !== "sent") {
+            if (state.currentStatusFilter && state.currentStatusFilter !== "all") {
+                params.set("status", state.currentStatusFilter);
+            } else {
+                params.delete("status");
+            }
+
+            if (state.currentClassFilter && state.currentClassFilter !== "all") {
+                params.set("class", state.currentClassFilter);
+            } else {
+                params.delete("class");
+            }
+        }
+
+        // Нормализуем ID перед сохранением в URL
+        let selectedId = state.selectedEmailId;
+        if (selectedId != null && Number(selectedId) > 0) {
+            const normalizedId = normalizeEmailId(selectedId);
+            if (normalizedId !== selectedId) {
+                state.selectedEmailId = normalizedId;
+                selectedId = normalizedId;
+            }
+            params.set("selected_email_id", String(selectedId));
+            params.set("selected_source", String(state.selectedSourceType || pageType));
+        } else {
+            params.delete("selected_email_id");
+            params.delete("selected_source");
+        }
+
+        const query = params.toString();
+        const nextUrl = query
+            ? `${window.location.pathname}?${query}`
+            : window.location.pathname;
+
+        const historyState = buildInboxHistoryState(state);
+
+        if (mode === "push") {
+            window.history.pushState(historyState, "", nextUrl);
+            return;
+        }
+
+        window.history.replaceState(historyState, "", nextUrl);
+    }
+
     function renderEmailList(deps) {
         const {
             state,
@@ -28,52 +123,7 @@
             selectEmail,
         } = deps;
 
-        let filtered = [...state.emails];
-        const pageType = window.MAILPAGECONFIG?.pageType || "inbox";
-
-        if (pageType === "archived") {
-            filtered = filtered.filter((email) => email.archived === true);
-        } else {
-            filtered = filtered.filter((email) => email.archived !== true);
-        }
-
-        if (state.currentSearchTerm.trim() !== "") {
-            const term = state.currentSearchTerm.toLowerCase();
-            filtered = filtered.filter((email) =>
-                email.subject.toLowerCase().includes(term) ||
-                email.sender.toLowerCase().includes(term) ||
-                email.mailbox.toLowerCase().includes(term) ||
-                (email.content && email.content.toLowerCase().includes(term))
-            );
-        }
-
-        if (state.currentStatusFilter !== "all") {
-            filtered = filtered.filter((e) => {
-                if (state.currentStatusFilter === "manual_review") {
-                    return e.status === "materials_review" || e.status === "ml_review";
-                }
-                return e.status === state.currentStatusFilter;
-            });
-        }
-
-        if (state.currentClassFilter !== "all") {
-            filtered = filtered.filter((e) => {
-                const decision = String(e.model_decision ?? "").trim().toLowerCase();
-                const isUndefinedClass = decision === "" || decision === "review";
-
-                if (state.currentClassFilter === "undefined_only") {
-                    return isUndefinedClass;
-                }
-
-                return decision === state.currentClassFilter && !isUndefinedClass;
-            });
-        }
-
-        filtered.sort((a, b) => {
-            const dateA = new Date(a.date);
-            const dateB = new Date(b.date);
-            return state.sortNewestFirst ? dateB - dateA : dateA - dateB;
-        });
+        const filtered = [...state.emails];
 
         const container = document.getElementById("emailsContainer");
         if (!container) return;
@@ -86,19 +136,37 @@
 
         container.innerHTML = filtered
             .map((email) => {
-                const mailParityId = Number(email.email_id || email.emailid || email.id);
+                const primaryEmailId = Number(email.email_id || email.emailid || email.id);
                 const parityClass =
-                    Number.isFinite(mailParityId) && mailParityId % 2 === 0
+                    Number.isFinite(primaryEmailId) && primaryEmailId % 2 === 0
                         ? "email-item--even"
                         : "email-item--odd";
+
+                // Нормализуем реальный ID письма для отображения и клика
+                const displayId = normalizeEmailId(primaryEmailId);
 
                 return `
                     <div
                         class="email-item ${email.read ? "is-read" : "is-unread"} ${parityClass}"
-                        data-id="${email.id}"
-                        data-email-id="${mailParityId}"
+                        data-id="${displayId}"
+                        data-email-id="${primaryEmailId}"
                     >
-                        <div class="subject">${escapeHtml(email.subject)}</div>
+                        <div class="email-item-subject-row">
+                            <div class="subject">${escapeHtml(email.subject)}</div>
+                            ${email.has_comment
+                                ? `
+                                    <span class="email-item-comment-indicator" aria-hidden="true">
+                                        <img
+                                            src="/static/images/comment.svg"
+                                            alt=""
+                                            class="email-item-comment-indicator-icon"
+                                        >
+                                    </span>
+                                `
+                                : ""
+                            }
+                        </div>
+
                         <div class="email-item-header">
                             <div class="sender">От: ${escapeHtml(email.sender)}</div>
                             <div class="status-badge status-${escapeHtml(email.status)}">
@@ -116,10 +184,16 @@
             .join("");
 
         document.querySelectorAll(".email-item").forEach((el) => {
-            el.addEventListener("click", () => selectEmail(el.dataset.id));
+            el.addEventListener("click", async () => {
+                await selectEmail(el.dataset.id, { historyMode: "push" });
+            });
         });
 
         if (state.selectedEmailId != null) {
+            const normalizedId = normalizeEmailId(state.selectedEmailId);
+            if (normalizedId !== state.selectedEmailId) {
+                state.selectedEmailId = normalizedId;
+            }
             highlightSelectedEmail(state.selectedEmailId);
         }
     }
@@ -141,10 +215,23 @@
         return response.json();
     }
 
-    function closeOpenedEmail(deps) {
-        const { state } = deps;
+    function closeOpenedEmail(deps, options = {}) {
+        const {
+            state,
+            threadCache,
+            chatStorage,
+        } = deps;
+
+        const {
+            historyMode = "replace",
+        } = options;
+
+        const closedEmailId = state.selectedEmailId;
 
         state.selectedEmailId = null;
+        state.selectedSourceType = window.MAILPAGECONFIG?.pageType || "inbox";
+        state.selectedEmailSnapshot = null;
+        syncInboxSelectionState(state, historyMode);
 
         document.querySelectorAll(".email-item").forEach((item) => {
             item.classList.remove("selected");
@@ -154,6 +241,18 @@
         if (emailView) {
             emailView.innerHTML =
                 '<div class="email-placeholder">👈 Выберите письмо из списка</div>';
+        }
+
+        if (closedEmailId != null) {
+            const normalizedId = Number(closedEmailId);
+
+            if (threadCache && typeof threadCache.delete === "function") {
+                threadCache.delete(normalizedId);
+            }
+
+            if (chatStorage && typeof chatStorage.delete === "function") {
+                chatStorage.delete(normalizedId);
+            }
         }
     }
 
@@ -169,7 +268,7 @@
             return;
         }
 
-        const email = state.emails.find((e) => e.id === state.selectedEmailId);
+        const email = state.emails.find((e) => Number(e.email_id || e.emailid || e.id) === Number(state.selectedEmailId),);
         if (!email) {
             closeOpenedEmail(deps);
             return;
@@ -180,7 +279,7 @@
             return;
         }
 
-        const realEmailId = email.email_id || email.id;
+        const realEmailId = Number(email.email_id || email.emailid || email.id);
 
         email.read = false;
         state.unreadCount += 1;
@@ -227,7 +326,99 @@
         countSpan.textContent = formatUnreadCount(state.unreadCount);
     }
 
-    function selectEmail(id, deps) {
+    async function loadInboxEmailDetail(emailId) {
+        const response = await fetch(`/api/emails/${emailId}/detail`, {
+            credentials: "same-origin",
+        });
+
+        if (response.status === 404) {
+            // Если письмо не найдено, пробуем найти альтернативный ID
+            const alternativeId = Object.keys(ID_MAPPING).find(key => ID_MAPPING[key] === emailId);
+            if (alternativeId) {
+                console.warn(`Письмо ${emailId} не найдено, пробуем ${alternativeId}`);
+                return loadInboxEmailDetail(alternativeId);
+            }
+            
+            // Очищаем состояние
+            const state = window.__inboxState || {};
+            state.selectedEmailId = null;
+            
+            // Обновляем URL
+            const params = new URLSearchParams(window.location.search);
+            params.delete('selected_email_id');
+            params.delete('selected_source');
+            const newUrl = params.toString() 
+                ? `${window.location.pathname}?${params}` 
+                : window.location.pathname;
+            window.history.replaceState({}, '', newUrl);
+            
+            // Обновляем UI
+            const emailView = document.getElementById("emailView");
+            if (emailView) {
+                emailView.innerHTML = '<div class="email-placeholder">Письмо не найдено</div>';
+            }
+            
+            document.querySelectorAll(".email-item.selected").forEach(el => {
+                el.classList.remove("selected");
+            });
+            
+            throw new Error("Письмо не найдено");
+        }
+
+        if (!response.ok) {
+            let detail = `Не удалось загрузить письмо (${response.status})`;
+
+            try {
+                const data = await response.json();
+                if (data?.detail) {
+                    detail = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(detail);
+        }
+
+        const data = await response.json();
+        if (!data?.item || typeof data.item !== "object") {
+            throw new Error("Некорректный ответ деталей письма");
+        }
+
+        return data.item;
+    }
+
+    async function resolveInboxEmailById(emailId, deps) {
+        const {
+            state,
+            normalizeInboxDetailItem,
+        } = deps;
+
+        const normalizedId = Number(emailId);
+
+        const mappedId = normalizeEmailId(normalizedId);
+        const finalId = mappedId !== normalizedId ? mappedId : normalizedId;
+
+        const rawItem = await loadInboxEmailDetail(finalId);
+        let email =
+            typeof normalizeInboxDetailItem === "function"
+                ? normalizeInboxDetailItem(rawItem)
+                : rawItem;
+
+        const listEmail = state.emails.find(
+            (e) => Number(e.email_id || e.emailid || e.id) === finalId
+        );
+        if (listEmail) {
+            email.read = listEmail.read;
+            email.has_comment = listEmail.has_comment;
+            email.mailbox = email.mailbox || listEmail.mailbox;
+            email.subject = email.subject || listEmail.subject;
+            email.sender = email.sender || listEmail.sender;
+            email.date = email.date || listEmail.date;
+        }
+
+        return { email, fromList: false };
+    }
+
+    async function selectEmail(id, deps, options = {}) {
         const {
             state,
             showLoading,
@@ -238,12 +429,60 @@
             updateUnreadCount,
         } = deps;
 
-        state.selectedEmailId = parseInt(id, 10);
+        const {
+            historyMode = "push",
+        } = options;
 
-        const email = state.emails.find((e) => e.id === state.selectedEmailId);
-        if (!email) return;
+        // Нормализуем ID
+        const normalizedId = normalizeEmailId(id);
+        if (normalizedId !== id) {
+            console.warn(`ID ${id} заменен на ${normalizedId}`);
+            id = normalizedId;
+        }
 
-        const realEmailId = email.email_id || email.id;
+        // Проверяем, что ID валидный
+        const numericId = parseInt(id, 10);
+        if (isNaN(numericId) || numericId <= 0) {
+            console.error('Невалидный ID:', id);
+            return;
+        }
+
+        state.selectedEmailId = numericId;
+        state.selectedSourceType = "inbox";
+        syncInboxSelectionState(state, historyMode);
+
+        let resolved;
+        try {
+            resolved = await resolveInboxEmailById(state.selectedEmailId, deps);
+        } catch (error) {
+            console.error("Не удалось загрузить письмо", error);
+
+            const emailView = document.getElementById("emailView");
+            if (emailView) {
+                emailView.innerHTML =
+                    '<div class="email-placeholder" style="padding:20px;text-align:center;">Ошибка загрузки письма</div>';
+            }
+            
+            // Очищаем состояние при ошибке
+            state.selectedEmailId = null;
+            syncInboxSelectionState(state, 'replace');
+            return;
+        }
+
+        const { email, fromList } = resolved;
+        if (!email) {
+            state.selectedEmailId = null;
+            syncInboxSelectionState(state, 'replace');
+            return;
+        }
+
+        if (fromList) {
+            state.selectedEmailSnapshot = null;
+        } else {
+            state.selectedEmailSnapshot = email;
+        }
+
+        const realEmailId = Number(email.email_id || email.emailid || email.id);
 
         if (!email.read) {
             email.read = true;
@@ -256,28 +495,37 @@
             updateEmailReadStatus(realEmailId, true).catch((error) => {
                 console.error("Не удалось отметить письмо прочитанным:", error);
 
-                email.read = false;
-                state.unreadCount += 1;
+                if (fromList) {
+                    email.read = false;
+                    state.unreadCount += 1;
 
-                if (typeof updateUnreadCount === "function") {
-                    updateUnreadCount();
-                }
+                    if (typeof updateUnreadCount === "function") {
+                        updateUnreadCount();
+                    }
 
-                if (typeof renderEmailList === "function") {
-                    renderEmailList();
-                }
+                    if (typeof renderEmailList === "function") {
+                        renderEmailList();
+                    }
 
-                if (typeof highlightSelectedEmail === "function") {
-                    highlightSelectedEmail(id);
+                    if (typeof highlightSelectedEmail === "function") {
+                        highlightSelectedEmail(id);
+                    }
                 }
             });
         }
 
         showLoading();
 
-        setTimeout(() => {
-            highlightSelectedEmail(id);
-            renderEmailCard(email);
+        setTimeout(async () => {
+            if (fromList) {
+                highlightSelectedEmail(state.selectedEmailId);
+            } else {
+                document.querySelectorAll(".email-item").forEach((itemEl) => {
+                    itemEl.classList.remove("selected");
+                });
+            }
+
+            await renderEmailCard(email);
 
             const chatTab = document.getElementById("tab-chat");
             if (chatTab && chatTab.classList.contains("active")) {
@@ -285,6 +533,23 @@
             }
         }, 300);
     }
+
+    // Инициализация - проверяем URL при загрузке
+    document.addEventListener('DOMContentLoaded', function() {
+        const params = new URLSearchParams(window.location.search);
+        const selectedId = params.get('selected_email_id');
+        
+        if (selectedId) {
+            const normalizedId = normalizeEmailId(selectedId);
+            if (normalizedId !== selectedId) {
+                params.set('selected_email_id', normalizedId);
+                const newUrl = params.toString() 
+                    ? `${window.location.pathname}?${params}` 
+                    : window.location.pathname;
+                window.history.replaceState({}, '', newUrl);
+            }
+        }
+    });
 
     window.MailRenderList = {
         showLoading,
@@ -294,5 +559,7 @@
         selectEmail,
         closeOpenedEmail,
         closeAndMarkUnread,
+        syncInboxSelectionState,
+        normalizeEmailId, // экспортируем для отладки
     };
 })();

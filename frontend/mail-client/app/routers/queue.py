@@ -3,16 +3,18 @@ from io import BytesIO
 from zipfile import ZipFile, ZIP_DEFLATED
 from urllib.parse import quote
 import httpx
+import re
 
 from typing import Annotated, Any
-from fastapi import APIRouter, Request, HTTPException, Form, File, UploadFile
+from fastapi import APIRouter, Request, HTTPException, Form, File, UploadFile, Query
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field, ConfigDict
 from pathlib import Path
+from math import ceil
 
 from app.db import get_db_pool
 from app.routers import auth
-from app.services.queue import list_queue_for_user
+from app.services.queue import list_queue_for_user, get_email_thread_for_user, get_email_detail_for_user
 from app.services.users import get_user_signature, update_user_signature
 from app.cloud.minio import MinIOClient
 
@@ -39,6 +41,9 @@ class MaterialsManualDecisionUpdate(BaseModel):
 class EmailReadUpdate(BaseModel):
     is_read: bool
 
+class EmailCommentUpdate(BaseModel):
+    comment_text: str = ""
+
 class ForwardAttachmentItem(BaseModel):
     document_id: int
     filename: str
@@ -55,6 +60,13 @@ class ForwardDraftResponse(BaseModel):
     body: str = ""
     attachments: list[ForwardAttachmentItem] = Field(default_factory=list)
 
+class ReplyDraftResponse(BaseModel):
+    email_id: int
+    mailbox: str
+    to: str = ""
+    subject: str = ""
+    body: str = ""
+    
 class SignatureUpdatePayload(BaseModel):
     signature: str = ""
 
@@ -83,6 +95,81 @@ def append_signature_if_missing(body: str | None, signature: str | None) -> str:
         return signature_block
 
     return f"{normalized_body}\n\n{signature_block}"
+
+def normalize_source_type(source_type: str | None) -> str:
+    value = (source_type or "").strip().lower()
+    return "sent" if value == "sent" else "inbox"
+
+
+def _sanitize_download_filename(value: str, default: str = "results") -> str:
+    value = (value or "").strip()
+    if not value:
+        return default
+
+    value = re.sub(r'[\\/*?:"<>|]+', "_", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    value = value.strip(" .")
+
+    if not value:
+        return default
+
+    return value[:120]
+
+async def get_email_access_row(
+    conn,
+    *,
+    email_id: int,
+    user: dict[str, Any],
+    source_type: str,
+):
+    normalized_source_type = normalize_source_type(source_type)
+
+    if normalized_source_type == "sent":
+        if user.get("role") == "admin":
+            return await conn.fetchrow(
+                """
+                SELECT id, mailbox
+                FROM sent_emails
+                WHERE id = $1
+                LIMIT 1
+                """,
+                email_id,
+            )
+
+        return await conn.fetchrow(
+            """
+            SELECT id, mailbox
+            FROM sent_emails
+            WHERE id = $1
+              AND mailbox = $2
+            LIMIT 1
+            """,
+            email_id,
+            user["email"],
+        )
+
+    if user.get("role") == "admin":
+        return await conn.fetchrow(
+            """
+            SELECT id, mailbox
+            FROM emails
+            WHERE id = $1
+            LIMIT 1
+            """,
+            email_id,
+        )
+
+    return await conn.fetchrow(
+        """
+        SELECT id, mailbox
+        FROM emails
+        WHERE id = $1
+          AND mailbox = $2
+        LIMIT 1
+        """,
+        email_id,
+        user["email"],
+    )
 
 @router.get("/me/signature")
 async def get_my_signature(request: Request):
@@ -239,7 +326,8 @@ async def download_all_result_documents(task_id: int, request: Request):
                 SELECT
                     t.id,
                     t.email_id,
-                    e.mailbox
+                    e.mailbox,
+                    e.email_subject
                 FROM tasks t
                 JOIN emails e ON e.id = t.email_id
                 WHERE t.id = $1
@@ -252,7 +340,8 @@ async def download_all_result_documents(task_id: int, request: Request):
                 SELECT
                     t.id,
                     t.email_id,
-                    e.mailbox
+                    e.mailbox,
+                    e.email_subject
                 FROM tasks t
                 JOIN emails e ON e.id = t.email_id
                 WHERE t.id = $1
@@ -328,7 +417,9 @@ async def download_all_result_documents(task_id: int, request: Request):
 
     zip_buffer.seek(0)
 
-    zip_name = f"task-{task_id}-results.zip"
+    email_subject = task["email_subject"] or ""
+    safe_subject = _sanitize_download_filename(email_subject, default=f"task-{task_id}")
+    zip_name = f"{safe_subject} - результаты.zip"
     return StreamingResponse(
         zip_buffer,
         media_type="application/zip",
@@ -341,20 +432,31 @@ async def download_all_result_documents(task_id: int, request: Request):
 async def get_queue(
     request: Request,
     status: str = "",
-    limit: int | None = None,
     archived: bool | None = None,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=50, ge=1, le=50),
+    search: str = "",
+    class_filter: str = Query(default="", alias="class"),
+    sort: str = Query(default="newest"),
 ):
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    if limit is not None:
-        if limit < 1:
-            limit = 1
-        if limit > 2000:
-            limit = 2000
+    result = await list_queue_for_user(
+        user=user,
+        status=status,
+        archived=archived,
+        page=page,
+        per_page=per_page,
+        search=search,
+        class_filter=class_filter,
+        sort=sort,
+    )
 
-    items = await list_queue_for_user(user=user, status=status, limit=limit, archived=archived)
+    total = int(result.get("total", 0))
+    items = list(result.get("items", []))
+    total_pages = max(1, ceil(total / per_page)) if total > 0 else 1
 
     return {
         "user": {
@@ -362,9 +464,51 @@ async def get_queue(
             "email": user["email"],
             "role": user.get("role"),
         },
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
         "count": len(items),
         "items": items,
     }
+
+
+@router.get("/emails/{email_id}/thread")
+async def get_email_thread(
+    email_id: int,
+    request: Request,
+    source: str | None = None,
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    result = await get_email_thread_for_user(
+        user=user,
+        email_id=email_id,
+        source=source,
+    )
+
+    return {
+        "ok": True,
+        "count": int(result.get("count", 0)),
+        "items": list(result.get("items", [])),
+    }
+
+@router.get("/emails/{email_id}/detail")
+async def get_email_detail(
+    email_id: int,
+    request: Request,
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    item = await get_email_detail_for_user(user, email_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+    return {"item": item}
 
 async def _download_document_by_id(
     document_id: int,
@@ -474,7 +618,8 @@ async def download_all_source_documents(email_id: int, request: Request):
                 """
                 SELECT
                     e.id,
-                    e.mailbox
+                    e.mailbox,
+                    e.email_subject
                 FROM emails e
                 WHERE e.id = $1
                 """,
@@ -485,7 +630,8 @@ async def download_all_source_documents(email_id: int, request: Request):
                 """
                 SELECT
                     e.id,
-                    e.mailbox
+                    e.mailbox,
+                    e.email_subject
                 FROM emails e
                 WHERE e.id = $1
                   AND e.mailbox = $2
@@ -542,7 +688,9 @@ async def download_all_source_documents(email_id: int, request: Request):
 
     zip_buffer.seek(0)
 
-    zip_name = f"email-{email_id}-attachments.zip"
+    email_subject = email_row["email_subject"] or ""
+    safe_subject = _sanitize_download_filename(email_subject, default=f"email-{email_id}")
+    zip_name = f"{safe_subject} - входящие.zip"
     return StreamingResponse(
         zip_buffer,
         media_type="application/zip",
@@ -630,6 +778,8 @@ async def update_queue_decision(
                 next_status = payload.status
             elif model_decision == "question":
                 next_status = "question"
+            elif model_decision == "claim":
+                next_status = "claim"
             else:
                 next_status = "ml_classified"
 
@@ -640,19 +790,21 @@ async def update_queue_decision(
                     predicted_class = 1
                 elif model_decision == "calculation":
                     predicted_class = 0
+                elif model_decision == "claim":
+                    predicted_class = 3
                 elif model_decision == "review":
                     predicted_class = None
 
-            if model_decision not in {"request", "calculation", "question"}:
+            if model_decision not in {"request", "calculation", "question", "claim"}:
                 raise HTTPException(
                     status_code=400,
-                    detail="Нужно выбрать итоговый класс: 'Заявка', 'Расчёт' или 'Вопрос'"
+                    detail="Нужно выбрать итоговый класс: 'Заявка', 'Расчёт', 'Вопрос' или 'Претензия'"
                 )
 
-            if predicted_class not in {0, 1, 2}:
+            if predicted_class not in {0, 1, 2, 3}:
                 raise HTTPException(
                     status_code=400,
-                    detail="Итоговый класс должен быть 0, 1 или 2"
+                    detail="Итоговый класс должен быть 0, 1, 2 или 3"
                 )
 
             output_patch = {
@@ -993,6 +1145,123 @@ async def update_email_read_status(
     }
 
 
+@router.get("/emails/{email_id}/comment")
+async def get_email_comment(
+    email_id: int,
+    request: Request,
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        if user.get("role") == "admin":
+            row = await conn.fetchrow(
+                """
+                SELECT id, mailbox, comment_text
+                FROM emails
+                WHERE id = $1
+                LIMIT 1
+                """,
+                email_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                SELECT id, mailbox, comment_text
+                FROM emails
+                WHERE id = $1
+                  AND mailbox = $2
+                LIMIT 1
+                """,
+                email_id,
+                user["email"],
+            )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+    comment_text = row["comment_text"]
+
+    return {
+        "ok": True,
+        "email_id": email_id,
+        "comment_text": comment_text,
+        "has_comment": bool((comment_text or "").strip()),
+    }
+
+
+@router.patch("/emails/{email_id}/comment")
+async def update_email_comment(
+    email_id: int,
+    payload: EmailCommentUpdate,
+    request: Request,
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    normalized_comment = _normalize_text(payload.comment_text)
+    comment_to_save = normalized_comment or None
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if user.get("role") == "admin":
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, mailbox, comment_text
+                    FROM emails
+                    WHERE id = $1
+                    LIMIT 1
+                    """,
+                    email_id,
+                )
+            else:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, mailbox, comment_text
+                    FROM emails
+                    WHERE id = $1
+                      AND mailbox = $2
+                    LIMIT 1
+                    """,
+                    email_id,
+                    user["email"],
+                )
+
+            if not row:
+                raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+            if row["comment_text"] == comment_to_save:
+                return {
+                    "ok": True,
+                    "email_id": email_id,
+                    "comment_text": comment_to_save,
+                    "has_comment": bool(comment_to_save),
+                }
+
+            await conn.execute(
+                """
+                UPDATE emails
+                SET comment_text = $1
+                WHERE id = $2
+                """,
+                comment_to_save,
+                email_id,
+            )
+
+    return {
+        "ok": True,
+        "email_id": email_id,
+        "comment_text": comment_to_save,
+        "has_comment": bool(comment_to_save),
+    }
+
+
 @router.post("/emails/{email_id}/reply", status_code=204)
 async def reply_to_email(
     email_id: int,
@@ -1014,9 +1283,6 @@ async def reply_to_email(
 
     if not body.strip():
         raise HTTPException(status_code=400, detail="body is empty")
-    
-    signature = await get_user_signature(user["id"])
-    body = append_signature_if_missing(body, signature)
 
     pool = await get_db_pool()
 
@@ -1101,36 +1367,26 @@ async def reply_to_email(
     return Response(status_code=204)
 
 @router.get("/emails/{email_id}/forward-draft", response_model=ForwardDraftResponse)
-async def get_forward_draft(email_id: int, request: Request):
+async def get_forward_draft(
+    email_id: int,
+    request: Request,
+    source_type: str | None = Query(default=None),
+):
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    normalized_source_type = normalize_source_type(source_type)
+
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        if user.get("role") == "admin":
-            row = await conn.fetchrow(
-                """
-                SELECT id, mailbox
-                FROM emails
-                WHERE id = $1
-                LIMIT 1
-                """,
-                email_id,
-            )
-        else:
-            row = await conn.fetchrow(
-                """
-                SELECT id, mailbox
-                FROM emails
-                WHERE id = $1
-                  AND mailbox = $2
-                LIMIT 1
-                """,
-                email_id,
-                user["email"],
-            )
+        row = await get_email_access_row(
+            conn,
+            email_id=email_id,
+            user=user,
+            source_type=normalized_source_type,
+        )
 
     if not row:
         raise HTTPException(status_code=404, detail="Письмо не найдено")
@@ -1139,12 +1395,73 @@ async def get_forward_draft(email_id: int, request: Request):
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(mail_service_url)
+            resp = await client.get(
+                mail_service_url,
+                params={"source_type": normalized_source_type},
+            )
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
 
     if resp.status_code >= 400:
         detail = "Не удалось получить черновик пересылки"
+
+        try:
+            data = resp.json()
+            if isinstance(data, dict) and data.get("detail"):
+                detail = data["detail"]
+            elif resp.text and resp.text.strip():
+                detail = resp.text.strip()
+        except Exception:
+            if resp.text and resp.text.strip():
+                detail = resp.text.strip()
+
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+
+    try:
+        payload = resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Некорректный ответ mail service: {e}") from e
+
+    return payload
+
+@router.get("/emails/{email_id}/reply-draft", response_model=ReplyDraftResponse)
+async def get_reply_draft(
+    email_id: int,
+    request: Request,
+    source_type: str | None = Query(default=None),
+):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    normalized_source_type = normalize_source_type(source_type)
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        row = await get_email_access_row(
+            conn,
+            email_id=email_id,
+            user=user,
+            source_type=normalized_source_type,
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Письмо не найдено")
+
+    mail_service_url = f"http://mail:8080/emails/{email_id}/reply-draft"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(
+                mail_service_url,
+                params={"source_type": normalized_source_type},
+            )
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Mail service unavailable: {e}") from e
+
+    if resp.status_code >= 400:
+        detail = "Не удалось получить черновик ответа"
 
         try:
             data = resp.json()
@@ -1173,6 +1490,7 @@ async def forward_email(
     body: Annotated[str, Form(...)],
     include_document_ids: Annotated[list[int] | None, Form()] = None,
     attachments: Annotated[list[UploadFile] | None, File()] = None,
+    source_type: Annotated[str | None, Form()] = None,
 ):
     attachments = attachments or []
     include_document_ids = include_document_ids or []
@@ -1180,6 +1498,8 @@ async def forward_email(
     user = auth.get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    normalized_source_type = normalize_source_type(source_type)
 
     to = (to or "").strip()
     body = body or ""
@@ -1189,35 +1509,16 @@ async def forward_email(
 
     if not body.strip():
         raise HTTPException(status_code=400, detail="body is empty")
-    
-    signature = await get_user_signature(user["id"])
-    body = append_signature_if_missing(body, signature)
 
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        if user.get("role") == "admin":
-            row = await conn.fetchrow(
-                """
-                SELECT id, mailbox
-                FROM emails
-                WHERE id = $1
-                LIMIT 1
-                """,
-                email_id,
-            )
-        else:
-            row = await conn.fetchrow(
-                """
-                SELECT id, mailbox
-                FROM emails
-                WHERE id = $1
-                  AND mailbox = $2
-                LIMIT 1
-                """,
-                email_id,
-                user["email"],
-            )
+        row = await get_email_access_row(
+            conn,
+            email_id=email_id,
+            user=user,
+            source_type=normalized_source_type,
+        )
 
     if not row:
         raise HTTPException(status_code=404, detail="Письмо не найдено")
@@ -1229,6 +1530,7 @@ async def forward_email(
         "to": to,
         "body": body,
         "include_document_ids": [str(document_id) for document_id in include_document_ids],
+        "source_type": normalized_source_type,
     }
 
     try:

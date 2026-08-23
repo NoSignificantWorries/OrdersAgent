@@ -15,6 +15,8 @@
             state.composeDraft.mode === "forward" ? "forward" : "new";
         state.composeDraft.emailId =
             state.composeDraft.emailId == null ? null : Number(state.composeDraft.emailId);
+        state.composeDraft.sourceType =
+            state.composeDraft.sourceType === "sent" ? "sent" : "inbox";
         state.composeDraft.to = state.composeDraft.to || "";
         state.composeDraft.subject = state.composeDraft.subject || "";
         state.composeDraft.body = state.composeDraft.body || "";
@@ -51,6 +53,7 @@
         ensureComposeState(state);
         state.composeDraft.mode = "new";
         state.composeDraft.emailId = null;
+        state.composeDraft.sourceType = "inbox";
         state.composeDraft.to = "";
         state.composeDraft.subject = "";
         state.composeDraft.body = "";
@@ -323,6 +326,28 @@
         return `${normalizedBody}\n\n${signatureBlock}`;
     }
 
+    function prependSignatureToDraft(draftBody, signature) {
+        const body = String(draftBody || "")
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .trim();
+
+        const rawSignature = normalizeSignature(signature);
+        const replySpace = "\n\n";
+
+        if (!rawSignature) {
+            return body ? `${replySpace}${body}` : "";
+        }
+
+        const signatureBlock = /^--(?:\r?\n|$)/.test(rawSignature)
+            ? rawSignature
+            : `--\n${rawSignature}`;
+
+        return body
+            ? `${replySpace}${signatureBlock}\n\n${body}`
+            : `${replySpace}${signatureBlock}`;
+    }
+
     async function ensureUserSignature(state) {
         if (state._signatureLoaded) {
             return state.userSignature || "";
@@ -388,6 +413,9 @@
         await ensureUserSignature(state);
 
         const emailId = Number(payload?.emailId);
+        const sourceType =
+            payload?.sourceType === "sent" ? "sent" : "inbox";
+
         if (Number.isNaN(emailId)) {
             throw new Error("Некорректный идентификатор письма");
         }
@@ -401,7 +429,7 @@
             throw new Error("Метод загрузки черновика пересылки не подключен");
         }
 
-        const draftData = await loader(emailId);
+        const draftData = await loader(emailId, { sourceType });
         const attachments = Array.isArray(draftData?.attachments)
             ? draftData.attachments
             : [];
@@ -411,10 +439,11 @@
         state.composeDraft.isOpen = true;
         state.composeDraft.mode = "forward";
         state.composeDraft.emailId = emailId;
+        state.composeDraft.sourceType = sourceType;
         state.composeDraft.to = typeof draftData?.to === "string" ? draftData.to : "";
         state.composeDraft.subject =
             typeof draftData?.subject === "string" ? draftData.subject : "";
-                state.composeDraft.body = appendSignatureIfMissing(
+        state.composeDraft.body = prependSignatureToDraft(
             typeof draftData?.body === "string" ? draftData.body : "",
             state.userSignature,
         );
@@ -547,7 +576,10 @@
         const { mode, emailId, recipients, subject, body, selectedDocumentIds } =
             validateComposeDraft(state);
 
-        const finalBody = appendSignatureIfMissing(body, state.userSignature);
+        const finalBody =
+            mode === "forward"
+                ? body
+                : appendSignatureIfMissing(body, state.userSignature);
 
         const formData = new FormData();
         formData.append("to", recipients.join(","));
@@ -561,6 +593,10 @@
             if (emailId == null || Number.isNaN(Number(emailId))) {
                 throw new Error("Не удалось определить письмо для пересылки");
             }
+
+            const sourceType =
+                state.composeDraft.sourceType === "sent" ? "sent" : "inbox";
+            formData.append("source_type", sourceType);
 
             selectedDocumentIds.forEach((documentId) => {
                 formData.append("include_document_ids", String(documentId));
@@ -581,11 +617,13 @@
         if (state.composeDraft.isSending) return;
 
         try {
-            state.composeDraft.body = appendSignatureIfMissing(
-                state.composeDraft.body,
-                state.userSignature,
-            );
-            
+            if (state.composeDraft.mode !== "forward") {
+                state.composeDraft.body = appendSignatureIfMissing(
+                    state.composeDraft.body,
+                    state.userSignature,
+                );
+            }
+
             const draftMeta = validateComposeDraft(state);
             const formData = buildComposeFormData(state);
 

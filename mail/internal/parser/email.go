@@ -1,23 +1,22 @@
 package parser
 
 import (
-	//"encoding/base64"
 	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"mime"
-	//"strconv"
 	"strings"
 	"bufio"
     "net/mail"
-    "unicode/utf8"
     "regexp"
+    "time"
 
 	htmllib "golang.org/x/net/html"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+    "github.com/emersion/go-message"
 	_ "github.com/emersion/go-message/charset"
 	msgmail "github.com/emersion/go-message/mail"
 	"golang.org/x/text/encoding/charmap"
@@ -58,84 +57,23 @@ func decodeBodyBytes(b []byte, contentType string) string {
     return string(b)
 }
 
-// func decodeBodyBytes(b []byte, contentType string) string {
-//     if len(b) == 0 {
-//         return ""
-//     }
+var imagePlaceholderRe = regexp.MustCompile(`\s*\[image:[^\]]+\]`)
 
-//     // Пытаемся вытащить charset из Content-Type
-//     _, params, err := mime.ParseMediaType(contentType)
-//     charsetName := ""
-//     if err == nil {
-//         charsetName = strings.ToLower(strings.TrimSpace(params["charset"]))
-//     }
-
-//     // По умолчанию считаем UTF-8
-//     if charsetName == "" || charsetName == "utf-8" || charsetName == "us-ascii" {
-// 		return string(b)
-// 	}
-
-//     switch charsetName {
-//     case "windows-1251", "cp1251":
-//         decoded, err := charmap.Windows1251.NewDecoder().Bytes(b)
-//         if err == nil {
-//             return string(decoded)
-//         }
-//     case "koi8-r":
-//         decoded, err := charmap.KOI8R.NewDecoder().Bytes(b)
-//         if err == nil {
-//             return string(decoded)
-//         }
-//     // при необходимости можно добавить другие чарсеты
-//     }
-
-//     // Fallback — возвращаем как есть
-//     return string(b)
-// }
-
-func extractNestedMessageText(raw []byte) string {
-    r := bytes.NewReader(raw)
-    mr, err := msgmail.CreateReader(r)
-    if err != nil {
-        return strings.TrimSpace(extractTextFromHTML(string(raw)))
+func extractNestedMessage(raw []byte) (text string, attachments []Attachment) {
+    if len(raw) == 0 {
+        return "", nil
     }
 
-    var plainPart, htmlPart string
+    nestedEmail := &Email{}
 
-    for {
-        p, err := mr.NextPart()
-        if err == io.EOF {
-            break
-        }
-        if err != nil {
-            break
-        }
+    if err := parseBody(nestedEmail, bytes.NewReader(raw)); err != nil {
+        log.Printf("nested message parse error: %v", err)
 
-        contentType := p.Header.Get("Content-Type")
-        ctLower := strings.ToLower(contentType)
-        bodyBytes, _ := io.ReadAll(p.Body)
-
-        if strings.HasPrefix(ctLower, "text/plain") {
-            txt := strings.TrimSpace(string(bodyBytes))
-            if txt != "" && plainPart == "" {
-                plainPart = txt
-            }
-        } else if strings.HasPrefix(ctLower, "text/html") {
-            html := string(bodyBytes)
-            txt := strings.TrimSpace(extractTextFromHTML(html))
-            if txt != "" && htmlPart == "" {
-                htmlPart = txt
-            }
-        }
+        // Если MIME-разбор невозможен, хотя бы возвращаем текст
+        return strings.TrimSpace(extractTextFromHTML(string(raw))), nil
     }
 
-    if plainPart != "" {
-        return plainPart
-    }
-    if htmlPart != "" {
-        return htmlPart
-    }
-    return ""
+    return nestedEmail.Body, nestedEmail.Files
 }
 
 func joinAddresses(addrs []imap.Address) string {
@@ -318,93 +256,135 @@ func extractEmailFromString(s string) string {
 }
 
 func ParseMessage(uid imap.UID, fetchCmd *imapclient.FetchCommand, mailbox string) (*Email, error) {
-    msg := fetchCmd.Next()
-    if msg == nil {
-        return nil, fmt.Errorf("no message")
-    }
+	msg := fetchCmd.Next()
+	if msg == nil {
+		if err := fetchCmd.Close(); err != nil {
+			return nil, fmt.Errorf("uid=%d: fetch failed: %w", uid, err)
+		}
 
-    email := &Email{
-        UID: uid,
-        Mailbox: mailbox,
-    }
+		return nil, fmt.Errorf("uid=%d: fetch returned no message data", uid)
+	}
 
-    var bodyError error
+	defer func() {
+		if err := fetchCmd.Close(); err != nil {
+			log.Printf("uid=%d: fetch close error: %v", uid, err)
+		}
+	}()
 
-    for {
-        item := msg.Next()
-        if item == nil {
-            break
-        }
+	email := &Email{
+		UID:     uid,
+		Mailbox: mailbox,
+	}
 
-        if env, ok := item.(imapclient.FetchItemDataEnvelope); ok {
-            email.Subject = decodeHeader(env.Envelope.Subject)
-            email.From = joinAddresses(env.Envelope.From)
+	var bodyError error
 
-            if !env.Envelope.Date.IsZero() {
-                email.Date = env.Envelope.Date.Format("2006-01-02 15:04")
-            }
+	hasEnvelope := false
+	hasHeaderSection := false
+	hasBodySection := false
+	hasBodyLiteral := false
 
-            email.MessageID = strings.TrimSpace(env.Envelope.MessageID)
-            if len(env.Envelope.InReplyTo) > 0 {
+	for {
+		item := msg.Next()
+		if item == nil {
+			break
+		}
+
+		if env, ok := item.(imapclient.FetchItemDataEnvelope); ok {
+			hasEnvelope = true
+
+			email.Subject = decodeHeader(env.Envelope.Subject)
+			email.From = joinAddresses(env.Envelope.From)
+
+			if !env.Envelope.Date.IsZero() {
+				email.Date = env.Envelope.Date.Format(time.RFC3339)
+			} else {
+				email.Date = ""
+			}
+
+			email.MessageID = strings.TrimSpace(env.Envelope.MessageID)
+			if len(env.Envelope.InReplyTo) > 0 {
 				email.InReplyTo = strings.TrimSpace(env.Envelope.InReplyTo[0])
 			}
-            email.ReplyTo = firstAddress(env.Envelope.ReplyTo)
+			email.ReplyTo = firstAddress(env.Envelope.ReplyTo)
 
-            continue
-        }
+			continue
+		}
 
-        if bodyData, ok := item.(imapclient.FetchItemDataBodySection); ok && bodyData.Literal != nil {
-            section := bodyData.Section
+		if bodyData, ok := item.(imapclient.FetchItemDataBodySection); ok {
+			section := bodyData.Section
+			isHeader := section != nil && section.Specifier == imap.PartSpecifierHeader
 
-            if section != nil && section.Specifier == imap.PartSpecifierHeader {
-                msgID, inReplyTo, refs, replyTo, to, cc, deliveredTo, 
-                xOriginalTo, envelopeTo, xEnvelopeTo, err := parseHeaderFields(bodyData.Literal)
-                if err != nil {
-                    log.Printf("parseHeaderFields: UID=%d err=%v", email.UID, err)
-                    continue
-                }
+			if isHeader {
+				if bodyData.Literal != nil {
+					hasHeaderSection = true
 
-                if email.MessageID == "" {
-                    email.MessageID = msgID
-                }
-                if email.InReplyTo == "" {
-                    email.InReplyTo = inReplyTo
-                }
-				log.Printf("InReplyTo: %s", email.InReplyTo)
-                if email.ReferencesHeader == "" {
-                    email.ReferencesHeader = refs
-                }
-				log.Printf("ReferencesHeader: %s", email.ReferencesHeader)
-                if email.ReplyTo == "" {
-                    email.ReplyTo = replyTo
-                }
-				log.Printf("ReplyTo: %s", email.ReplyTo)
-                email.To = to
-                email.Cc = cc
-                email.DeliveredTo = deliveredTo
-                email.XOriginalTo = xOriginalTo
-                email.EnvelopeTo = envelopeTo
-                email.XEnvelopeTo = xEnvelopeTo
-                
-                log.Printf("To: %s", email.To)
-                log.Printf("Cc: %s", email.Cc)
-                log.Printf("Delivered-To: %s", email.DeliveredTo)
+					msgID, inReplyTo, refs, replyTo, to, cc, deliveredTo,
+						xOriginalTo, envelopeTo, xEnvelopeTo, err := parseHeaderFields(bodyData.Literal)
+					if err != nil {
+						log.Printf("parseHeaderFields: UID=%d err=%v", email.UID, err)
+						continue
+					}
 
-                resolveRecipient(email, email.Mailbox)
-                log.Printf("RecipientEmail: %s, Source: %s, IsPrimary: %v", 
-                    email.RecipientEmail, email.RecipientSource, email.IsPrimaryRecipient)
+					if email.MessageID == "" {
+						email.MessageID = msgID
+					}
+					if email.InReplyTo == "" {
+						email.InReplyTo = inReplyTo
+					}
+					log.Printf("InReplyTo: %s", email.InReplyTo)
+					if email.ReferencesHeader == "" {
+						email.ReferencesHeader = refs
+					}
+					log.Printf("ReferencesHeader: %s", email.ReferencesHeader)
+					if email.ReplyTo == "" {
+						email.ReplyTo = replyTo
+					}
+					log.Printf("ReplyTo: %s", email.ReplyTo)
+					email.To = to
+					email.Cc = cc
+					email.DeliveredTo = deliveredTo
+					email.XOriginalTo = xOriginalTo
+					email.EnvelopeTo = envelopeTo
+					email.XEnvelopeTo = xEnvelopeTo
 
-                continue
-            }
+					log.Printf("To: %s", email.To)
+					log.Printf("Cc: %s", email.Cc)
+					log.Printf("Delivered-To: %s", email.DeliveredTo)
 
-            if err := parseBody(email, bodyData.Literal); err != nil {
-                bodyError = err
-            }
-            continue
-        }
-    }
+					resolveRecipient(email, email.Mailbox)
+					log.Printf("RecipientEmail: %s, Source: %s, IsPrimary: %v",
+						email.RecipientEmail, email.RecipientSource, email.IsPrimaryRecipient)
+				}
 
-    return email, bodyError
+				continue
+			}
+
+			hasBodySection = true
+
+			if bodyData.Literal != nil {
+				hasBodyLiteral = true
+
+				if err := parseBody(email, bodyData.Literal); err != nil {
+					bodyError = err
+				}
+			}
+
+			continue
+		}
+	}
+
+	log.Printf(
+		"uid=%d fetch summary | envelope=%v header=%v body_section=%v body_literal=%v body_len=%d attachments=%d",
+		uid,
+		hasEnvelope,
+		hasHeaderSection,
+		hasBodySection,
+		hasBodyLiteral,
+		len(strings.TrimSpace(email.Body)),
+		len(email.Files),
+	)
+
+	return email, bodyError
 }
 
 func cleanBodyText(body string) string {
@@ -416,9 +396,8 @@ func cleanBodyText(body string) string {
 
     for _, raw := range lines {
         line := strings.TrimRight(raw, " \t\r")
-
-        // Удаляем явный техмусор
         trimmed := strings.TrimSpace(line)
+
         if trimmed == "" {
             // схлопываем пачки пустых строк в одну
             if !prevEmpty {
@@ -429,10 +408,17 @@ func cleanBodyText(body string) string {
         }
         prevEmpty = false
 
-        // CSS/HTML‑мусор
-        if strings.Contains(trimmed, "blockquote.rt") ||
-            strings.HasPrefix(trimmed, "p {") ||
-            strings.Contains(trimmed, ".email-signature") {
+        lower := strings.ToLower(trimmed)
+        if strings.Contains(lower, "blockquote.rt") ||
+            strings.HasPrefix(lower, "p {") ||
+            strings.Contains(lower, ".email-signature") {
+            continue
+        }
+
+        trimmed = imagePlaceholderRe.ReplaceAllString(trimmed, "")
+        trimmed = strings.TrimSpace(trimmed)
+
+        if trimmed == "" {
             continue
         }
 
@@ -447,100 +433,279 @@ func cleanBodyText(body string) string {
     return res
 }
 
+func isInlinePart(contentType, disposition, contentID string) bool {
+    ctLower := strings.ToLower(contentType)
+    dispLower := strings.ToLower(disposition)
+
+    if strings.Contains(dispLower, "inline") {
+        return true
+    }
+
+    if contentID != "" && !strings.Contains(dispLower, "attachment") {
+        return true
+    }
+
+    if strings.HasPrefix(ctLower, "image/") && contentID != "" {
+        return true
+    }
+
+    return false
+}
+
 func parseBody(email *Email, literal io.Reader) error {
     mr, err := msgmail.CreateReader(literal)
-    if err != nil {
+
+    if err != nil &&
+        !message.IsUnknownCharset(err) &&
+        !message.IsUnknownEncoding(err) {
         return fmt.Errorf("parsing body: %w", err)
     }
 
-    var plainPart string
-    var htmlPart string
-    var nestedPart string
+    if err != nil {
+        log.Printf(
+            "UID=%d: MIME reader warning, continuing parsing: %v",
+            email.UID,
+            err,
+        )
+    }
+
+    if mr == nil {
+        return fmt.Errorf("UID=%d: MIME reader is nil", email.UID)
+    }
+
+    var plainParts []string
+    var htmlParts []string
+    var nestedAttachments []Attachment
+    var htmlProcessed bool
+    var attachmentIndex int
 
     for {
         p, err := mr.NextPart()
+
         if err == io.EOF {
             break
         }
+
+        if err != nil &&
+            !message.IsUnknownCharset(err) &&
+            !message.IsUnknownEncoding(err) {
+            return fmt.Errorf(
+                "UID=%d: reading MIME part: %w",
+                email.UID,
+                err,
+            )
+        }
+
         if err != nil {
-            log.Printf("NextPart error UID=%d: %v", email.UID, err)
+            log.Printf(
+                "UID=%d: MIME part warning, continuing parsing: %v",
+                email.UID,
+                err,
+            )
+        }
+
+        if p == nil {
             continue
         }
 
         contentType := p.Header.Get("Content-Type")
-        disp := p.Header.Get("Content-Disposition")
-        ctLower := strings.ToLower(contentType)
+        disposition := p.Header.Get("Content-Disposition")
+        contentID := strings.TrimSpace(p.Header.Get("Content-ID"))
 
-        switch {
-        // ---------------- text/plain ----------------
-        case strings.HasPrefix(ctLower, "text/plain"):
-            bodyBytes, _ := io.ReadAll(p.Body)
+        mediaType, _, parseTypeErr := mime.ParseMediaType(contentType)
+        if parseTypeErr != nil {
+            mediaType = strings.ToLower(strings.TrimSpace(
+                strings.Split(contentType, ";")[0],
+            ))
+        }
 
-            log.Printf("UID=%d part=%s utf8_valid=%v", email.UID, contentType, utf8.Valid(bodyBytes))
+        mediaType = strings.ToLower(mediaType)
 
-            txt := strings.TrimSpace(string(bodyBytes))
-            if txt != "" {
-                if plainPart == "" {
-                    plainPart = txt
-                } else {
-                    log.Printf("UID=%d: extra text/plain part skipped", email.UID)
-                }
-            }
-        // ---------------- text/html ----------------
-        case strings.HasPrefix(ctLower, "text/html"):
-            bodyBytes, _ := io.ReadAll(p.Body)
-            html := string(bodyBytes)
-            txt := strings.TrimSpace(extractTextFromHTML(html))
-            if txt != "" && htmlPart == "" {
-                htmlPart = txt
-            }
-        // ---------------- вложенное письмо message/rfc822 ----------------
-        case strings.HasPrefix(ctLower, "message/rfc822"):
-            nestedBytes, _ := io.ReadAll(p.Body)
-            if len(nestedBytes) > 0 && nestedPart == "" {
-                nestedText := extractNestedMessageText(nestedBytes)
-                if nestedText != "" {
-                    nestedPart = nestedText
-                }
+        log.Printf(
+            "UID=%d: MIME part header_type=%T content_type=%q disposition=%q content_id=%q",
+            email.UID,
+            p.Header,
+            contentType,
+            disposition,
+            contentID,
+        )
+
+        // Вложенное письмо (.eml): не сохраняем как файл
+        // Извлекаем текст и обычные файлы из него рекурсивно.
+        if mediaType == "message/rfc822" {
+            nestedBytes, readErr := io.ReadAll(p.Body)
+            if readErr != nil {
+                return fmt.Errorf(
+                    "UID=%d: read nested message: %w",
+                    email.UID,
+                    readErr,
+                )
             }
 
-        // ---------------- вложения ----------------
+            if len(nestedBytes) == 0 {
+                continue
+            }
+
+            nestedText, nestedFiles := extractNestedMessage(nestedBytes)
+
+            if nestedText != "" {
+                plainParts = append(
+                    plainParts,
+                    "--- Пересланное письмо ---\n"+nestedText,
+                )
+            }
+
+            if len(nestedFiles) > 0 {
+                nestedAttachments = append(
+                    nestedAttachments,
+                    nestedFiles...,
+                )
+            }
+
+            log.Printf(
+                "UID=%d: nested message parsed body_len=%d attachments=%d",
+                email.UID,
+                len(nestedText),
+                len(nestedFiles),
+            )
+
+            continue
+        }
+
+        // Обычный файл
+        if attachmentHeader, ok := p.Header.(*msgmail.AttachmentHeader); ok {
+            filename, filenameErr := attachmentHeader.Filename()
+            if filenameErr != nil {
+                log.Printf(
+                    "UID=%d: attachment filename parse warning: %v",
+                    email.UID,
+                    filenameErr,
+                )
+            }
+
+            if filename == "" {
+                filename = extractFilename(disposition, contentType)
+            }
+
+            attachmentIndex++
+
+            if filename == "" {
+                filename = fmt.Sprintf(
+                    "attachment-%d%s",
+                    attachmentIndex,
+                    extensionFromContentType(contentType),
+                )
+            }
+
+            data, readErr := io.ReadAll(p.Body)
+            if readErr != nil {
+                return fmt.Errorf(
+                    "UID=%d: read attachment %q: %w",
+                    email.UID,
+                    filename,
+                    readErr,
+                )
+            }
+
+            email.Files = append(email.Files, Attachment{
+                Name: filename,
+                Data: data,
+            })
+
+            log.Printf(
+                "UID=%d: attachment found name=%q size=%d content_type=%q disposition=%q",
+                email.UID,
+                filename,
+                len(data),
+                contentType,
+                disposition,
+            )
+
+            continue
+        }
+
+        // Inline-картинки из HTML: не добавляем ни в Body, ни в Files
+        if isInlinePart(contentType, disposition, contentID) {
+            if _, err := io.Copy(io.Discard, p.Body); err != nil {
+                return fmt.Errorf(
+                    "UID=%d: discard inline MIME part: %w",
+                    email.UID,
+                    err,
+                )
+            }
+
+            continue
+        }
+
+        // Текстовые inline-части письма
+        switch mediaType {
+        case "text/plain":
+            bodyBytes, readErr := io.ReadAll(p.Body)
+            if readErr != nil {
+                return fmt.Errorf(
+                    "UID=%d: read text/plain: %w",
+                    email.UID,
+                    readErr,
+                )
+            }
+
+            text := strings.TrimSpace(string(bodyBytes))
+            if text != "" {
+                plainParts = append(plainParts, text)
+            }
+
+        case "text/html":
+            bodyBytes, readErr := io.ReadAll(p.Body)
+            if readErr != nil {
+                return fmt.Errorf(
+                    "UID=%d: read text/html: %w",
+                    email.UID,
+                    readErr,
+                )
+            }
+
+            text := strings.TrimSpace(
+                extractTextFromHTML(string(bodyBytes)),
+            )
+
+            if text != "" && !htmlProcessed {
+                htmlParts = append(htmlParts, text)
+                htmlProcessed = true
+            }
+
         default:
-            if strings.Contains(strings.ToLower(disp), "attachment") ||
-                strings.HasPrefix(ctLower, "application/") ||
-                strings.HasPrefix(ctLower, "image/") {
-
-                name := extractFilename(disp, contentType)
-                if name == "" {
-                    continue
-                }
-                att := Attachment{Name: name}
-                att.Data, _ = io.ReadAll(p.Body)
-                email.Files = append(email.Files, att)
+            // Полностью дочитываем неизвестную inline-часть перед NextPart
+            // Необходимо для корректной работы streaming MIME reader
+            if _, err := io.Copy(io.Discard, p.Body); err != nil {
+                return fmt.Errorf(
+                    "UID=%d: discard unknown MIME part: %w",
+                    email.UID,
+                    err,
+                )
             }
         }
     }
 
-    // Выбор лучшей ветки
     var body string
-    plain := strings.TrimSpace(plainPart)
-	html := strings.TrimSpace(htmlPart)
-	nested := strings.TrimSpace(nestedPart)
 
-	switch {
-	case plain != "" && len([]rune(plain)) > 30:
-		body = plain
-	case nested != "":
-		body = nested
-	case html != "":
-		body = html
-	case plain != "":
-		body = plain
-	default:
-		body = ""
-	}
+    if len(plainParts) > 0 {
+        body = strings.Join(plainParts, "\n\n")
+    } else if len(htmlParts) > 0 {
+        body = strings.Join(htmlParts, "\n\n")
+    }
 
+    email.Files = append(email.Files, nestedAttachments...)
     email.Body = cleanBodyText(body)
+
+    log.Printf(
+        "UID=%d: body length=%d, plain parts=%d, html parts=%d, attachments=%d",
+        email.UID,
+        len(email.Body),
+        len(plainParts),
+        len(htmlParts),
+        len(email.Files),
+    )
+
     return nil
 }
 
@@ -567,6 +732,7 @@ func extractTextFromHTML(htmlStr string) string {
 		"script": true,
 		"style":  true,
 		"noscript": true,
+        "img": true,
 	}
 
 	var walk func(*htmllib.Node, bool)
@@ -661,4 +827,67 @@ func extractFilename(disposition, contentType string) string {
     }, filename)
 
     return filename
+}
+
+func extensionFromContentType(contentType string) string {
+    mediaType, _, err := mime.ParseMediaType(contentType)
+    if err != nil {
+        return ""
+    }
+
+    switch strings.ToLower(mediaType) {
+    case "application/pdf":
+        return ".pdf"
+
+    case "application/zip":
+        return ".zip"
+
+    case "text/csv":
+        return ".csv"
+
+    case "text/plain":
+        return ".txt"
+
+    case "text/html":
+        return ".html"
+
+    case "text/xml", "application/xml":
+        return ".xml"
+
+    case "application/json":
+        return ".json"
+
+    case "application/vnd.ms-excel":
+        return ".xls"
+
+    case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        return ".xlsx"
+
+    case "application/msword":
+        return ".doc"
+
+    case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return ".docx"
+
+    case "application/vnd.ms-powerpoint":
+        return ".ppt"
+
+    case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        return ".pptx"
+
+    case "image/jpeg":
+        return ".jpg"
+
+    case "image/png":
+        return ".png"
+
+    case "image/gif":
+        return ".gif"
+
+    case "image/webp":
+        return ".webp"
+
+    default:
+        return ""
+    }
 }

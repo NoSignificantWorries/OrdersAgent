@@ -40,6 +40,8 @@ func runUserWorker(
 
 	processor := orders.New(repo, userID)
 
+	consecutiveReconnectErrors := 0
+
 	var imapClient *client.Client
 	defer func() {
 		if imapClient != nil {
@@ -62,7 +64,13 @@ func runUserWorker(
 		}
 
 		if time.Now().After(mailAuth.AccessExpiresAt.Add(-1 * time.Minute)) {
-			log.Printf("access token expired or about to expire, refreshing | user_id=%d", userID)
+			log.Printf(
+				"access token expired or about to expire, refreshing | user_id=%d email=%s expires_at=%s now=%s",
+				userID,
+				mailAuth.Email,
+				mailAuth.AccessExpiresAt.Format(time.RFC3339),
+				time.Now().Format(time.RFC3339),
+			)
 
 			newToken, err := client.RefreshYandexToken(
 				os.Getenv("YANDEX_TOKEN_URL"),
@@ -82,7 +90,12 @@ func runUserWorker(
 				return nil, err
 			}
 
-			log.Printf("access token refreshed | user_id=%d", userID)
+			log.Printf(
+				"access token refreshed | user_id=%d email=%s new_expires_at=%s",
+				userID,
+				mailAuth.Email,
+				mailAuth.AccessExpiresAt.Format(time.RFC3339),
+			)
 		}
 
 		c, err := client.NewOAuth(cfg, mailAuth.Email, mailAuth.AccessToken)
@@ -90,19 +103,42 @@ func runUserWorker(
 			return nil, err
 		}
 
-		log.Printf("IMAP client connected | user_id=%d", userID)
+		log.Printf(
+			"IMAP client connected | user_id=%d email=%s session_id=%s connected_at=%s",
+			userID,
+			mailAuth.Email,
+			c.SessionID(),
+			c.ConnectedAt().Format(time.RFC3339),
+		)
+
 		imapClient = c
 		return imapClient, nil
 	}
 
 	resetClient := func(reason error) {
-		if reason != nil {
-			log.Printf("reset IMAP client | user_id=%d err=%v", userID, reason)
-		}
 		if imapClient != nil {
-			imapClient.Close()
+			log.Printf(
+				"reset IMAP client | user_id=%d email=%s session_id=%s age=%s last_ok_ago=%s consecutive_reconnect_errors=%d err=%v",
+				userID,
+				userEmail,
+				imapClient.SessionID(),
+				time.Since(imapClient.ConnectedAt()),
+				time.Since(imapClient.LastOKAt()),
+				consecutiveReconnectErrors,
+				reason,
+			)
+			_ = imapClient.Close()
 			imapClient = nil
+			return
 		}
+
+		log.Printf(
+			"reset IMAP client | user_id=%d email=%s no_active_session consecutive_reconnect_errors=%d err=%v",
+			userID,
+			userEmail,
+			consecutiveReconnectErrors,
+			reason,
+		)
 	}
 
 	processOnce := func() {
@@ -114,12 +150,29 @@ func runUserWorker(
 
 		err = ProcessEmails(c, stopChan, processor, userEmail)
 		if err == nil {
+			if consecutiveReconnectErrors > 0 {
+				log.Printf(
+					"IMAP processing recovered | user_id=%d email=%s session_id=%s previous_consecutive_reconnect_errors=%d",
+					userID,
+					userEmail,
+					c.SessionID(),
+					consecutiveReconnectErrors,
+				)
+			}
+			consecutiveReconnectErrors = 0
 			return
 		}
 
-		log.Printf("process emails | user_id=%d err=%v", userID, err)
+		log.Printf(
+			"process emails | user_id=%d email=%s session_id=%s err=%v",
+			userID,
+			userEmail,
+			c.SessionID(),
+			err,
+		)
 
 		if isReconnectableError(err) {
+			consecutiveReconnectErrors++
 			resetClient(err)
 
 			select {
@@ -131,7 +184,7 @@ func runUserWorker(
 		}
 	}
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
 	processOnce()
@@ -153,14 +206,20 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
         return err
     }
 
-    log.Printf("ProcessEmails | unread_count=%d uids=%v", len(uids), uids)
+    log.Printf(
+		"ProcessEmails | email=%s session_id=%s unread_count=%d uids=%v",
+		imap.Email(),
+		imap.SessionID(),
+		len(uids),
+		uids,
+	)
 
     if len(uids) == 0 {
         return nil
     }
 
     for _, uid := range uids {
-        log.Printf("ProcessEmails | start uid=%d", uid)
+        log.Printf("ProcessEmails | email=%s session_id=%s start uid=%d", imap.Email(), imap.SessionID(), uid)
 
         select {
         case <-stopChan:
@@ -178,12 +237,14 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
             continue
         }
 
-        log.Printf("ProcessEmails | fetched uid=%d", uid)
+        log.Printf("ProcessEmails | email=%s session_id=%s fetched uid=%d", imap.Email(), imap.SessionID(), uid)
 
         email, err := parser.ParseMessage(uid, fetchCmd, userEmail)
         if err != nil {
             log.Printf("parse uid=%d: %v", uid, err)
-            fetchCmd.Close()
+            if isReconnectableError(err) {
+				return err
+			}
             continue
         }
 
@@ -193,10 +254,10 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
         if err := processor.ProcessEmail(*email); err != nil {
             log.Printf("process uid=%d: %v", uid, err)
         } else {
-            log.Printf("ProcessEmails | processed uid=%d", uid)
+            log.Printf("ProcessEmails | email=%s session_id=%s processed uid=%d", imap.Email(), imap.SessionID(), uid)
         }
 
-        fetchCmd.Close()
+        //fetchCmd.Close()
 
         if err := imap.MarkRead(uid); err != nil {
             log.Printf("mark read uid=%d: %v", uid, err)
@@ -204,7 +265,7 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
                 return err
             }
         } else {
-            log.Printf("ProcessEmails | marked read uid=%d", uid)
+            log.Printf("ProcessEmails | email=%s session_id=%s marked read uid=%d", imap.Email(), imap.SessionID(), uid)
         }
     }
 

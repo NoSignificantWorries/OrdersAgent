@@ -5,74 +5,61 @@
         ml_review: { name: "Выберите класс" },
         materials_review: { name: "Требуются материалы" },
         question: { name: "Вопрос" },
+        claim: { name: "Претензия" },
         completed: { name: "Завершено" },
         error: { name: "Ошибка" },
     };
 
     function formatDate(dateString) {
-        const date = new Date(dateString);
-        if (isNaN(date)) return "";
+        const formatted = formatDateTime(dateString);
+        if (!formatted) return "";
+
+        const match = formatted.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+        if (!match) return "";
 
         const months = [
             "янв", "фев", "мар", "апр", "май", "июн",
             "июл", "авг", "сен", "окт", "ноя", "дек",
         ];
 
-        return `${date.getDate()} ${months[date.getMonth()]}`;
+        const day = String(Number(match[1]));
+        const monthIndex = Number(match[2]) - 1;
+
+        if (monthIndex < 0 || monthIndex > 11) return "";
+
+        return `${day} ${months[monthIndex]}`;
     }
 
     function formatDateTime(dateString) {
-        const date = new Date(dateString);
+        if (!dateString) return "";
+        const raw = String(dateString).trim();
+        if (!raw || raw.startsWith("0001-01-01")) return "";
+
+        const date = new Date(raw);
         if (isNaN(date)) return "";
-        
-        const isEmailDate = dateString.includes('+00:00') && 
-                            dateString.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
-        
-        if (isEmailDate) {
-            // Показываем как есть (в UTC)
-            return date.toLocaleString("ru-RU", {
-                timeZone: "UTC",
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        }
-        
-        // Для createdat - конвертируем в Новосибирск
+
         return date.toLocaleString("ru-RU", {
             timeZone: "Asia/Novosibirsk",
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit'
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit"
         });
     }
 
     function formatTimeOnly(dateString) {
-        const date = new Date(dateString);
+        if (!dateString) return "";
+        const raw = String(dateString).trim();
+        if (!raw || raw.startsWith("0001-01-01")) return "";
+
+        const date = new Date(raw);
         if (isNaN(date)) return "";
-        
-        // Проверяем, является ли это emaildate (приходит в UTC)
-        const isEmailDate = dateString.includes('+00:00') && 
-                            dateString.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
-        
-        if (isEmailDate) {
-            // Показываем как есть (в UTC)
-            return date.toLocaleString("ru-RU", {
-                timeZone: "UTC",
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        }
-        
-        // Для createdat - конвертируем в Новосибирск
+
         return date.toLocaleString("ru-RU", {
             timeZone: "Asia/Novosibirsk",
-            hour: '2-digit',
-            minute: '2-digit'
+            hour: "2-digit",
+            minute: "2-digit"
         });
     }
 
@@ -132,6 +119,9 @@
 
             case "question":
                 return "question";
+
+            case "claim":
+                return "claim";
 
             case "completed":
                 return "completed";

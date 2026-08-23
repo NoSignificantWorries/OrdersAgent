@@ -1,7 +1,10 @@
 // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
+let allEmails = [];
 let emails = [];
 let selectedEmailId = null;
+let selectedSourceType = "inbox";
 let unreadCount = 0;
+let selectedEmailSnapshot = null;
 
 const {
     formatDate,
@@ -22,9 +25,12 @@ const {
     loadEmailsFromApi: loadEmailsFromApiFromApiModule,
     sendNewEmail,
     loadForwardDraft,
+    loadReplyDraft,
     sendForwardEmail,
     getMySignature,
     updateMySignature,
+    getEmailComment,
+    updateEmailComment,
 } = window.MailApi;
 
 const {
@@ -47,6 +53,7 @@ const {
     selectEmail: selectEmailFromModule,
     closeOpenedEmail: closeOpenedEmailFromModule,
     closeAndMarkUnread: closeAndMarkUnreadFromModule,
+    syncInboxSelectionState: syncInboxSelectionStateFromModule,
 } = window.MailRenderList;
 
 const {
@@ -76,6 +83,7 @@ const {
 } = window.MailCompose;
 
 const chatStorage = new Map();
+const threadCache = new Map();
 
 let currentStatusFilter = "all";
 let currentClassFilter = "all";
@@ -90,6 +98,8 @@ const replyDrafts = new Map();
 let isReplyInputFocused = false;
 let isReplyFileDialogOpen = false;
 let isDecisionSelectFocused = false;
+let isCommentModalOpen = false;
+let isCommentModalSaving = false;
 const openReplyForms = new Set();
 const expandedThreads = new Set();
 let composeDraft = {
@@ -116,6 +126,12 @@ let signatureModalSaving = false;
 let signatureDraft = "";
 
 let mailToastTimer = null;
+
+function syncInboxSelectionState(mode = "replace") {
+    if (typeof syncInboxSelectionStateFromModule === "function") {
+        return syncInboxSelectionStateFromModule(getMailRenderListState(), mode);
+    }
+}
 
 function showMailToast(message) {
     const toast = document.getElementById("mail-toast");
@@ -371,7 +387,9 @@ function getThreadMessages(currentEmail) {
         return [currentEmail];
     }
 
-    const related = emails.filter((email) => {
+    const source = Array.isArray(allEmails) && allEmails.length ? allEmails : emails;
+
+    const related = source.filter((email) => {
         const messageId = getEmailMessageId(email);
         const inReplyTo = getEmailInReplyTo(email);
         const refs = getEmailReferences(email);
@@ -381,7 +399,11 @@ function getThreadMessages(currentEmail) {
         return refs.some((ref) => threadKeys.has(ref));
     });
 
-    if (!related.some((email) => email.id === currentEmail.id)) {
+    const currentRealId = Number(currentEmail.email_id || currentEmail.id || 0);
+
+    if (
+        !related.some((email) => Number(email.email_id || email.id) === Number(currentRealId))
+    ) {
         related.push(currentEmail);
     }
 
@@ -408,6 +430,7 @@ const decisionOptions = [
     { value: "request", label: "Заявка" },
     { value: "calculation", label: "Расчёт" },
     { value: "question", label: "Вопрос" },
+    { value: "claim", label: "Претензия" },
 ];
 
 function recalculateUnreadCount() {
@@ -418,26 +441,108 @@ function recalculateUnreadCount() {
 
 // ========== НОРМАЛИЗАЦИЯ ДАННЫХ API ==========
 function normalizeApiItem(item, idx) {
+    const taskStatus = item.status || "";
+    const uiStatus = mapTaskStatusToUiStatus
+        ? mapTaskStatusToUiStatus(taskStatus)
+        : taskStatus;
+
+    const dateValue =
+        item.date ||
+        item.created_at ||
+        item.emaildate ||
+        item.createdat ||
+        new Date().toISOString();
+
+    const normalized = {
+        id: item.id ?? idx + 1,
+        email_id: item.email_id ?? item.emailid ?? null,
+        mailbox: item.mailbox || "",
+        uid: item.email_uid ?? item.emailuid ?? null,
+
+        sender: item.sender || item.emailfrom || "Неизвестный отправитель",
+        subject: item.subject || item.emailsubject || "(без темы)",
+        date: dateValue,
+
+        message_id: item.message_id || item.messageid || null,
+        in_reply_to: item.in_reply_to || item.inreplyto || null,
+        references: item.references || item.emailreferences || "",
+
+        archived: item.archived === true,
+        read: item.is_read === true,
+        comment_text: item.comment_text ?? null,
+        has_comment:
+            item.has_comment === true ||
+            Boolean(String(item.comment_text || "").trim()),
+
+        prob_1: null,
+        predicted_class:
+            item.predicted_class ??
+            item.predictedclass ??
+            null,
+        model_decision: item.class || item.modeldecision || "",
+
+        task: {
+            id: item.id ?? null,
+            document_id: null,
+            type: null,
+            status: item.status || null,
+            priority: 100,
+            input_data: {},
+            output_data: {},
+            assigned_to: null,
+            error_message: "",
+            attempts: 0,
+            max_attempts: 3,
+            created_at: null,
+            started_at: null,
+            completed_at: null,
+        },
+
+        task_status: taskStatus,
+        status: uiStatus,
+        documents: [],
+        document_names: [],
+    };
+
+    return normalized;
+}
+
+function normalizeSingleInboxDetailItem(item) {
     const output =
         item.outputdata && typeof item.outputdata === "object"
             ? item.outputdata
-            : {};
+            : item.output_data && typeof item.output_data === "object"
+                ? item.output_data
+                : {};
     const documents = Array.isArray(item.documents) ? item.documents : [];
 
-    const taskStatus = item.status || "";
-    const uiStatus = mapTaskStatusToUiStatus(taskStatus);
+    const taskStatus = item.status || item.task_status || "";
+    const uiStatus = mapTaskStatusToUiStatus
+        ? mapTaskStatusToUiStatus(taskStatus)
+        : taskStatus;
 
-    const emailContent = item.rawemail || item.emailbody || "";
+    const emailContent = item.rawemail || item.raw_email || item.emailbody || "";
+
     const normalized = {
-        id: item.id ?? idx + 1,
-        email_id: item.emailid ?? null,
+        id: item.taskid ?? item.id ?? item.emailid ?? item.email_id ?? 0,
+        email_id: item.emailid ?? item.email_id ?? null,
         mailbox: item.mailbox || "",
-        uid: item.emailuid ?? null,
-        sender: item.emailfrom || "Неизвестный отправитель",
-        subject: item.emailsubject || "(без темы)",
-        date: item.emaildate || item.createdat || new Date().toISOString(),
+        uid: item.emailuid ?? item.email_uid ?? null,
+
+        sender: item.emailfrom || item.email_from || "Неизвестный отправитель",
+        subject: item.emailsubject || item.email_subject || "(без темы)",
+        date:
+            item.emaildate ||
+            item.email_date ||
+            item.createdat ||
+            item.created_at ||
+            new Date().toISOString(),
         content: emailContent,
-        preview: emailContent.replace(/\s+/g, " ").trim().slice(0, 140),
+        preview: emailContent
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 140),
+
         message_id: item.messageid || item.message_id || null,
         in_reply_to: item.inreplyto || item.in_reply_to || null,
         references: Array.isArray(item.references)
@@ -446,31 +551,42 @@ function normalizeApiItem(item, idx) {
 
         archived: item.archived === true,
         read: item.is_read === true,
+        comment_text: item.comment_text ?? null,
+        has_comment:
+            item.has_comment === true ||
+            Boolean(String(item.comment_text || "").trim()),
 
         prob_1: output.prob_1 ?? item.prob1 ?? null,
-        predicted_class: output.predicted_class ?? item.predictedclass ?? null,
-        model_decision: output.model_decision ?? item.modeldecision ?? "",
+        predicted_class:
+            output.predicted_class ??
+            item.predictedclass ??
+            item.predicted_class ??
+            null,
+        model_decision:
+            output.model_decision ??
+            item.modeldecision ??
+            item.model_decision ??
+            "",
 
         task: {
-            id: item.id ?? null,
-            document_id: item.documentid ?? null,
+            id: item.taskid ?? item.id ?? null,
+            document_id: item.documentid ?? item.document_id ?? null,
             type: item.type || null,
-            status: item.status || null,
-            priority: item.priority ?? 100,
-            input_data: item.inputdata || {},
+            status: taskStatus || null,
+            priority: item.task_priority ?? item.priority ?? 100,
+            input_data: item.inputdata || item.input_data || {},
             output_data: output,
-            assigned_to: item.assignedto ?? null,
-            error_message: item.errormessage || "",
+            assigned_to: item.assignedto ?? item.assigned_to ?? null,
+            error_message: item.errormessage || item.error_message || "",
             attempts: item.attempts ?? 0,
             max_attempts: item.maxattempts ?? 3,
-            created_at: item.taskcreatedat || null,
-            started_at: item.taskstartedat || null,
-            completed_at: item.taskcompletedat || null,
+            created_at: item.taskcreatedat || item.task_created_at || null,
+            started_at: item.taskstartedat || item.task_started_at || null,
+            completed_at: item.taskcompletedat || item.task_completed_at || null,
         },
 
         task_status: taskStatus,
         status: uiStatus,
-
         documents,
         document_names: documents
             .map((doc) => doc?.document_name)
@@ -487,74 +603,89 @@ function normalizeApiItem(item, idx) {
     return normalized;
 }
 
-
 // ========== ЗАГРУЗКА ПИСЕМ ИЗ API ==========
-async function loadEmailsFromApi(showLoadingState = true) {
-    const result = await loadEmailsFromApiFromApiModule(
-        showLoadingState,
-        normalizeApiItem,
-    );
+async function loadEmailsFromApi(options = {}) {
+    const normalizedOptions =
+        typeof options === "object" && options !== null
+            ? options
+            : { showLoadingState: Boolean(options) };
 
-    emails = result.emails || [];
+    const result = await loadEmailsFromApiFromApiModule({
+        ...normalizedOptions,
+        normalizeApiItem,
+    });
+
+    allEmails = result.emails || [];
+    emails = [...allEmails];
     recalculateUnreadCount();
-    return result.ok;
+    return result;
 }
 
 
 // ========== ОТРИСОВКА СПИСКА ==========
 function getMailRenderListState() {
-    return {
+    const state = {
         get emails() {
             return emails;
         },
         set emails(value) {
             emails = value;
         },
-
         get selectedEmailId() {
             return selectedEmailId;
         },
         set selectedEmailId(value) {
             selectedEmailId = value;
         },
-
+        get selectedEmailSnapshot() {
+            return selectedEmailSnapshot;
+        },
+        set selectedEmailSnapshot(value) {
+            selectedEmailSnapshot = value;
+        },
+        get selectedSourceType() {
+            return selectedSourceType;
+        },
+        set selectedSourceType(value) {
+            selectedSourceType = value;
+        },
         get currentSearchTerm() {
             return currentSearchTerm;
         },
         set currentSearchTerm(value) {
             currentSearchTerm = value;
         },
-
         get currentStatusFilter() {
             return currentStatusFilter;
         },
         set currentStatusFilter(value) {
             currentStatusFilter = value;
         },
-
         get currentClassFilter() {
             return currentClassFilter;
         },
         set currentClassFilter(value) {
             currentClassFilter = value;
         },
-
         get sortNewestFirst() {
             return sortNewestFirst;
         },
         set sortNewestFirst(value) {
             sortNewestFirst = value;
         },
-
         get unreadCount() {
             return unreadCount;
         },
         set unreadCount(value) {
             unreadCount = value;
         },
-
         openReplyForms,
     };
+
+    // DEBUG: ссылка на состояние списка
+    window.__inboxState = state;
+
+    return state;
 }
 
 function showLoading() {
@@ -583,18 +714,22 @@ function renderEmailList() {
     });
 }
 
-function selectEmail(id) {
-    return selectEmailFromModule(id, {
-        state: getMailRenderListState(),
-        showLoading,
-        highlightSelectedEmail,
-        renderEmailCard,
-        renderChatForEmail,
-        renderEmailList,
-        updateUnreadCount,
-    });
+function selectEmail(id, options = {}) {
+    return selectEmailFromModule(
+        id,
+        {
+            state: getMailRenderListState(),
+            showLoading,
+            highlightSelectedEmail,
+            renderEmailCard,
+            renderChatForEmail,
+            renderEmailList,
+            updateUnreadCount,
+            normalizeInboxDetailItem: normalizeSingleInboxDetailItem,
+        },
+        options,
+    );
 }
-
 
 // ========== КАРТОЧКА ПИСЬМА ==========
 function getMailRenderCardState() {
@@ -610,6 +745,18 @@ function getMailRenderCardState() {
         },
         set selectedEmailId(value) {
             selectedEmailId = value;
+        },
+        get selectedEmailSnapshot() {
+            return selectedEmailSnapshot;
+        },
+        set selectedEmailSnapshot(value) {
+            selectedEmailSnapshot = value;
+        },
+        get selectedSourceType() {
+            return selectedSourceType;
+        },
+        set selectedSourceType(value) {
+            selectedSourceType = value;
         },
         get pendingSilentRefresh() {
             return pendingSilentRefresh;
@@ -634,6 +781,18 @@ function getMailRenderCardState() {
         },
         set isDecisionSelectFocused(value) {
             isDecisionSelectFocused = value;
+        },
+        get isCommentModalOpen() {
+            return isCommentModalOpen;
+        },
+        set isCommentModalOpen(value) {
+            isCommentModalOpen = value;
+        },
+        get isCommentModalSaving() {
+            return isCommentModalSaving;
+        },
+        set isCommentModalSaving(value) {
+            isCommentModalSaving = value;
         },
         get isReplyFileDialogOpen() {
             return isReplyFileDialogOpen;
@@ -672,10 +831,15 @@ function canUnarchiveTask(email) {
     return canUnarchiveTaskFromModule(email);
 }
 
-function closeOpenedEmail() {
-    return closeOpenedEmailFromModule({
-        state: getMailRenderListState(),
-    });
+function closeOpenedEmail(options = {}) {
+    return closeOpenedEmailFromModule(
+        {
+            state: getMailRenderListState(),
+            threadCache,
+            chatStorage,
+        },
+        options,
+    );
 }
 
 function closeAndMarkUnread() {
@@ -686,10 +850,12 @@ function closeAndMarkUnread() {
     });
 }
 
-function renderEmailCard(email) {
-    return renderEmailCardFromModule(email, {
+async function renderEmailCard(email) {
+    return await renderEmailCardFromModule(email, {
         state: getMailRenderCardState(),
         escapeHtml,
+        formatDate,
+        formatTimeOnly,
         formatDateTime,
         getStatusName,
         decisionOptions,
@@ -699,14 +865,17 @@ function renderEmailCard(email) {
         canCloseTask,
         canUnarchiveTask,
         renderEmailList,
+        updateUnreadCount,
         highlightSelectedEmail,
         selectEmail,
         closeOpenedEmail,
         closeAndMarkUnread,
         refreshEmailsSilently,
+        loadReplyDraft,
         getThreadMessages,
         isThreadExpanded,
         toggleThreadExpanded,
+        threadCache,
     });
 }
 
@@ -731,6 +900,10 @@ function isReplyInputProtected(state) {
 
 function isDecisionSelectProtected() {
     return isDecisionSelectFocused === true;
+}
+
+function isCommentModalProtected() {
+    return isCommentModalOpen === true || isCommentModalSaving === true;
 }
 
 function getMailComposeState() {
@@ -821,6 +994,18 @@ function getMailChatDeps() {
             set selectedEmailId(value) {
                 selectedEmailId = value;
             },
+            get selectedEmailSnapshot() {
+                return selectedEmailSnapshot;
+            },
+            set selectedEmailSnapshot(value) {
+                selectedEmailSnapshot = value;
+            },
+            get selectedSourceType() {
+                return selectedSourceType;
+            },
+            set selectedSourceType(value) {
+                selectedSourceType = value;
+            },
             chatStorage,
             get isMaterialInputComposing() {
                 return isMaterialInputComposing;
@@ -872,6 +1057,18 @@ function getMailInitState() {
         },
         set selectedEmailId(value) {
             selectedEmailId = value;
+        },
+        get selectedEmailSnapshot() {
+            return selectedEmailSnapshot;
+        },
+        set selectedEmailSnapshot(value) {
+            selectedEmailSnapshot = value;
+        },
+        get selectedSourceType() {
+            return selectedSourceType;
+        },
+        set selectedSourceType(value) {
+            selectedSourceType = value;
         },
         chatStorage,
         replyDrafts,
@@ -942,13 +1139,25 @@ function getMailInitState() {
         set isDecisionSelectFocused(value) {
             isDecisionSelectFocused = value;
         },
+        get isCommentModalOpen() {
+            return isCommentModalOpen;
+        },
+        set isCommentModalOpen(value) {
+            isCommentModalOpen = value;
+        },
+        get isCommentModalSaving() {
+            return isCommentModalSaving;
+        },
+        set isCommentModalSaving(value) {
+            isCommentModalSaving = value;
+        },
         get isReplyFileDialogOpen() {
             return isReplyFileDialogOpen;
         },
         set isReplyFileDialogOpen(value) {
             isReplyFileDialogOpen = value;
         },
-                get userSignature() {
+        get userSignature() {
             return userSignature;
         },
         set userSignature(value) {
@@ -978,6 +1187,8 @@ function refreshEmailsSilently() {
         isMaterialInputProtected,
         isReplyInputProtected,
         isComposeInputProtected,
+        isDecisionSelectProtected,
+        isCommentModalProtected,
         loadEmailsFromApi,
         renderEmailList,
         updateUnreadCount,
@@ -992,6 +1203,11 @@ function initSignatureSettings() {
 }
 
 function initMailPage(config) {
+    threadCache.clear();
+    chatStorage.clear();
+    selectedEmailSnapshot = null;
+    selectedEmailId = null;
+    
     initSignatureSettings();
 
     return initMailPageFromModule(config, {
@@ -1008,6 +1224,7 @@ function initMailPage(config) {
         isReplyInputProtected,
         isComposeInputProtected,
         isDecisionSelectProtected,
+        isCommentModalProtected,
         highlightSelectedEmail,
         renderChatForEmail,
         renderEmailCard,

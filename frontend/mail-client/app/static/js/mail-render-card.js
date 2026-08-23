@@ -14,6 +14,22 @@
         };
     }
 
+    function prependSignatureToReplyDraft(draftBody, signatureText) {
+        const body = String(draftBody || "").trim();
+        const rawSignature = String(signatureText || "").trim();
+        const replySpace = "\n\n";
+
+        if (!rawSignature) {
+            return body ? `${replySpace}${body}` : "";
+        }
+
+        const formattedSignature = /^--(?:\r?\n|$)/.test(rawSignature)
+            ? rawSignature
+            : `--\n${rawSignature}`;
+
+        return `${replySpace}${formattedSignature}\n\n${body}`;
+    }
+
     function getDisplayDocuments(email) {
         const docs = Array.isArray(email?.documents) ? email.documents : [];
         const seenNames = new Set();
@@ -75,7 +91,7 @@
         if (!input) return;
 
         const { state, refreshEmailsSilently } = deps;
-        const realEmailId = email.email_id || email.id;
+        const realEmailId = Number(email.email_id || email.emailid || email.id);
 
         if (!state.replyDrafts) {
             state.replyDrafts = new Map();
@@ -147,10 +163,137 @@
         return `${count} писем`;
     };
 
-    function renderEmailCard(email, deps) {
+    async function loadEmailThread(emailId) {
+        const resp = await fetch(`/api/emails/${emailId}/thread?source=inbox`, {
+            credentials: "same-origin",
+        });
+
+        if (!resp.ok) {
+            let detail = `Не удалось загрузить цепочку (${resp.status})`;
+
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    detail = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(detail);
+        }
+
+        const data = await resp.json();
+        return Array.isArray(data?.items) ? data.items : [];
+    }
+
+    
+    function extractDisplayBodyFromRawEmail(value) {
+        const raw = String(value || "").replace(/\r\n/g, "\n");
+
+        if (!raw.trim()) {
+            return "";
+        }
+
+        const headerBodySeparator = raw.indexOf("\n\n");
+        let body = headerBodySeparator >= 0 ? raw.slice(headerBodySeparator + 2) : raw;
+
+        body = body
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+
+        return body;
+    }
+
+
+    function normalizeThreadItem(threadEmail) {
+        const subject =
+            threadEmail?.subject ||
+            threadEmail?.emailsubject ||
+            "(без темы)";
+
+        const rawSource =
+            threadEmail?.content ||
+            threadEmail?.rawemail ||
+            "";
+
+        const rawText =
+            threadEmail?.thread_source === "sent"
+                ? extractDisplayBodyFromRawEmail(rawSource)
+                : rawSource;
+
+        const preview =
+            threadEmail?.preview ||
+            String(rawText)
+                .replace(/\r/g, "\n")
+                .replace(/\n{2,}/g, "\n")
+                .replace(/\s+/g, " ")
+                .trim();
+
+        const date =
+            threadEmail?.date ||
+            threadEmail?.emaildate ||
+            threadEmail?.createdat ||
+            threadEmail?.sentat ||
+            null;
+
+        const sender =
+            threadEmail?.sender ||
+            threadEmail?.emailfrom ||
+            "Без отправителя";
+
+        const mailbox =
+            threadEmail?.mailbox ||
+            threadEmail?.toheader ||
+            "";
+
+        return {
+            ...threadEmail,
+            id: Number(threadEmail?.source_id || threadEmail?.id || threadEmail?.emailid || 0),
+            email_id: Number(threadEmail?.emailid || threadEmail?.email_id || 0),
+            source_id: Number(threadEmail?.source_id || threadEmail?.id || threadEmail?.emailid || 0),
+            source_type: threadEmail?.thread_source || threadEmail?.source_type || "inbox",
+            thread_source: threadEmail?.thread_source || threadEmail?.source_type || "inbox",
+            subject,
+            content: rawText,
+            preview,
+            date,
+            sender,
+            mailbox,
+        };
+    }
+
+    function openSentThreadEmailFromInbox(threadEmail) {
+        const sentEmailId = Number(threadEmail?.source_id || 0);
+        if (!Number.isFinite(sentEmailId) || sentEmailId <= 0) {
+            alert("Не удалось определить исходящее письмо для перехода.");
+            return;
+        }
+
+        const params = new URLSearchParams();
+        params.set("selected_email_id", String(sentEmailId));
+        params.set("selected_source", "sent");
+
+        window.location.href = `/sent?${params.toString()}`;
+    }
+
+    async function openInboxThreadEmailFromInbox(targetSourceId, selectEmail) {
+        if (!Number.isFinite(Number(targetSourceId)) || Number(targetSourceId) <= 0) {
+            alert("Не удалось определить входящее письмо для перехода.");
+            return;
+        }
+
+        if (typeof selectEmail !== "function") {
+            throw new Error("Функция выбора письма не подключена");
+        }
+
+        await selectEmail(Number(targetSourceId), { historyMode: "push" });
+    }
+
+    async function renderEmailCard(email, deps) {
         const {
             state,
             escapeHtml,
+            formatDate,
+            formatTimeOnly,
             formatDateTime,
             getStatusName,
             decisionOptions,
@@ -160,20 +303,31 @@
             canCloseTask,
             canUnarchiveTask,
             renderEmailList,
+            updateUnreadCount,
             highlightSelectedEmail,
             selectEmail,
             closeOpenedEmail,
             closeAndMarkUnread,
             refreshEmailsSilently,
+            loadReplyDraft,
             getThreadMessages,
             isThreadExpanded,
             toggleThreadExpanded,
+            threadCache,
         } = deps;
+
+        const commentApi = window.MailComments || {};
 
         const cfg = window.MAILPAGECONFIG || {};
 
+        const emailSubject = email.subject || email.emailsubject || "(без темы)";
+        const emailSender = email.sender || email.emailfrom || "Без отправителя";
+        const emailDate = email.date || email.emaildate || email.createdat || null;
+        const emailMailbox = email.mailbox || email.toheader || "";
+        const emailContentSource = email.content || email.rawemail || "";
+
         const formattedContent =
-            (email.content || "")
+            (emailContentSource || "")
                 .split("\n")
                 .map((line) => {
                     if (line.trim() === "") return "<br>";
@@ -185,13 +339,37 @@
                 .join("") || "<p>...</p>";
 
         const docsWithName = getDisplayDocuments(email);
+        const realEmailId = Number(email.email_id || email.emailid || email.id);
 
-        const threadMessagesRaw =
-            typeof getThreadMessages === "function" ? getThreadMessages(email) : [email];
+        let threadMessages = [];
+        const cacheKey = realEmailId;
 
-        const threadMessages = Array.isArray(threadMessagesRaw) && threadMessagesRaw.length
-            ? threadMessagesRaw
-            : [email];
+        if (threadCache && threadCache.has(cacheKey)) {
+            threadMessages = threadCache.get(cacheKey);
+        } else {
+            try {
+                const rawThreadItems = await loadEmailThread(realEmailId);
+                threadMessages = rawThreadItems.map(normalizeThreadItem);
+                if (threadCache) {
+                    threadCache.set(cacheKey, threadMessages);
+                }
+            } catch (error) {
+                console.error("Не удалось загрузить цепочку через API, используем локальный fallback", error);
+
+                const threadMessagesRaw =
+                    typeof getThreadMessages === "function" ? getThreadMessages(email) : [email];
+
+                const fallback = Array.isArray(threadMessagesRaw) && threadMessagesRaw.length
+                    ? threadMessagesRaw
+                    : [email];
+
+                threadMessages = fallback.map(normalizeThreadItem);
+
+                if (threadCache) {
+                    threadCache.set(cacheKey, threadMessages);
+                }
+            }
+        }
 
         const hasThread = threadMessages.length > 1;
         const threadExpanded =
@@ -223,22 +401,37 @@
                         <div class="email-thread-timeline">
                             ${threadMessages
                                 .map((threadEmail) => {
-                                    const isCurrent = threadEmail.id === email.id;
+                                    const threadSource = String(threadEmail.thread_source || threadEmail.source_type || "inbox");
+                                    const threadSourceId = Number(threadEmail.source_id || 0);
+
+                                    const currentThreadSource = String(email.thread_source || email.source_type || "inbox");
+                                    const currentSourceId = Number(email.source_id || realEmailId || 0);
+
+                                    const isCurrent =
+                                        threadSource === currentThreadSource &&
+                                        threadSourceId === currentSourceId;
+
                                     const previewSource =
-                                        threadEmail.preview || threadEmail.content || "";
-                                    const preview = escapeHtml(previewSource.slice(0, 180));
+                                        threadEmail.preview || threadEmail.content || threadEmail.rawemail || "";
+
+                                    const preview = escapeHtml(String(previewSource).slice(0, 180));
 
                                     return `
                                         <button
                                             type="button"
                                             class="email-thread-item ${isCurrent ? "is-current" : ""}"
-                                            data-thread-email-id="${threadEmail.id}"
+                                            data-thread-source="${escapeHtml(threadSource)}"
+                                            data-thread-source-id="${escapeHtml(String(threadSourceId))}"
                                         >
                                             <span class="email-thread-marker" aria-hidden="true"></span>
 
                                             <span class="email-thread-item-main">
                                                 <span class="email-thread-item-top">
-                                                    <span class="email-thread-sender">${escapeHtml(threadEmail.sender || "Без отправителя")}</span>
+                                                    <span class="email-thread-sender">${
+                                                        (threadEmail.thread_source === "sent")
+                                                            ? `Исходящее: ${escapeHtml(threadEmail.sender || threadEmail.emailfrom || "Без отправителя")}`
+                                                            : escapeHtml(threadEmail.sender || threadEmail.emailfrom || "Без отправителя")
+                                                    }</span>
                                                     ${
                                                         isCurrent
                                                             ? '<span class="email-thread-current-badge">Текущее</span>'
@@ -247,11 +440,11 @@
                                                 </span>
 
                                                 <span class="email-thread-item-meta">
-                                                    ${formatDateTime(threadEmail.date)}
+                                                    ${threadEmail.date ? `${escapeHtml(formatDate(threadEmail.date))} ${escapeHtml(formatTimeOnly(threadEmail.date))}` : "Дата неизвестна"}
                                                 </span>
 
                                                 <span class="email-thread-item-subject">
-                                                    ${escapeHtml(threadEmail.subject || "(без темы)")}
+                                                    ${escapeHtml(threadEmail.subject || threadEmail.emailsubject || "(без темы)")}
                                                 </span>
 
                                                 <span class="email-thread-item-preview">
@@ -281,7 +474,7 @@
                             )
                             .join("")}
                     </ul>
-                    <button class="save-all-attachments-btn" data-email-id="${email.id}">
+                    <button class="save-all-attachments-btn" data-email-id="${realEmailId}">
                         Скачать
                     </button>
                 </div>
@@ -306,12 +499,11 @@
         const decisionBlock =
             email.task && cfg.allowDecisionEdit !== false
                 ? `
-                    <div class="decision-block">
-                        <label for="decision-select" class="decision-label">Класс письма</label>
-                        <select id="decision-select" class="decision-select">
+                    <div class="email-bottom-decision">
+                        <select id="decision-select" class="decision-select email-bottom-select" aria-label="Класс письма">
                             ${decisionHtml}
                         </select>
-                        <button id="decision-save-btn" class="decision-save-btn">Сохранить</button>
+                        <button id="decision-save-btn" class="decision-save-btn email-bottom-btn email-bottom-btn-save">Сохранить</button>
                     </div>
                 `
                 : "";
@@ -319,11 +511,9 @@
         const closeTaskBlock =
             cfg.allowCloseTask !== false && canCloseTask(email) && email.task?.id
                 ? `
-                    <div class="danger-zone">
-                        <button id="close-task-btn" class="close-task-btn">
-                            Закрыть задачу
-                        </button>
-                    </div>
+                    <button id="close-task-btn" class="close-task-btn email-bottom-btn email-bottom-btn-danger">
+                        Закрыть задачу
+                    </button>
                 `
                 : "";
 
@@ -339,19 +529,16 @@
 
         const unarchiveTaskBlock = canUnarchiveTask(email)
                 ? `
-                    <div class="danger-zone">
-                        <button id="unarchive-task-btn" class="close-task-btn">
-                            Вернуть во входящие
-                        </button>
-                    </div>
+                    <button id="unarchive-task-btn" class="close-task-btn email-bottom-btn email-bottom-btn-danger">
+                        Вернуть во входящие
+                    </button>
                 `
                 : "";
 
         const emailView = document.getElementById("emailView");
         if (!emailView) return;
 
-        const realEmailId = email.email_id || email.id;
-        const { appendSignatureIfMissing, ensureUserSignature } = getReplySignatureHelpers();
+        const { ensureUserSignature } = getReplySignatureHelpers();
         const savedReplyDraft = state.replyDrafts?.get(realEmailId) || "";
         const shouldShowReplyForm = state.openReplyForms?.has(realEmailId) === true;
 
@@ -359,7 +546,29 @@
             <div class="email-card">
                 <div class="email-header">
                     <div class="email-header-top">
-                        <div class="email-subject">${escapeHtml(email.subject)}</div>
+                        <div class="email-subject-row">
+                            ${
+                                email.has_comment
+                                    ? `
+                                        <button
+                                            type="button"
+                                            class="email-comment-indicator-btn"
+                                            id="email-comment-indicator-btn"
+                                            aria-label="Просмотреть комментарий"
+                                            title="Просмотреть комментарий"
+                                        >
+                                            <img
+                                                src="/static/images/comment.svg"
+                                                alt=""
+                                                aria-hidden="true"
+                                                class="email-comment-indicator-icon"
+                                            >
+                                        </button>
+                                    `
+                                    : ""
+                            }
+                            <div class="email-subject">${escapeHtml(emailSubject)}</div>
+                        </div>
 
                         <div class="email-header-actions">
                             <div class="status-block">
@@ -390,6 +599,14 @@
                                                 <button
                                                     type="button"
                                                     class="email-actions-menu-item"
+                                                    id="email-comment-btn"
+                                                >
+                                                    Комментарий
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    class="email-actions-menu-item"
                                                     id="mark-unread-btn"
                                                 >
                                                     Пометить непрочитанным
@@ -413,9 +630,9 @@
                     </div>
 
                     <div class="email-meta">
-                        <div><strong>От:</strong> ${escapeHtml(email.sender)}</div>
-                        <div><strong>Кому:</strong> ${escapeHtml(email.mailbox)}</div>
-                        <div><strong>Дата:</strong> ${formatDateTime(email.date)}</div>
+                        <div><strong>От:</strong> ${escapeHtml(emailSender)}</div>
+                        <div><strong>Кому:</strong> ${escapeHtml(emailMailbox)}</div>
+                        <div><strong>Дата:</strong> ${emailDate ? `${escapeHtml(formatDate(emailDate))} ${escapeHtml(formatTimeOnly(emailDate))}` : "Дата неизвестна"}</div>
                     </div>
                 </div>
 
@@ -424,34 +641,12 @@
                 <div class="email-divider"></div>
 
                 ${attachmentBlock}
-                ${decisionBlock}
-                ${closeTaskBlock}
-                ${unarchiveTaskBlock}
 
                 <div class="email-body">
                     ${formattedContent}
                 </div>
 
                 <div class="reply-block">
-                    <div class="reply-toolbar">
-                        <button
-                            type="button"
-                            id="reply-toggle-btn"
-                            class="reply-btn reply-btn-primary"
-                            ${shouldShowReplyForm ? "hidden" : ""}
-                        >
-                            Ответить
-                        </button>
-
-                        <button
-                            type="button"
-                            id="forward-toggle-btn"
-                            class="reply-btn reply-btn-primary"
-                        >
-                            Переслать
-                        </button>
-                    </div>
-
                     <div
                         id="reply-form-block"
                         class="reply-form-block"
@@ -484,6 +679,35 @@
                                 aria-label="Добавить вложения"
                                 title="Добавить вложения"
                             />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="email-bottom-actions">
+                    <div class="email-bottom-actions-inner">
+                        <div class="email-bottom-actions-left">
+                            <button
+                                type="button"
+                                id="reply-toggle-btn"
+                                class="reply-btn reply-btn-primary"
+                                ${shouldShowReplyForm ? "hidden" : ""}
+                            >
+                                Ответить
+                            </button>
+
+                            <button
+                                type="button"
+                                id="forward-toggle-btn"
+                                class="reply-btn reply-btn-primary"
+                            >
+                                Переслать
+                            </button>
+                        </div>
+
+                        <div class="email-bottom-actions-right">
+                            ${decisionBlock}
+                            ${closeTaskBlock}
+                            ${unarchiveTaskBlock}
                         </div>
                     </div>
                 </div>
@@ -521,16 +745,52 @@
                 }
             });
 
-            threadPanel.addEventListener("click", (event) => {
-                const target = event.target.closest("[data-thread-email-id]");
+            threadPanel.addEventListener("click", async (event) => {
+                const target = event.target.closest("[data-thread-source][data-thread-source-id]");
                 if (!target) return;
 
                 event.stopPropagation();
 
-                const targetId = Number(target.dataset.threadEmailId);
-                if (Number.isNaN(targetId) || targetId === email.id) return;
+                const targetSource = String(target.dataset.threadSource || "");
+                const targetSourceId = Number(target.dataset.threadSourceId || 0);
 
-                selectEmail(targetId);
+                if (!targetSource || !Number.isFinite(targetSourceId) || targetSourceId <= 0) {
+                    return;
+                }
+
+                const currentThreadSource = String(email.thread_source || email.source_type || "inbox");
+                const currentSourceId = Number(email.source_id || realEmailId || 0);
+
+                const isCurrentEmail =
+                    targetSource === currentThreadSource &&
+                    targetSourceId === currentSourceId;
+
+                if (isCurrentEmail) {
+                    return;
+                }
+
+                const targetThreadEmail = threadMessages.find(
+                    (item) =>
+                        String(item.thread_source || item.source_type || "inbox") === targetSource &&
+                        Number(item.source_id || 0) === targetSourceId,
+                );
+
+                if (!targetThreadEmail) {
+                    alert("Не удалось найти письмо в цепочке.");
+                    return;
+                }
+
+                if (targetSource === "inbox") {
+                    await openInboxThreadEmailFromInbox(targetSourceId, selectEmail);
+                    return;
+                }
+
+                if (targetSource === "sent") {
+                    openSentThreadEmailFromInbox(targetThreadEmail);
+                    return;
+                }
+
+                alert("Неизвестный тип письма в цепочке.");
             });
         }
 
@@ -544,17 +804,16 @@
         const replyFilesList = document.getElementById("reply-files-list");
 
         if (replyBodyInput) {
-            const initialReplyBody = appendSignatureIfMissing(
-                savedReplyDraft,
-                state.userSignature || "",
-            );
+            const initialReplyBody = String(savedReplyDraft || "");
 
             replyBodyInput.value = initialReplyBody;
 
             if (!state.replyDrafts) {
                 state.replyDrafts = new Map();
             }
-            state.replyDrafts.set(realEmailId, initialReplyBody);
+            if (initialReplyBody) {
+                state.replyDrafts.set(realEmailId, initialReplyBody);
+            }
 
             bindReplyInputEvents({
                 input: replyBodyInput,
@@ -693,12 +952,36 @@
         if (replyToggleBtn && replyFormBlock && replyBodyInput) {
             replyToggleBtn.addEventListener("click", async () => {
                 try {
-                    await ensureUserSignature(state);
+                    if (state.pendingSilentRefresh === true) {
+                        state.pendingSilentRefresh = false;
+                    }
 
-                    const nextValue = appendSignatureIfMissing(
-                        replyBodyInput.value,
-                        state.userSignature || "",
-                    );
+                    replyToggleBtn.disabled = true;
+
+                    let nextValue = String(replyBodyInput.value || "");
+                    const hasSavedDraft = String(nextValue).trim() !== "";
+
+                    if (!hasSavedDraft) {
+                        if (typeof loadReplyDraft !== "function") {
+                            throw new Error("Загрузка черновика ответа не подключена");
+                        }
+
+                        const sourceType =
+                            String(email.thread_source || email.source_type || "inbox") === "sent"
+                                ? "sent"
+                                : "inbox";
+
+                        const draft = await loadReplyDraft(realEmailId, {
+                            sourceType,
+                        });
+
+                        await ensureUserSignature(state);
+
+                        nextValue = prependSignatureToReplyDraft(
+                            draft?.body,
+                            state.userSignature || "",
+                        );
+                    }
 
                     replyBodyInput.value = nextValue;
 
@@ -711,9 +994,12 @@
                     replyFormBlock.hidden = false;
                     replyToggleBtn.hidden = true;
                     replyBodyInput.focus();
+                    replyBodyInput.setSelectionRange(0, 0);
                 } catch (error) {
                     console.error(error);
                     alert(error.message || "Не удалось открыть форму ответа");
+                } finally {
+                    replyToggleBtn.disabled = false;
                 }
             });
         }
@@ -773,12 +1059,7 @@
 
         if (replySendBtn && replyBodyInput) {
             replySendBtn.addEventListener("click", async () => {
-                await ensureUserSignature(state);
-
-                const body = appendSignatureIfMissing(
-                    replyBodyInput.value,
-                    state.userSignature || "",
-                ).trim();
+                const body = String(replyBodyInput.value || "").trim();
 
                 replyBodyInput.value = body;
 
@@ -862,6 +1143,8 @@
         const actionsToggleBtn = document.getElementById("email-actions-toggle-btn");
         const actionsMenu = document.getElementById("email-actions-menu");
         const markUnreadBtn = document.getElementById("mark-unread-btn");
+        const emailCommentBtn = document.getElementById("email-comment-btn");
+        const emailCommentIndicatorBtn = document.getElementById("email-comment-indicator-btn");
 
         if (actionsToggleBtn && actionsMenu) {
             actionsToggleBtn.addEventListener("click", (e) => {
@@ -895,13 +1178,55 @@
             });
         }
 
+        if (emailCommentBtn) {
+            emailCommentBtn.addEventListener("click", async () => {
+                try {
+                    actionsMenu.hidden = true;
+
+                    if (typeof commentApi.openCommentEditor !== "function") {
+                        throw new Error("Модуль комментариев не подключен");
+                    }
+
+                    await commentApi.openCommentEditor(email, {
+                        state,
+                        renderEmailList,
+                        renderEmailCard: (targetEmail) => renderEmailCard(targetEmail, deps),
+                    });
+                } catch (e) {
+                    console.error(e);
+                    alert(e.message || "Не удалось открыть комментарий");
+                }
+            });
+        }
+
+        if (emailCommentIndicatorBtn) {
+            emailCommentIndicatorBtn.addEventListener("click", async (event) => {
+                event.stopPropagation();
+
+                try {
+                    if (typeof commentApi.openCommentViewer !== "function") {
+                        throw new Error("Модуль комментариев не подключен");
+                    }
+
+                    await commentApi.openCommentViewer(email, {
+                        state,
+                        renderEmailList,
+                        renderEmailCard: (targetEmail) => renderEmailCard(targetEmail, deps),
+                    });
+                } catch (e) {
+                    console.error(e);
+                    alert(e.message || "Не удалось открыть просмотр комментария");
+                }
+            });
+        }
+
         const closeTaskBtn = document.getElementById("close-task-btn");
         if (closeTaskBtn) {
             closeTaskBtn.addEventListener("click", async () => {
                 closeTaskBtn.disabled = true;
 
                 try {
-                    const realEmailId = email.email_id || email.id;
+                    const realEmailId = Number(email.email_id || email.emailid || email.id);
 
                     const resp = await fetch(`/api/emails/${realEmailId}/archive`, {
                         method: "POST",
@@ -945,7 +1270,7 @@
                 unarchiveTaskBtn.disabled = true;
 
                 try {
-                    const realEmailId = email.email_id || email.id;
+                    const realEmailId = Number(email.email_id || email.emailid || email.id);
 
                     const resp = await fetch(`/api/emails/${realEmailId}/unarchive`, {
                         method: "POST",
@@ -1006,16 +1331,21 @@
                 if (
                     newVal !== "request" &&
                     newVal !== "calculation" &&
-                    newVal !== "question"
+                    newVal !== "question" &&
+                    newVal !== "claim"
                 ) {
                     alert(
-                        "Выберите итоговый класс: «Заявка», «Расчёт» или «Вопрос».",
+                        "Выберите итоговый класс: «Заявка», «Расчёт», «Вопрос» или «Претензия».",
                     );
                     return;
                 }
 
                 const nextStatus =
-                    newVal === "question" ? "question" : "ml_classified";
+                    newVal === "question"
+                        ? "question"
+                        : newVal === "claim"
+                            ? "claim"
+                            : "ml_classified";
 
                 try {
                     const resp = await fetch(
@@ -1069,7 +1399,7 @@
                     }
 
                     try {
-                        const realEmailId = email.email_id || email.id;
+                        const realEmailId = Number(email.email_id || email.emailid || email.id);
                         await fetch(`/api/emails/${realEmailId}/read`, {
                             method: "PATCH",
                             headers: {
@@ -1083,13 +1413,10 @@
                     }
 
                     renderEmailList();
-                    highlightSelectedEmail(email.id);
-                    renderEmailCard(email, deps);
 
-                    if (typeof closeOpenedEmail === 'function') {
+                    if (typeof closeOpenedEmail === "function") {
                         closeOpenedEmail();
                     }
-
 
                 } catch (e) {
                     console.error(e);
@@ -1117,5 +1444,7 @@
         isEditingReplyInput,
         isReplyInputProtected,
         bindReplyInputEvents,
+        openSentThreadEmailFromInbox,
+        openInboxThreadEmailFromInbox,
     };
 })();

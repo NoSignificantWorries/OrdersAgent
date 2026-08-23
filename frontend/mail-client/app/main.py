@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import os
 
 from app.config import settings
-from app.routers import auth, queue, me
+from app.routers import auth, queue, me, sent, mappings
 
 app = FastAPI(
     title=settings.app_name,
@@ -18,7 +18,9 @@ templates = Jinja2Templates(directory="app/templates")
 
 app.include_router(auth.router)
 app.include_router(queue.router)
+app.include_router(sent.router)
 app.include_router(me.router)
+app.include_router(mappings.router)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -71,6 +73,42 @@ async def archived_page(request: Request):
             "user": user,
             "current_page": "archived",
         }
+    )
+
+
+@app.get("/sent", response_class=HTMLResponse)
+async def sent_page(request: Request):
+    """Страница исходящих писем"""
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "request": request,
+            "user": user,
+            "current_page": "sent",
+        }
+    )
+
+
+@app.get("/materials", response_class=HTMLResponse)
+async def materials_page(request: Request):
+    """Страница справочника материалов."""
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="materials.html",
+        context={
+            "request": request,
+            "user": user,
+            "current_page": "materials",
+        },
     )
 
 

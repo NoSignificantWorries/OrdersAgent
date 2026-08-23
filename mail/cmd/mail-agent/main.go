@@ -53,15 +53,21 @@ func main() {
 	endpoint := os.Getenv("MINIO_ENDPOINT")
 	accessKey := os.Getenv("MINIO_ACCESS_KEY")
 	secretKey := os.Getenv("MINIO_SECRET_KEY")
-	bucket := os.Getenv("MINIO_BUCKET")
+	incomingBucket := os.Getenv("MINIO_BUCKET")
+	outgoingBucket := os.Getenv("MINIO_OUTGOING_BUCKET")
 	useSSL := false
 
-	store, err := minio.NewCloudStorage(endpoint, accessKey, secretKey, bucket, useSSL)
+	incomingStore, err := minio.NewCloudStorage(endpoint, accessKey, secretKey, incomingBucket, useSSL)
 	if err != nil {
-		log.Fatalf("init cloud storage: %v", err)
+		log.Fatalf("init incoming cloud storage: %v", err)
 	}
 
-	repo := storage.NewDBRepo(db, store)
+	outgoingStore, err := minio.NewCloudStorage(endpoint, accessKey, secretKey, outgoingBucket, useSSL)
+	if err != nil {
+		log.Fatalf("init outgoing cloud storage: %v", err)
+	}
+
+	repo := storage.NewDBRepo(db, incomingStore, outgoingStore)
 	dbRepo, ok := repo.(*storage.DBRepo)
 	if !ok {
 		log.Fatalf("repo type assertion to *storage.DBRepo failed")
@@ -110,7 +116,9 @@ func main() {
                 return
             }
 
-            draft, err := storage.BuildForwardDraft(db, emailID)
+            sourceType := strings.TrimSpace(r.URL.Query().Get("source_type"))
+
+			draft, err := storage.BuildForwardDraft(db, emailID, sourceType)
             if err != nil {
                 log.Printf("forward draft failed | email_id=%d err=%v", emailID, err)
                 writeJSONError(w, http.StatusInternalServerError, "failed to build forward draft")
@@ -120,6 +128,34 @@ func main() {
             w.Header().Set("Content-Type", "application/json; charset=utf-8")
             if err := json.NewEncoder(w).Encode(draft); err != nil {
                 log.Printf("forward draft encode failed | email_id=%d err=%v", emailID, err)
+            }
+            return
+        }
+
+		if len(parts) == 2 && parts[1] == "reply-draft" {
+            if r.Method != http.MethodGet && r.Method != http.MethodPost {
+                http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+                return
+            }
+
+            emailID, err := strconv.ParseInt(parts[0], 10, 64)
+            if err != nil || emailID <= 0 {
+                writeJSONError(w, http.StatusBadRequest, "invalid email id")
+                return
+            }
+
+            sourceType := strings.TrimSpace(r.URL.Query().Get("source_type"))
+
+            draft, err := storage.BuildReplyDraft(db, emailID, sourceType)
+            if err != nil {
+                log.Printf("reply draft failed | email_id=%d err=%v", emailID, err)
+                writeJSONError(w, http.StatusInternalServerError, "failed to build reply draft")
+                return
+            }
+
+            w.Header().Set("Content-Type", "application/json; charset=utf-8")
+            if err := json.NewEncoder(w).Encode(draft); err != nil {
+                log.Printf("reply draft encode failed | email_id=%d err=%v", emailID, err)
             }
             return
         }
@@ -259,7 +295,7 @@ func main() {
 
 			log.Printf("send start | mailbox=%s to=%q subject=%q attachments=%d", mailbox, to, subject, len(attachments))
 
-			if err := storage.SendEmail(db, smtpClient, imapCfg, storage.SendEmailRequest{
+			if err := storage.SendEmail(db, dbRepo, smtpClient, imapCfg, storage.SendEmailRequest{
 				Mailbox:     mailbox,
 				To:          to,
 				Subject:     subject,
@@ -307,7 +343,7 @@ func main() {
 
 			log.Printf("reply send start | email_id=%d attachments=%d", emailID, len(attachments))
 
-			if err := storage.ReplyToEmail(db, smtpClient, imapCfg, storage.ReplyToEmailRequest{
+			if err := storage.ReplyToEmail(db, dbRepo, smtpClient, imapCfg, storage.ReplyToEmailRequest{
 				EmailID:     emailID,
 				Body:        body,
 				Attachments: attachments,
@@ -330,6 +366,7 @@ func main() {
 
 			to := strings.TrimSpace(r.FormValue("to"))
 			body := strings.TrimSpace(r.FormValue("body"))
+			sourceType := strings.TrimSpace(r.FormValue("source_type"))
 
 			if to == "" {
 				http.Error(w, "to is empty", http.StatusBadRequest)
@@ -353,8 +390,9 @@ func main() {
 			}
 
 			log.Printf(
-				"forward send start | email_id=%d to=%q include_docs=%d new_attachments=%d",
+				"forward send start | email_id=%d source_type=%q to=%q include_docs=%d new_attachments=%d",
 				emailID,
+				sourceType,
 				to,
 				len(includeDocumentIDs),
 				len(attachments),
@@ -366,8 +404,9 @@ func main() {
 				Body:               body,
 				IncludeDocumentIDs: includeDocumentIDs,
 				Attachments:        attachments,
+				SourceType:         sourceType,
 			}); err != nil {
-				log.Printf("forward send failed | email_id=%d err=%v", emailID, err)
+				log.Printf("forward send failed | email_id=%d source_type=%q err=%v", emailID, sourceType, err)
 				http.Error(w, "failed to forward email", http.StatusInternalServerError)
 				return
 			}
@@ -450,7 +489,7 @@ func main() {
 
 	startNewWorkers()
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
 	for {

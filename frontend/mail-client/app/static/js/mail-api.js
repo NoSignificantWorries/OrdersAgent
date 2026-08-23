@@ -3,6 +3,46 @@
         mapTaskStatusToUiStatus,
     } = window.MailFormatters;
 
+    function pickSafeEmailDate(item) {
+        const primary =
+            item?.date ??
+            item?.email_date ??
+            item?.emaildate ??
+            "";
+
+        const fallback =
+            item?.created_at ??
+            item?.createdat ??
+            "";
+
+        const rawPrimary = String(primary || "").trim();
+        if (!rawPrimary || rawPrimary.startsWith("0001-01-01")) {
+            return fallback || "";
+        }
+
+        return rawPrimary;
+    }
+
+    function getFilenameFromContentDisposition(headerValue) {
+        if (!headerValue) return "";
+
+        const utf8Match = headerValue.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+        if (utf8Match && utf8Match[1]) {
+            try {
+                return decodeURIComponent(utf8Match[1]);
+            } catch (_) {}
+        }
+
+        const asciiMatch = headerValue.match(/filename\s*=\s*"([^"]+)"/i)
+            || headerValue.match(/filename\s*=\s*([^;]+)/i);
+
+        if (asciiMatch && asciiMatch[1]) {
+            return asciiMatch[1].trim().replace(/^"|"$/g, "");
+        }
+
+        return "";
+    }
+
     async function downloadBlob(url, filename) {
         const resp = await fetch(url, {
             method: "GET",
@@ -24,9 +64,13 @@
         const blob = await resp.blob();
         const objectUrl = URL.createObjectURL(blob);
 
+        const contentDisposition = resp.headers.get("Content-Disposition") || "";
+        const serverFilename = getFilenameFromContentDisposition(contentDisposition);
+        const finalFilename = serverFilename || filename || "file";
+
         const link = document.createElement("a");
         link.href = objectUrl;
-        link.download = filename || "file";
+        link.download = finalFilename;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -51,9 +95,15 @@
                 return;
             }
 
+            const emailId = Number(email.email_id || email.emailid || email.id);
+
+            if (!Number.isFinite(emailId) || emailId <= 0) {
+                throw new Error("Не удалось определить ID письма");
+            }
+
             await downloadBlob(
-                `/api/emails/${email.id}/attachments/download-all`,
-                `email-${email.id}-attachments.zip`,
+                `/api/emails/${emailId}/attachments/download-all`,
+                `email-${emailId}-attachments.zip`,
             );
         } catch (e) {
             console.error(e);
@@ -104,7 +154,15 @@
         );
     }
 
-    async function loadEmailsFromApi(showLoadingState = true, normalizeApiItem) {
+    async function loadEmailsFromApi(options = {}) {
+        const {
+            showLoadingState = true,
+            normalizeApiItem = (item) => item,
+            page = 1,
+            perPage = 50,
+            extraParams = {},
+        } = options || {};
+
         const listEl = document.getElementById("emailsContainer");
         const viewEl = document.getElementById("emailView");
         const countSpan = document.getElementById("email-count-display");
@@ -118,9 +176,20 @@
             }
 
             const cfg = window.__MAIL_PAGE_CONFIG__ || {};
-            const url = cfg.apiUrl || "/api/queue";
+            const baseUrl = cfg.apiUrl || "/api/queue";
 
-            const resp = await fetch(url, {
+            const url = new URL(baseUrl, window.location.origin);
+            url.searchParams.set("page", String(page));
+            url.searchParams.set("per_page", String(perPage));
+
+            Object.entries(extraParams || {}).forEach(([key, value]) => {
+                if (value === undefined || value === null || value === "" || value === "all") {
+                    return;
+                }
+                url.searchParams.set(key, String(value));
+            });
+
+            const resp = await fetch(url.toString(), {
                 method: "GET",
                 headers: { Accept: "application/json" },
                 credentials: "same-origin",
@@ -134,7 +203,17 @@
                 if (viewEl) {
                     viewEl.innerHTML = `<div class="email-placeholder">Нужно войти заново</div>`;
                 }
-                return { ok: false, emails: [] };
+
+                return {
+                    ok: false,
+                    emails: [],
+                    pagination: {
+                        page: 1,
+                        perPage,
+                        total: 0,
+                        totalPages: 1,
+                    },
+                };
             }
 
             if (!resp.ok) {
@@ -145,22 +224,58 @@
                 if (viewEl) {
                     viewEl.innerHTML = `<div class="email-placeholder">Ошибка загрузки писем</div>`;
                 }
-                return { ok: false, emails: [] };
+
+                return {
+                    ok: false,
+                    emails: [],
+                    pagination: {
+                        page: 1,
+                        perPage,
+                        total: 0,
+                        totalPages: 1,
+                    },
+                };
             }
 
             const data = await resp.json();
             const items = Array.isArray(data.items) ? data.items : [];
-            const emails = items.map((item, idx) => normalizeApiItem(item, idx));
+            const normalize =
+                typeof normalizeApiItem === "function"
+                    ? normalizeApiItem
+                    : (item) => item;
+            const emails = items.map((item, idx) => {
+                const patchedItem = {
+                    ...item,
+                    date: pickSafeEmailDate(item),
+                    email_date: pickSafeEmailDate(item),
+                    emaildate: pickSafeEmailDate(item),
+                };
+                return normalize(patchedItem, idx);
+            });
 
-            if (countSpan) countSpan.textContent = `${emails.length} писем`;
+            const total = Number(data.total ?? emails.length);
+            const currentPage = Number(data.page ?? page);
+            const currentPerPage = Number(data.per_page ?? perPage);
+            const totalPages = Number(
+                data.total_pages ?? Math.max(1, Math.ceil(total / currentPerPage))
+            );
 
-            return { ok: true, emails };
+            if (countSpan) {
+                countSpan.textContent = `${total} писем`;
+            }
+
+            return {
+                ok: true,
+                emails,
+                pagination: {
+                    page: currentPage,
+                    perPage: currentPerPage,
+                    total,
+                    totalPages,
+                },
+            };
         } catch (e) {
             console.error("Ошибка загрузки писем:", e);
-
-            const listEl = document.getElementById("emailsContainer");
-            const viewEl = document.getElementById("emailView");
-            const countSpan = document.getElementById("email-count-display");
 
             if (countSpan) countSpan.textContent = "Ошибка";
             if (listEl) {
@@ -170,7 +285,16 @@
                 viewEl.innerHTML = `<div class="email-placeholder">Ошибка загрузки писем</div>`;
             }
 
-            return { ok: false, emails: [] };
+            return {
+                ok: false,
+                emails: [],
+                pagination: {
+                    page: 1,
+                    perPage,
+                    total: 0,
+                    totalPages: 1,
+                },
+            };
         }
     }
 
@@ -198,8 +322,15 @@
         return resp;
     }
 
-    async function loadForwardDraft(emailId) {
-        const resp = await fetch(`/api/emails/${emailId}/forward-draft`, {
+    async function loadForwardDraft(emailId, options = {}) {
+        const sourceType = options?.sourceType === "sent" ? "sent" : "inbox";
+
+        const url = new URL(`/api/emails/${emailId}/forward-draft`, window.location.origin);
+        url.search = new URLSearchParams({
+            source_type: sourceType,
+        }).toString();
+
+        const resp = await fetch(url.toString(), {
             method: "GET",
             headers: { Accept: "application/json" },
             credentials: "same-origin",
@@ -207,6 +338,43 @@
 
         if (!resp.ok) {
             let message = "Не удалось получить черновик пересылки";
+
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    message = data.detail;
+                }
+            } catch (_) {
+                try {
+                    const text = await resp.text();
+                    if (text?.trim()) {
+                        message = text.trim();
+                    }
+                } catch (_) {}
+            }
+
+            throw new Error(message);
+        }
+
+        return await resp.json();
+    }
+
+    async function loadReplyDraft(emailId, options = {}) {
+        const sourceType = options?.sourceType === "sent" ? "sent" : "inbox";
+
+        const url = new URL(`/api/emails/${emailId}/reply-draft`, window.location.origin);
+        url.search = new URLSearchParams({
+            source_type: sourceType,
+        }).toString();
+
+        const resp = await fetch(url.toString(), {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            credentials: "same-origin",
+        });
+
+        if (!resp.ok) {
+            let message = "Не удалось получить черновик ответа";
 
             try {
                 const data = await resp.json();
@@ -311,6 +479,58 @@
         return await response.json();
     }
 
+    async function getEmailComment(emailId) {
+        const resp = await fetch(`/api/emails/${emailId}/comment`, {
+            method: "GET",
+            headers: {
+                Accept: "application/json",
+            },
+            credentials: "same-origin",
+        });
+
+        if (!resp.ok) {
+            let message = "Не удалось загрузить комментарий";
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    message = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(message);
+        }
+
+        return await resp.json();
+    }
+
+    async function updateEmailComment(emailId, commentText) {
+        const resp = await fetch(`/api/emails/${emailId}/comment`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+            },
+            credentials: "same-origin",
+            body: JSON.stringify({
+                comment_text: String(commentText || ""),
+            }),
+        });
+
+        if (!resp.ok) {
+            let message = "Не удалось сохранить комментарий";
+            try {
+                const data = await resp.json();
+                if (data?.detail) {
+                    message = data.detail;
+                }
+            } catch (_) {}
+
+            throw new Error(message);
+        }
+
+        return await resp.json();
+    }
+
     window.MailApi = {
         downloadBlob,
         downloadEmailAttachments,
@@ -319,8 +539,11 @@
         loadEmailsFromApi,
         sendNewEmail,
         loadForwardDraft,
+        loadReplyDraft,
         sendForwardEmail,
         getMySignature,
         updateMySignature,
+        getEmailComment,
+        updateEmailComment,
     };
 })();
