@@ -14,6 +14,65 @@
         };
     }
 
+    function sanitizeHtmlKeepTables(html) {
+        // удаляет ненужные теги, оставляет таблицы и базовую разметку
+
+        const allowedTags = new Set([
+            'p', 'div', 'br', 'span',
+            'b', 'strong', 'i', 'em', 'u',
+            'a', 'ul', 'ol', 'li',
+            'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'blockquote', 'pre', 'code'
+        ]);
+
+        const allowedAttrs = new Set([
+            'href', 'title', 'colspan', 'rowspan', 'style', 'class'
+        ]);
+
+        let doc;
+        try {
+            doc = new DOMParser().parseFromString(html, 'text/html');
+        } catch (e) {
+            return html;
+        }
+
+        const dangerousTags = doc.querySelectorAll(
+            'script, style, iframe, object, embed, form, input, link, meta, base'
+        );
+        dangerousTags.forEach(node => node.remove());
+
+        const allElements = doc.body.querySelectorAll('*');
+        allElements.forEach(el => {
+            const tagName = el.tagName.toLowerCase();
+
+            if (!allowedTags.has(tagName)) {
+                const parent = el.parentNode;
+                while (el.firstChild) {
+                    parent.insertBefore(el.firstChild, el);
+                }
+                el.remove();
+                return;
+            }
+
+            [...el.attributes].forEach(attr => {
+                const name = attr.name.toLowerCase();
+                if (!allowedAttrs.has(name)) {
+                    el.removeAttribute(attr.name);
+                }
+            });
+
+            if (tagName === 'a') {
+                const href = el.getAttribute('href') || '';
+                if (/^\s*javascript:/i.test(href)) {
+                    el.removeAttribute('href');
+                }
+            }
+        });
+
+        return doc.body.innerHTML;
+    }
+
     function prependSignatureToReplyDraft(draftBody, signatureText) {
         const body = String(draftBody || "").trim();
         const rawSignature = String(signatureText || "").trim();
@@ -326,17 +385,15 @@
         const emailMailbox = email.mailbox || email.toheader || "";
         const emailContentSource = email.content || email.rawemail || "";
 
-        const formattedContent =
-            (emailContentSource || "")
-                .split("\n")
-                .map((line) => {
-                    if (line.trim() === "") return "<br>";
-                    if (line.includes("•")) {
-                        return `<p style="margin-left:20px;">${escapeHtml(line)}</p>`;
-                    }
-                    return `<p>${escapeHtml(line)}</p>`;
-                })
-                .join("") || "<p>...</p>";
+        const rawContent = (emailContentSource || "")
+            .replace(/^[\s\n\r]+/, "")
+            .replace(/[\s\n\r]+$/, "");
+
+        console.log("rawContent (first 200):", JSON.stringify(rawContent.slice(0, 200)));    
+
+        const formattedContent = rawContent
+            ? sanitizeHtmlKeepTables(rawContent)
+            : "<p>...</p>";
 
         const docsWithName = getDisplayDocuments(email);
         const realEmailId = Number(email.email_id || email.emailid || email.id);
@@ -642,9 +699,7 @@
 
                 ${attachmentBlock}
 
-                <div class="email-body">
-                    ${formattedContent}
-                </div>
+                <div class="email-body">${formattedContent}</div>
 
                 <div class="reply-block">
                     <div
