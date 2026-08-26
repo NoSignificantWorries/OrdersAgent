@@ -15,62 +15,135 @@
     }
 
     function sanitizeHtmlKeepTables(html) {
-        // удаляет ненужные теги, оставляет таблицы и базовую разметку
-
         const allowedTags = new Set([
-            'p', 'div', 'br', 'span',
-            'b', 'strong', 'i', 'em', 'u',
-            'a', 'ul', 'ol', 'li',
-            'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
-            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-            'blockquote', 'pre', 'code'
+            "p",
+            "div",
+            "br",
+            "span",
+            "b",
+            "strong",
+            "i",
+            "em",
+            "u",
+            "a",
+            "ul",
+            "ol",
+            "li",
+            "table",
+            "thead",
+            "tbody",
+            "tfoot",
+            "tr",
+            "th",
+            "td",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "blockquote",
+            "pre",
+            "code",
         ]);
 
         const allowedAttrs = new Set([
-            'href', 'title', 'colspan', 'rowspan', 'style', 'class'
+            "href",
+            "title",
+            "colspan",
+            "rowspan",
         ]);
 
         let doc;
         try {
-            doc = new DOMParser().parseFromString(html, 'text/html');
-        } catch (e) {
-            return html;
+            doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+        } catch (error) {
+            console.warn("Не удалось распарсить HTML письма", error);
+            return "";
         }
 
-        const dangerousTags = doc.querySelectorAll(
-            'script, style, iframe, object, embed, form, input, link, meta, base'
-        );
-        dangerousTags.forEach(node => node.remove());
+        doc.querySelectorAll(
+            [
+                "script",
+                "style",
+                "noscript",
+                "iframe",
+                "object",
+                "embed",
+                "form",
+                "input",
+                "button",
+                "textarea",
+                "select",
+                "option",
+                "link",
+                "meta",
+                "base",
+                "svg",
+                "math",
+            ].join(", "),
+        ).forEach((node) => node.remove());
 
-        const allElements = doc.body.querySelectorAll('*');
-        allElements.forEach(el => {
-            const tagName = el.tagName.toLowerCase();
+        Array.from(doc.body.querySelectorAll("*")).forEach((element) => {
+            const tagName = element.tagName.toLowerCase();
 
             if (!allowedTags.has(tagName)) {
-                const parent = el.parentNode;
-                while (el.firstChild) {
-                    parent.insertBefore(el.firstChild, el);
+                const parent = element.parentNode;
+
+                while (element.firstChild) {
+                    parent.insertBefore(element.firstChild, element);
                 }
-                el.remove();
+
+                element.remove();
                 return;
             }
 
-            [...el.attributes].forEach(attr => {
-                const name = attr.name.toLowerCase();
-                if (!allowedAttrs.has(name)) {
-                    el.removeAttribute(attr.name);
+            Array.from(element.attributes).forEach((attr) => {
+                const attrName = attr.name.toLowerCase();
+
+                if (!allowedAttrs.has(attrName)) {
+                    element.removeAttribute(attr.name);
                 }
             });
 
-            if (tagName === 'a') {
-                const href = el.getAttribute('href') || '';
-                if (/^\s*javascript:/i.test(href)) {
-                    el.removeAttribute('href');
+            if (tagName === "a") {
+                const href = String(element.getAttribute("href") || "").trim();
+
+                if (
+                    href &&
+                    !/^(https?:|mailto:|tel:|#|\/)/i.test(href)
+                ) {
+                    element.removeAttribute("href");
                 }
             }
         });
 
-        return doc.body.innerHTML;
+        return doc.body.innerHTML.trim();
+    }
+
+    function decodeHtmlEntities(value) {
+        const source = String(value || "");
+
+        if (!source) {
+            return "";
+        }
+
+        const textarea = document.createElement("textarea");
+        textarea.innerHTML = source;
+
+        return textarea.value;
+    }
+
+    function hasEmailHtmlMarkup(value) {
+        const text = String(value || "").trim();
+
+        if (!text) {
+            return false;
+        }
+
+        return /<\/?(?:html|head|body|div|p|br|span|table|thead|tbody|tfoot|tr|th|td|ul|ol|li|blockquote|pre|a|strong|b|em|i|u)\b[^>]*>/i.test(
+            text,
+        );
     }
 
     function prependSignatureToReplyDraft(draftBody, signatureText) {
@@ -385,15 +458,22 @@
         const emailMailbox = email.mailbox || email.toheader || "";
         const emailContentSource = email.content || email.rawemail || "";
 
-        const rawContent = (emailContentSource || "")
-            .replace(/^[\s\n\r]+/, "")
-            .replace(/[\s\n\r]+$/, "");
+        const rawContent = String(emailContentSource || "")
+            .replace(/\r\n/g, "\n")
+            .trim();
 
-        console.log("rawContent (first 200):", JSON.stringify(rawContent.slice(0, 200)));    
+        const decodedContent = decodeHtmlEntities(rawContent);
+        const isHtmlContent = hasEmailHtmlMarkup(decodedContent);
 
-        const formattedContent = rawContent
-            ? sanitizeHtmlKeepTables(rawContent)
-            : "<p>...</p>";
+        let formattedContent;
+
+        if (!rawContent) {
+            formattedContent = "<p>...</p>";
+        } else if (isHtmlContent) {
+            formattedContent = sanitizeHtmlKeepTables(decodedContent);
+        } else {
+            formattedContent = escapeHtml(rawContent);
+        }
 
         const docsWithName = getDisplayDocuments(email);
         const realEmailId = Number(email.email_id || email.emailid || email.id);
