@@ -15,10 +15,12 @@ def number_to_int(number: str) -> Optional[int]:
     return None
 
 
-def clean(text: Optional[str]) -> Optional[str]:
+def clean(text: str | None) -> str | None:
     if text is None:
         return None
-    value = re.sub(r"\s*", "", text)
+    value = re.sub(WHITESPACE, "", text)
+    if not bool(value):
+        return None
     return value
 
 
@@ -35,8 +37,8 @@ def fuzzy_match(text: str, pattern: str, threshold: int = 50) -> bool:
 
 
 def get_match_and_groups(
-    pattern: str, text: str, groups: List[int] = []
-) -> Tuple[bool, List[str]]:
+    pattern: str, text: str, groups: list[int] = []
+) -> tuple[bool, list[str]]:
     pattern = re.compile(pattern)
     match = pattern.match(text)
     if match:

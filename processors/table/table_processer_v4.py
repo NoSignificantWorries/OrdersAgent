@@ -1,11 +1,14 @@
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
+from matplotlib.table import Cell
 import openpyxl
 import xlrd
 
-from .config import CellType
+from . import config as conf
+from . import functional as func
 
 
 @dataclass
@@ -25,9 +28,102 @@ class ParseResults:
     count: int
 
 
+@dataclass
+class CellValue:
+    value: str | int | tuple[int, int]
+    type: conf.CellType = conf.CellType.TEXT
+    merged: bool = False
+    parent: tuple[int, int] | None = None
+
+
+def cell_value_classify(value: str) -> tuple[conf.CellType, list[str] | None]:
+    if conf.TYPES_CONFIG.regex is not None:
+        for cell_type, patterns in conf.TYPES_CONFIG.regex.items():
+            for pattern, groups in patterns:
+                matched, values = func.get_match_and_groups(pattern, value, groups)
+                if matched:
+                    return cell_type, values
+    if conf.TYPES_CONFIG.fuzzy is not None:
+        for cell_type, patterns in conf.TYPES_CONFIG.fuzzy.items():
+            for pattern in patterns:
+                if func.fuzzy_match(value.lower(), pattern, 70):
+                    return cell_type, None
+    return conf.CellType.TEXT, None
+
+
+class SheetParser:
+    def __init__(self, nrows: int, ncols: int, name: str) -> None:
+        self.nrows: int = nrows
+        self.ncols: int = ncols
+        self.name: str = name
+        self.data: list[list[CellValue | None]] = [[None] * ncols for _ in range(nrows)]
+
+        self._empty_rows: list[int] = [i for i in range(nrows)]
+        self._empty_cols: list[int] = [i for i in range(ncols)]
+
+    def _check_position(self, row: int, col: int) -> None:
+        if row in self._empty_rows:
+            idx = self._empty_rows.index(row)
+            del self._empty_rows[idx]
+
+        if col in self._empty_cols:
+            idx = self._empty_cols.index(col)
+            del self._empty_cols[idx]
+
+    def add_cell(self, row: int, col: int, cell: CellValue | None) -> None:
+        if cell is not None:
+            self.data[row][col] = cell
+            if not cell.merged:
+                self._check_position(row, col)
+
+    def get_cell(self, row: int, col: int) -> CellValue | None:
+        return self.data[row][col]
+
+    def clean_empty_cols_and_rows(self) -> None:
+        for i in self._empty_rows[::-1]:
+            del self.data[i]
+
+        for i in range(len(self.data)):
+            for j in self._empty_cols[::-1]:
+                del self.data[i][j]
+
+        self.nrows = len(self.data)
+        if self.nrows > 0:
+            self.ncols = len(self.data[0])
+        else:
+            self.ncols = 0
+
+
+class Document:
+    def __init__(self, name: str | None = None) -> None:
+        self.name: str | None = name
+        self.sheets: dict[str, SheetParser] = {}
+
+    def add_sheet(self, nrows: int, ncols: int, name: str) -> None:
+        sheet = SheetParser(nrows=nrows, ncols=ncols, name=name)
+        self.sheets[name] = sheet
+
+    def add_cell_on_sheet(self, sheetname: str, row: int, col: int, cell: CellValue | None) -> None:
+        sheet = self.sheets.get(sheetname)
+        if sheet is None:
+            raise ValueError(f"Sheet with name '{sheetname}' is not exists in the document '{self.name}'")
+
+        sheet.add_cell(row=row, col=col, cell=cell)
+
+    def get_cell_from_sheet(self, sheetname: str, row: int, col: int) -> CellValue | None:
+        sheet = self.sheets.get(sheetname)
+        if sheet is None:
+            raise ValueError(f"Sheet with name '{sheetname}' is not exists in the document '{self.name}'")
+        return sheet.get_cell(row, col)
+
+    def clean_sheets(self) -> None:
+        for sheet in self.sheets.values():
+            sheet.clean_empty_cols_and_rows()
+
+
 class TableLoader:
     @staticmethod
-    def load(bdata: BytesIO | None = None, filepath: Path | None = None):
+    def load(bdata: BytesIO | None = None, filepath: Path | None = None) -> Document | None:
         '''
         Loads data from xls/xlsx files by the provided path or from bytes format.
 
@@ -61,6 +157,24 @@ class TableLoader:
                 return TableLoader._load_xls_data(bdata=bdata)
         raise ValueError("No data provided")
 
+    @staticmethod
+    def _parse_cell(value: Any) -> None | CellValue:
+        clean_text = func.to_text(value)
+        if clean_text is None:
+            return None
+
+        number_value = func.number_to_int(clean_text)
+        if number_value is not None:
+            return CellValue(value=number_value, type=conf.CellType.NUMBER)
+
+        cell_type, parsed_values = cell_value_classify(clean_text)
+
+        if cell_type is conf.CellType.SIZES:
+            x = func.number_to_int(parsed_values[0])
+            y = func.number_to_int(parsed_values[1])
+            return CellValue(value=(x, y), type=cell_type)
+
+        return CellValue(value=str(value), type=cell_type)
 
     @staticmethod
     def _get_merged_cells_from_xls_sheet(sheet) -> dict[tuple[int, int], tuple[int, int]]:
@@ -70,12 +184,13 @@ class TableLoader:
             for row_idx in range(merged_range[0], merged_range[1]):
                 for col_idx in range(merged_range[2], merged_range[3]):
                     merged_cells[(row_idx, col_idx)] = parent
+            del merged_cells[parent]
         return merged_cells
 
     @staticmethod
     def _load_xls_data(
         bdata: BytesIO | None = None, filepath: Path | None = None
-    ):
+    ) -> Document | None:
         try:
             if filepath:
                 wb = xlrd.open_workbook(str(filepath), formatting_info=True)
@@ -101,19 +216,35 @@ class TableLoader:
                 with_metadata = False
             except Exception as err:
                 print(f"File opening errors: {first_step_error} {err}")
-                return None
+                return
 
+        document = Document()
         sheets = wb.sheet_names()
         for sheetname in sheets:
             sheet = wb[sheetname]
+            document.add_sheet(sheet.nrows, sheet.ncols, sheetname)
 
             merged_cells = {}
             if hasattr(sheet, "merged_cells"):
                 merged_cells = TableLoader._get_merged_cells_from_xls_sheet(sheet)
+            # print(merged_cells)
 
             for row in range(sheet.nrows):
                 for col in range(sheet.ncols):
                     value = sheet.cell_value(row, col)
+                    cell_data = TableLoader._parse_cell(value)
+
+                    merge_parent = merged_cells.get((row, col))
+                    if merge_parent and cell_data is None and merge_parent != (row, col):
+                        parent_cell = document.get_cell_from_sheet(sheetname, *merge_parent)
+                        cell_data = parent_cell
+                        if cell_data is not None:
+                            cell_data.parent = merge_parent
+                            cell_data.merged = True
+
+                    document.add_cell_on_sheet(sheetname, row, col, cell_data)
+        document.clean_sheets()
+        return document
 
 
     @staticmethod
@@ -124,12 +255,13 @@ class TableLoader:
             for row_idx in range(merged_range.min_row - 1, merged_range.max_row):
                 for col_idx in range(merged_range.min_col - 1, merged_range.max_col):
                     merged_cells[(row_idx, col_idx)] = parent
+            del merged_cells[parent]
         return merged_cells
 
     @staticmethod
     def _load_xlsx_data(
         bdata: BytesIO | None = None, filepath: Path | None = None
-    ):
+    ) -> Document | None:
         try:
             if filepath:
                 wb = openpyxl.load_workbook(filepath, data_only=False)
@@ -151,12 +283,13 @@ class TableLoader:
                 with_metadata = False
             except Exception as err:
                 print(f"File opening errors: {first_step_error} {err}")
-                return None
+                return
 
-        sheet_tables = []
+        document = Document()
         sheets = wb.sheetnames
         for sheetname in sheets:
             sheet = wb[sheetname]
+            document.add_sheet(sheet.max_row - 1, sheet.max_column - 1, sheetname)
 
             merged_cells = {}
             if with_metadata:
@@ -165,3 +298,15 @@ class TableLoader:
             for row in sheet.iter_rows():
                 for cell in row:
                     value = cell.value
+                    cell_data = TableLoader._parse_cell(value)
+
+                    merge_parent = merged_cells.get((cell.row - 1, cell.column - 1))
+                    if merge_parent and cell_data is None and merge_parent != (cell.row - 1, cell.column - 1):
+                        parent_cell = document.get_cell_from_sheet(sheetname, *merge_parent)
+                        cell_data = parent_cell
+                        if cell_data is not None:
+                            cell_data.parent = merge_parent
+                            cell_data.merged = True
+                    document.add_cell_on_sheet(sheetname, cell.row - 1, cell.col - 1, cell_data)
+        document.clean_sheets()
+        return document

@@ -9,6 +9,7 @@ from materials import DELIMETERS, ParserV2
 from table import TableWorker, make_callculation_xlsx, make_request_xlsx, tp2
 from table import config as conf
 from table import table_processer_v3 as tp3
+from table import table_processer_v4 as tp4
 
 
 def test_ascii_table():
@@ -245,10 +246,47 @@ def mainv3():
         print(error_files)
 
 
+def mainv4():
+    # testfile = Path("../../private/tables/1108A.xls")
+    inputs = Path("../private/tables")
+    output = Path("../private/results/texts")
+    output.mkdir(parents=True, exist_ok=True)
+
+    parsed_cnt = 0
+    all_cnt = 0
+    error_files = []
+    for file in inputs.iterdir():
+        print("\n\n", file)
+
+        try:
+            data = tp4.TableLoader.load(None, file)
+        except BaseException as err:
+            print("ERROR: Wrong file!", err)
+            continue
+        all_cnt += 1
+
+        if data is None:
+            continue
+        parsed_cnt += 1
+
+        for sheet in data.sheets.values():
+            print(sheet.name, sheet.nrows, sheet.ncols)
+            for line in sheet.data:
+                print([None if obj is None else obj.value for obj in line])
+
+
+    if all_cnt == 0:
+        print("No files in the dir")
+    else:
+        print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
+        print(error_files)
+
+
 if __name__ == "__main__":
     # test_callculation_table()
     # main()
     # test_text()
     # mainv2()
     # test_ascii_table()
-    mainv3()
+    # mainv3()
+    mainv4()
