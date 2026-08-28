@@ -121,31 +121,6 @@
         return doc.body.innerHTML.trim();
     }
 
-    function decodeHtmlEntities(value) {
-        const source = String(value || "");
-
-        if (!source) {
-            return "";
-        }
-
-        const textarea = document.createElement("textarea");
-        textarea.innerHTML = source;
-
-        return textarea.value;
-    }
-
-    function hasEmailHtmlMarkup(value) {
-        const text = String(value || "").trim();
-
-        if (!text) {
-            return false;
-        }
-
-        return /<\/?(?:html|head|body|div|p|br|span|table|thead|tbody|tfoot|tr|th|td|ul|ol|li|blockquote|pre|a|strong|b|em|i|u)\b[^>]*>/i.test(
-            text,
-        );
-    }
-
     function prependSignatureToReplyDraft(draftBody, signatureText) {
         const body = String(draftBody || "").trim();
         const rawSignature = String(signatureText || "").trim();
@@ -462,8 +437,17 @@
             .replace(/\r\n/g, "\n")
             .trim();
 
-        const decodedContent = decodeHtmlEntities(rawContent);
-        const isHtmlContent = hasEmailHtmlMarkup(decodedContent);
+        const { decodeHtmlEntities, hasHtmlMarkup } = window.MailFormatters || {};
+
+        const decodedContent =
+            typeof decodeHtmlEntities === "function"
+                ? decodeHtmlEntities(rawContent)
+                : rawContent;
+
+        const isHtmlContent =
+            typeof hasHtmlMarkup === "function"
+                ? hasHtmlMarkup(decodedContent)
+                : false;
 
         let formattedContent;
 
@@ -1112,8 +1096,13 @@
 
                         await ensureUserSignature(state);
 
+                        const replyDraftText =
+                            typeof window.MailFormatters?.htmlToPlainText === "function"
+                                ? window.MailFormatters.htmlToPlainText(draft?.body)
+                                : String(draft?.body || "");
+
                         nextValue = prependSignatureToReplyDraft(
-                            draft?.body,
+                            replyDraftText,
                             state.userSignature || "",
                         );
                     }
