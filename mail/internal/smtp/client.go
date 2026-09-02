@@ -309,9 +309,9 @@ func (c *Client) SendWithAttachments(
         base64.StdEncoding.Encode(encoded, att.Data)
 
         sb.WriteString("--" + boundary + "\r\n")
-        sb.WriteString(fmt.Sprintf("Content-Type: %s; name=%s\r\n", contentType, encodedFilename))
+        sb.WriteString(fmt.Sprintf("Content-Type: %s; name=%q\r\n", contentType, encodedFilename))
         sb.WriteString("Content-Transfer-Encoding: base64\r\n")
-        sb.WriteString(fmt.Sprintf("Content-Disposition: attachment; filename=%s\r\n", encodedFilename))
+        sb.WriteString(fmt.Sprintf("Content-Disposition: attachment; filename=%q\r\n", encodedFilename))
         sb.WriteString("\r\n")
 
         for i := 0; i < len(encoded); i += 76 {
