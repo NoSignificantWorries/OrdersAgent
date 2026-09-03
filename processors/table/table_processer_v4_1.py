@@ -35,6 +35,15 @@ class CellValue:
     parent: tuple[int, int] | None = None
 
 
+@dataclass
+class HeaderCell:
+    type: conf.CellType
+    row: int
+    col: int
+    merged: bool = False
+    parent: tuple[int, int] | None = None
+
+
 def cell_value_classify(value: str) -> tuple[conf.CellType, list[str] | None]:
     if conf.TYPES_CONFIG.regex is not None:
         for cell_type, patterns in conf.TYPES_CONFIG.regex.items():
@@ -56,7 +65,8 @@ class Sheet:
         self.ncols: int = ncols
         self.name: str = name
         self.data: list[list[CellValue | None]] = [[None] * ncols for _ in range(nrows)]
-        self.type_cells: dict[conf.CellType, list[tuple[int, int]]] = {}
+
+        self.headers: list[HeaderCell] = []
 
         self._empty_rows: list[int] = [i for i in range(nrows)]
         self._empty_cols: list[int] = [i for i in range(ncols)]
@@ -77,12 +87,10 @@ class Sheet:
     def add_cell(self, row: int, col: int, cell: CellValue | None) -> None:
         if cell is not None:
             self.data[row][col] = cell
-            if cell.type in conf.HEADER:
-                if cell.type not in self.type_cells:
-                    self.type_cells[cell.type] = []
-                self.type_cells[cell.type].append((row, col))
             if not cell.merged:
                 self._check_position(row, col)
+            if cell.type in conf.HEADER:
+                self.headers.append(HeaderCell(type=cell.type, row=row, col=col, merged=cell.merged, parent=cell.parent))
 
     def get_cell(self, row: int, col: int) -> CellValue | None:
         return self.data[row][col]
@@ -102,14 +110,6 @@ class Sheet:
             self.ncols = len(self.data[0])
         else:
             self.ncols = 0
-
-    def iter_rows_windowed(self, nrows: int = 1) -> Iterator[list[list[CellValue | None]]]:
-        if nrows <= self.nrows:
-            yield self.data
-
-        step = (nrows - 1) // 2
-        for i in range(step, self.nrows - step):
-            yield self.data[i - step:i + step + 1]
 
 
 class Document:

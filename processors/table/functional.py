@@ -1,5 +1,4 @@
 import re
-from typing import Any, List, Optional, Tuple
 
 from rapidfuzz import fuzz
 
@@ -7,7 +6,7 @@ NUMBER = re.compile(r"^\s*((\d+)([.,]\d+)?)\s*$")
 WHITESPACE = re.compile(r"\s*")
 
 
-def number_to_int(number: str) -> Optional[int]:
+def number_to_int(number: str) -> int | None:
     match = NUMBER.match(number)
     if match:
         number = match.group(2)
@@ -24,7 +23,7 @@ def clean(text: str | None) -> str | None:
     return value
 
 
-def to_text(data: Any) -> Optional[str]:
+def to_text(data: str | float | None) -> str | None:
     if data is None:
         return None
     text = str(data)
@@ -37,7 +36,7 @@ def fuzzy_match(text: str, pattern: str, threshold: int = 50) -> bool:
 
 
 def get_match_and_groups(
-    pattern: str, text: str, groups: list[int] = []
+    pattern: re.Pattern[str], text: str, groups: list[int] = []
 ) -> tuple[bool, list[str]]:
     pattern = re.compile(pattern)
     match = pattern.match(text)
@@ -46,9 +45,7 @@ def get_match_and_groups(
     return False, []
 
 
-def check_fullmatch(pattern: str, text: str) -> bool:
+def check_fullmatch(pattern: re.Pattern[str], text: str) -> bool:
     pattern = re.compile(pattern)
     match = pattern.fullmatch(text)
-    if match:
-        return True
-    return False
+    return bool(match)

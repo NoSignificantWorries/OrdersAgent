@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from enum import Enum, Flag, auto
-from typing import Dict, List, Optional, Tuple
 
 
 class CellType(Flag):
@@ -16,6 +15,7 @@ class CellType(Flag):
     MAT_H = auto()
     BARCODE_H = auto()
     MARKING_H = auto()
+    GLASS = auto()
 
 
 HEADERS = [
@@ -28,23 +28,6 @@ HEADERS = [
     CellType.MAT_H,
     CellType.SIZE_H,
 ]
-
-HeadersLabels = "ABHWLMRS"
-
-CellTypeLabel = {
-    CellType.EMPTY: ".",
-    CellType.TEXT: "t",
-    CellType.NUMBER: "n",
-    CellType.SIZES: "s",
-    CellType.SIZE_H: "S",
-    CellType.LENGTH_H: "L",
-    CellType.WIDTH_H: "W",
-    CellType.HEIGHT_H: "H",
-    CellType.AMOUNT_H: "A",
-    CellType.MAT_H: "R",
-    CellType.BARCODE_H: "B",
-    CellType.MARKING_H: "M",
-}
 
 
 HEADER = (
@@ -61,8 +44,8 @@ HEADER = (
 
 @dataclass
 class CellTypes:
-    regex: Optional[Dict[CellType, List[Tuple[str, List[int]]]]] = None
-    fuzzy: Optional[Dict[CellType, List[str]]] = None
+    regex: dict[CellType, list[tuple[str, list[int]]]] | None = None
+    fuzzy: dict[CellType, list[str]] | None = None
 
 
 TYPES_CONFIG = CellTypes(
@@ -81,9 +64,9 @@ TYPES_CONFIG = CellTypes(
             "размеры(мм)",
         ],
         CellType.LENGTH_H: ["длина", "длина,мм", "длина[мм]", "длина(мм)"],
-        CellType.WIDTH_H: ["ширина", "ширина,мм", "ширина[мм]", "ширина(мм)"],
-        CellType.HEIGHT_H: ["высота", "высота,мм", "высота[мм]", "высота(мм)"],
-        CellType.AMOUNT_H: ["кол-во", "количество", "кол-во(шт)", "количество(шт)"],
+        CellType.WIDTH_H: ["ширина", "ширина,мм", "ширина[мм]", "ширина(мм)", "x"],
+        CellType.HEIGHT_H: ["высота", "высота,мм", "высота[мм]", "высота(мм)", "y"],
+        CellType.AMOUNT_H: ["кол-во", "количество", "кол-во(шт)", "количество(шт)", "n"],
         CellType.MAT_H: [
             "наименование",
             "обозначение",
