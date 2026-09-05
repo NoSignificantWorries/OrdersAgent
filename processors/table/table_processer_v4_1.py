@@ -43,6 +43,16 @@ class HeaderCell:
     merged: bool = False
     parent: tuple[int, int] | None = None
 
+    def to_json(self) -> dict[str, str | int | tuple[int, int] | bool | None]:
+        return {
+            "type": self.type.value,
+            "type-name": self.type.name,
+            "row": self.row,
+            "col": self.col,
+            "merged": self.merged,
+            "parent": self.parent
+        }
+
 
 def cell_value_classify(value: str) -> tuple[conf.CellType, list[str] | None]:
     if conf.TYPES_CONFIG.regex is not None:
@@ -89,8 +99,6 @@ class Sheet:
             self.data[row][col] = cell
             if not cell.merged:
                 self._check_position(row, col)
-            if cell.type in conf.HEADER:
-                self.headers.append(HeaderCell(type=cell.type, row=row, col=col, merged=cell.merged, parent=cell.parent))
 
     def get_cell(self, row: int, col: int) -> CellValue | None:
         return self.data[row][col]
@@ -110,6 +118,15 @@ class Sheet:
             self.ncols = len(self.data[0])
         else:
             self.ncols = 0
+
+    def find_headers(self) -> list[HeaderCell]:
+        for irow, row in enumerate(self.data):
+            for icol, cell in enumerate(row):
+                if cell is None:
+                    continue
+                if cell.type in conf.HEADER:
+                    self.headers.append(HeaderCell(type=cell.type, row=irow, col=icol, merged=cell.merged, parent=cell.parent))
+        return self.headers
 
 
 class Document:

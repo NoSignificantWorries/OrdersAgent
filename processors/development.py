@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from materials import DELIMETERS, ParserV2
@@ -142,6 +143,7 @@ def mainv4_1():
     parsed_cnt = 0
     all_cnt = 0
     error_files = []
+    header_packs = []
     for file in inputs.iterdir():
         print("\n\n", file)
 
@@ -158,7 +160,15 @@ def mainv4_1():
 
         for sheet in data.sheets.values():
             print(sheet.name, sheet.nrows, sheet.ncols)
-            print(sheet.headers)
+            if sheet.empty:
+                continue
+            headers_on_sheet = {"nrows": sheet.nrows, "ncols": sheet.ncols, "headers": []}
+            headers = sheet.find_headers()
+            for header in headers:
+                headers_on_sheet["headers"].append(header.to_json())
+            header_packs.append(headers_on_sheet)
+    with open("../private/headers.json", "w") as file:
+        json.dump(header_packs, file, indent=4)
 
 
     if all_cnt == 0:

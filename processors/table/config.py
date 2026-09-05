@@ -18,6 +18,23 @@ class CellType(Flag):
     GLASS = auto()
 
 
+CELL_TYPE_ANNOTATIONS = {
+    CellType.EMPTY: "empty",
+    CellType.TEXT: "text",
+    CellType.NUMBER: "number",
+    CellType.SIZES: "sizes",
+    CellType.SIZE_H: "size-header",
+    CellType.LENGTH_H: "length-header",
+    CellType.WIDTH_H: "width-header",
+    CellType.HEIGHT_H: "height-header",
+    CellType.AMOUNT_H: "amount",
+    CellType.MAT_H: "material-header",
+    CellType.BARCODE_H: "barcode-header",
+    CellType.MARKING_H: "marking-header",
+    CellType.GLASS: "glass"
+}
+
+
 HEADERS = [
     CellType.AMOUNT_H,
     CellType.BARCODE_H,
@@ -81,6 +98,7 @@ TYPES_CONFIG = CellTypes(
         ],
         CellType.BARCODE_H: ["штрихкод", "шк"],
         CellType.MARKING_H: ["маркировка"],
+        CellType.GLASS: ["стекла"]
     },
 )
 
