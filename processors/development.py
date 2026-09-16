@@ -1,8 +1,15 @@
+from collections import defaultdict
 import json
 from pathlib import Path
 
 from materials import DELIMETERS, ParserV2
-from table import TableWorker, make_callculation_xlsx, make_request_xlsx
+from table import (
+    TableWorker,
+    make_callculation_xlsx,
+    make_request_xlsx,
+    table_loader,
+    tpv5,
+)
 from table import config as conf
 from table import table_processer_v4 as tp4
 from table import table_processer_v4_1 as tp4_1
@@ -178,6 +185,59 @@ def mainv4_1():
         print(error_files)
 
 
+def mainv5():
+    # testfile = Path("../../private/tables/1108A.xls")
+    inputs = Path("../private/tables")
+    output = Path("../private/results/texts")
+    output.mkdir(parents=True, exist_ok=True)
+
+    parsed_cnt = 0
+    all_cnt = 0
+    error_files = []
+    for file in inputs.iterdir():
+        all_cnt += 1
+        try:
+            data = table_loader.TableLoader.load(file)
+        except BaseException as err:
+            print(f"ERROR: Wrong file '{file.name}'!", err)
+            print("\n")
+            error_files.append(file)
+            continue
+
+        print(data.name, data.fmt, data.with_metadata)
+        parser = tpv5.TableParser(data)
+        parser.parse()
+
+        parsed_cnt += 1
+
+    if all_cnt == 0:
+        print("No files in the dir")
+    else:
+        print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
+        print(error_files)
+
+
+def patterns_work():
+    PATTERNS = [
+        'длина', 'длинамм',
+        'ширина', 'ширинамм',
+        'высота', 'высотамм',
+        'размер', 'размеры', 'размерымм',
+        'количество', 'количествошт', 'колво', 'колвошт',
+        'наименование', 'номенклатура', 'артикул', 'маркировка',
+        'формула', 'формуласп', 'формулазаполнения',
+        'штрихкод', 'обозначение', 'типпакета', 'стекла',
+    ]
+
+    # 3. Бакеты по длине
+    K = 1
+    buckets = defaultdict(list)
+    for p in sorted(PATTERNS, key=len):
+        buckets[len(p)].append(p)
+
+    print(buckets)
+
+
 if __name__ == "__main__":
     # test_callculation_table()
     # main()
@@ -186,4 +246,6 @@ if __name__ == "__main__":
     # test_ascii_table()
     # mainv3()
     # mainv4()
-    mainv4_1()
+    # mainv4_1()
+    # mainv5()
+    patterns_work()
