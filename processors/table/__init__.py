@@ -1,5 +1,5 @@
 from . import functional as func
-from . import table_loader
+from . import table_loader, table_parser
 from . import table_processer_v5 as tpv5
 from .table_processer import (
     TableParseResults,

@@ -1,5 +1,5 @@
-from collections import defaultdict
 import json
+from collections import defaultdict
 from pathlib import Path
 
 from materials import DELIMETERS, ParserV2
@@ -8,6 +8,7 @@ from table import (
     make_callculation_xlsx,
     make_request_xlsx,
     table_loader,
+    table_parser,
     tpv5,
 )
 from table import config as conf
@@ -205,8 +206,17 @@ def mainv5():
             continue
 
         print(data.name, data.fmt, data.with_metadata)
-        parser = tpv5.TableParser(data)
-        parser.parse()
+
+        for sheet in data.sheets:
+            table = table_parser.SparseTable(sheet.name, sheet.nrows, sheet.ncols)
+            for cell in sheet.cells:
+                # print(cell)
+                table.add_cell(cell.value, cell.row, cell.col, cell.merged, cell.parent)
+            print(table._empty_rows)
+            print(table._empty_columns)
+            print(table.nrows, table.ncols)
+            table.normilize_cells()
+            print(table.nrows, table.ncols)
 
         parsed_cnt += 1
 
@@ -215,27 +225,6 @@ def mainv5():
     else:
         print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
         print(error_files)
-
-
-def patterns_work():
-    PATTERNS = [
-        'длина', 'длинамм',
-        'ширина', 'ширинамм',
-        'высота', 'высотамм',
-        'размер', 'размеры', 'размерымм',
-        'количество', 'количествошт', 'колво', 'колвошт',
-        'наименование', 'номенклатура', 'артикул', 'маркировка',
-        'формула', 'формуласп', 'формулазаполнения',
-        'штрихкод', 'обозначение', 'типпакета', 'стекла',
-    ]
-
-    # 3. Бакеты по длине
-    K = 1
-    buckets = defaultdict(list)
-    for p in sorted(PATTERNS, key=len):
-        buckets[len(p)].append(p)
-
-    print(buckets)
 
 
 if __name__ == "__main__":
@@ -247,5 +236,4 @@ if __name__ == "__main__":
     # mainv3()
     # mainv4()
     # mainv4_1()
-    # mainv5()
-    patterns_work()
+    mainv5()
