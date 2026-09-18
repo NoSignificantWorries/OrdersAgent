@@ -1,20 +1,22 @@
+
 from dataclasses import dataclass
 from enum import Enum
-from io import BytesIO
-from pathlib import Path
-from typing import Any, Iterator
-
-import openpyxl
-import xlrd
-
-from . import table_loader as tl
 
 
-class TableParser:
-    def __init__(self, workbook: tl.Workbook) -> None:
-        self.wb = workbook
+class CellType(str, Enum):
+    TEXT = "text"
+    NUMBER = "number"
 
-    def parse(self) -> None:
-        for sheet in self.wb.sheets:
-            for cell in sheet.cells:
-                print(cell)
+
+@dataclass(slots=True)
+class Field:
+    anchor_patterns: list[str]
+    possible_value_types: list[CellType]
+    vertical: bool = True
+    needed: bool = True
+
+
+
+TypePatterns = {
+    CellType.NUMBER: ["pattern1", "pattern2"]
+}
