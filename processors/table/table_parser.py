@@ -1,15 +1,18 @@
-import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
 from rapidfuzz import fuzz
 
+from .table_loader import Workbook
+
 
 @dataclass(slots=True)
 class Cell:
-    value: int | str
+    value: int | str | tuple[int, int]
+    row: int
+    col: int
     is_merge_child: bool = False
 
 
@@ -33,9 +36,9 @@ class SparseTable:
             parent_cell = self.cells[prow][pcol]
             if parent_cell is None:
                 return
-            cell = Cell(value=parent_cell.value, is_merge_child=True)
+            cell = Cell(value=parent_cell.value, row=row, col=col, is_merge_child=True)
         else:
-            cell = Cell(value=value)
+            cell = Cell(value=value, row=row, col=col)
         self.cells[row][col] = cell
 
     def normalize(self) -> None:
@@ -46,17 +49,34 @@ class SparseTable:
         self.nrows = len(keep_rows)
         self.ncols = len(keep_cols)
 
+        for i in range(self.nrows):
+            for j in range(self.ncols):
+                if self.cells[i][j] is not None:
+                    self.cells[i][j].row = i
+                    self.cells[i][j].col = j
+
+    def get_cell(self, row: int, col: int) -> Cell | None:
+        return self.cells[row][col]
+
 
 class Direction(str, Enum):
     DOWN = "down"
     RIGHT = "right"
 
 
+class ExtractorID(str, Enum):
+    AsInt = "AsInt"
+    AsStr = "AsStr"
+    AsSizes = "AsSizes"
+
+
 class Extractor(Protocol):
+    extractor_id: ExtractorID
     def extract(self, cell: Cell) -> Any | None: ...
 
 
 class AsInt(Extractor):
+    extractor_id = ExtractorID.AsInt
     def extract(self, cell: Cell) -> int | None:
         if isinstance(cell.value, int):
             return cell.value
@@ -73,6 +93,7 @@ class AsInt(Extractor):
 
 
 class AsStr(Extractor):
+    extractor_id = ExtractorID.AsStr
     def extract(self, cell: Cell) -> str | None:
         if cell.value is None:
             return None
@@ -81,6 +102,7 @@ class AsStr(Extractor):
 
 
 class AsSizes(Extractor):
+    extractor_id = ExtractorID.AsSizes
     SIZES = re.compile(r"^\s*([\d\s]+(?:[.,]\d+)?)\s*[xXхХ*×]\s*([\d\s]+(?:[.,]\d+)?)\s*$")
     def extract(self, cell: Cell) -> tuple[int, int] | None:
         if not isinstance(cell.value, str):
@@ -100,9 +122,32 @@ class AsSizes(Extractor):
 class FieldSpec:
     name: str
     anchors: list[str]
-    extractor: Extractor
+    extractors: list[Extractor]
+    aliases: list[str] = field(default_factory=list)
     direction: Direction = Direction.DOWN
-    required: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PushCallback:
+    extracted: bool = False
+    extractor_id: ExtractorID | None = None
+
+
+@dataclass(slots=True)
+class FieldState:
+    spec: FieldSpec
+    start: tuple[int, int]
+    block_id: int
+    cells: list[Cell] = field(default_factory=list)
+
+    def push(self, cell: Cell) -> PushCallback:
+        for extractor in self.spec.extractors:
+            extracted = extractor.extract(cell)
+            if extracted is not None:
+                cell.value = extracted
+                self.cells.append(cell)
+                return PushCallback(extracted=True, extractor_id=extractor.extractor_id)
+        return PushCallback()
 
 
 class FieldMatcher:
@@ -159,15 +204,39 @@ class FieldMatcher:
         return self.name_to_field.get(name, None)
 
 
+@dataclass(slots=True)
+class Block:
+    id: int
+    start_row: int
+    end_row: int = -1
+    vertical_fields: dict[int, FieldState] = field(default_factory=dict)
+    horizontal_fields: dict[int, FieldState] = field(default_factory=dict)
+
+
 MATCHER = FieldMatcher([
-    FieldSpec("material", ["наименование", "обозначение", "номенклатура", "артикул", "формула", "формула заполнения", "формула сп"], AsStr(), required=True),
-    FieldSpec("amount", ["кол-во", "количество", "кол-во(шт)", "количество(шт)", "n"], AsInt(), required=True),
-    FieldSpec("sizes", [ "размер", "размеры", "размеры,мм", "размеры[мм]", "размеры(мм)", ], AsSizes()),
-    FieldSpec("barcode", ["штрихкод", "шк"], AsStr()),
-    FieldSpec("marking", ["маркировка"], AsStr())
+    FieldSpec("material", ["наименование", "обозначение", "номенклатура", "артикул", "формула", "формула заполнения", "формула сп"], [AsStr()]),
+    FieldSpec("amount", ["кол-во", "количество", "кол-во(шт)", "количество(шт)", "n"], [AsInt()]),
+    FieldSpec("barcode", ["штрихкод", "шк"], [AsStr()]),
+    FieldSpec("marking", ["маркировка"], [AsStr()])
 ])
 
 
-class HeadersChecker:
-    def __init__(self, field_matcher: FieldMatcher) -> None:
-        self.field_matcher = field_matcher
+class TableParser:
+    matcher: FieldMatcher = MATCHER
+
+    @staticmethod
+    def read(wb: Workbook) -> list[SparseTable]:
+        tables = []
+        for sheet in wb.sheets:
+            subtable = SparseTable(name=sheet.name, nrows=sheet.nrows, ncols=sheet.ncols)
+            for cell in sheet.cells:
+                subtable.add_cell(cell.value, cell.row, cell.col, cell.merged, cell.parent)
+            subtable.normalize()
+            if not subtable.empty:
+                tables.append(subtable)
+            else:
+                print(f"WARN: Empty sheet '{sheet.name}' in the workbook '{wb.name}'")
+        return tables
+
+    @staticmethod
+    def parse(tables: list[SparseTable]) -> None: ...

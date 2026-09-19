@@ -50,8 +50,6 @@ def test_callculation_table():
         wb.save(output)
 
 
-
-
 def main():
     # testfile = Path("../../private/tables/1108A.xls")
     inputs = Path("../private/tables")
@@ -104,7 +102,6 @@ def main():
     else:
         print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
         print(error_files)
-
 
 
 def mainv4():
@@ -207,14 +204,8 @@ def mainv5():
 
         print(data.name, data.fmt, data.with_metadata)
 
-        for sheet in data.sheets:
-            table = table_parser.SparseTable(sheet.name, sheet.nrows, sheet.ncols)
-            for cell in sheet.cells:
-                # print(cell)
-                table.add_cell(cell.value, cell.row, cell.col, cell.merged, cell.parent)
-            print(table.nrows, table.ncols)
-            table.normalize()
-            print(table.nrows, table.ncols)
+        tables = table_parser.TableParser.read(data)
+        print(tables)
 
         parsed_cnt += 1
 
