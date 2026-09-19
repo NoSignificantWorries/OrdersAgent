@@ -40,7 +40,7 @@ def parse_value(value) -> int | str | None:
             return None
         num = number_to_int(clean_value)
         if num is None:
-            return clean_value
+            return value
         return num
     return str(value)
 

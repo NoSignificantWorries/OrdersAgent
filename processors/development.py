@@ -212,10 +212,8 @@ def mainv5():
             for cell in sheet.cells:
                 # print(cell)
                 table.add_cell(cell.value, cell.row, cell.col, cell.merged, cell.parent)
-            print(table._empty_rows)
-            print(table._empty_columns)
             print(table.nrows, table.ncols)
-            table.normilize_cells()
+            table.normalize()
             print(table.nrows, table.ncols)
 
         parsed_cnt += 1
