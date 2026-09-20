@@ -1,8 +1,8 @@
 from io import BytesIO
 from pathlib import Path
 
-from . import table_loader as tl
-from . import table_parser as tp
+from . import loader as tl
+from . import parser as tp
 
 
 def run_file(file: Path | BytesIO) -> None:

@@ -1,5 +1,5 @@
 from . import functional as func
-from . import table_loader, table_parser
+from . import loader, parser
 from . import table_processer_v5 as tpv5
 from .table_processer import (
     TableParseResults,
@@ -12,8 +12,9 @@ __all__ = [
     "TableParseResults",
     "TableWorker",
     "func",
+    "loader",
     "make_callculation_xlsx",
     "make_request_xlsx",
-    "table_loader",
+    "parser",
     "tpv5"
 ]

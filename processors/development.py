@@ -2,18 +2,22 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
+from sqlalchemy.sql.expression import table
+
 from materials import DELIMETERS, ParserV2
 from table import (
     TableWorker,
     make_callculation_xlsx,
     make_request_xlsx,
-    table_loader,
-    table_parser,
     tpv5,
 )
 from table import config as conf
-from table import table_processer_v4 as tp4
-from table import table_processer_v4_1 as tp4_1
+from table import (
+    loader as tl,
+)
+from table import (
+    parser as tp,
+)
 
 
 def test_callculation_table():
@@ -104,85 +108,6 @@ def main():
         print(error_files)
 
 
-def mainv4():
-    # testfile = Path("../../private/tables/1108A.xls")
-    inputs = Path("../private/tables")
-    output = Path("../private/results/texts")
-    output.mkdir(parents=True, exist_ok=True)
-
-    parsed_cnt = 0
-    all_cnt = 0
-    error_files = []
-    for file in inputs.iterdir():
-        print("\n\n", file)
-
-        try:
-            data = tp4.TableLoader.load(None, file)
-        except BaseException as err:
-            print("ERROR: Wrong file!", err)
-            continue
-        all_cnt += 1
-
-        if data is None:
-            continue
-        parsed_cnt += 1
-
-        for sheet in data.sheets.values():
-            print(sheet.name, sheet.nrows, sheet.ncols)
-            print(sheet.type_cells)
-
-
-    if all_cnt == 0:
-        print("No files in the dir")
-    else:
-        print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
-        print(error_files)
-
-
-def mainv4_1():
-    # testfile = Path("../../private/tables/1108A.xls")
-    inputs = Path("../private/tables")
-    output = Path("../private/results/texts")
-    output.mkdir(parents=True, exist_ok=True)
-
-    parsed_cnt = 0
-    all_cnt = 0
-    error_files = []
-    header_packs = []
-    for file in inputs.iterdir():
-        print("\n\n", file)
-
-        try:
-            data = tp4_1.TableLoader.load(None, file)
-        except BaseException as err:
-            print("ERROR: Wrong file!", err)
-            continue
-        all_cnt += 1
-
-        if data is None:
-            continue
-        parsed_cnt += 1
-
-        for sheet in data.sheets.values():
-            print(sheet.name, sheet.nrows, sheet.ncols)
-            if sheet.empty:
-                continue
-            headers_on_sheet = {"nrows": sheet.nrows, "ncols": sheet.ncols, "headers": []}
-            headers = sheet.find_headers()
-            for header in headers:
-                headers_on_sheet["headers"].append(header.to_json())
-            header_packs.append(headers_on_sheet)
-    with open("../private/headers.json", "w") as file:
-        json.dump(header_packs, file, indent=4)
-
-
-    if all_cnt == 0:
-        print("No files in the dir")
-    else:
-        print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
-        print(error_files)
-
-
 def mainv5():
     # testfile = Path("../../private/tables/1108A.xls")
     inputs = Path("../private/tables")
@@ -195,7 +120,7 @@ def mainv5():
     for file in inputs.iterdir():
         all_cnt += 1
         try:
-            data = table_loader.TableLoader.load(file)
+            data = tl.TableLoader.load(file)
         except BaseException as err:
             print(f"ERROR: Wrong file '{file.name}'!", err)
             print("\n")
@@ -204,8 +129,20 @@ def mainv5():
 
         print(data.name, data.fmt, data.with_metadata)
 
-        tables = table_parser.TableParser.read(data)
-        print(tables)
+        tables = tp.read(data)
+        print(len(tables))
+        for table in tables:
+            parser = tp.TableParser(table, tp.MATCHER)
+            blocks = parser.parse()
+            for block in blocks:
+                print("Block:", block.id)
+                print("\thorizontal:")
+                for row, field in block.horizontal_fields.items():
+                    print(f"\t\t{row}:", field.spec.name, len(field.cells))
+                print("\tvertical:")
+                for col, field in block.vertical_fields.items():
+                    print(f"\t\t{col}:", field.spec.name, len(field.cells))
+            print("\n")
 
         parsed_cnt += 1
 
@@ -214,6 +151,41 @@ def mainv5():
     else:
         print(f"Parsed: {parsed_cnt}/{all_cnt} = {parsed_cnt / all_cnt * 100:.1f}%")
         print(error_files)
+
+
+def mainv5_one_file():
+    input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
+    # input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
+    output = Path("../private/")
+    output.mkdir(parents=True, exist_ok=True)
+
+    try:
+        data = tl.TableLoader.load(input)
+    except BaseException as err:
+        print(f"ERROR: Wrong file '{input.name}'!", err)
+        return
+
+    print(data.name, data.fmt, data.with_metadata)
+
+    report, tables = tp.read(data)
+    print(len(tables))
+    for table in tables:
+        parser = tp.TableParser(table, tp.MATCHER)
+        blocks = parser.parse()
+        for block in blocks:
+            print("Block:", block.id)
+            print("\thorizontal:")
+            for row, field in block.horizontal_fields.items():
+                print(f"\t\t{row}:", field.spec.name, len(field.cells))
+                for cell in field.cells:
+                    print("\t\t\t", cell)
+            print("\tvertical:")
+            for col, field in block.vertical_fields.items():
+                print(f"\t\t{col}:", field.spec.name, len(field.cells))
+        print("\n")
+
+    with open(output / Path(f"{report.name}.html"), "w") as file:
+        file.write(report.to_html())
 
 
 if __name__ == "__main__":
@@ -225,4 +197,6 @@ if __name__ == "__main__":
     # mainv3()
     # mainv4()
     # mainv4_1()
-    mainv5()
+
+    # mainv5()
+    mainv5_one_file()
