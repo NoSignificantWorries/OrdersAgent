@@ -82,11 +82,19 @@ class Direction(str, Enum):
     RIGHT = "right"
 
 
+class ExtractorID(str, Enum):
+    AsInt = "AsInt"
+    AsStr = "AsStr"
+    AsSizes = "AsSizes"
+
+
 class Extractor(Protocol):
+    extractor_id: ExtractorID
     def extract(self, cell: Cell) -> Any | None: ...
 
 
 class AsInt(Extractor):
+    extractor_id = ExtractorID.AsInt
     def extract(self, cell: Cell) -> int | None:
         if isinstance(cell.value, int):
             return cell.value
@@ -103,6 +111,7 @@ class AsInt(Extractor):
 
 
 class AsStr(Extractor):
+    extractor_id = ExtractorID.AsStr
     def extract(self, cell: Cell) -> str | None:
         if cell.value is None:
             return None
@@ -111,6 +120,7 @@ class AsStr(Extractor):
 
 
 class AsSizes(Extractor):
+    extractor_id = ExtractorID.AsSizes
     SIZES = re.compile(r"^\s*([\d\s]+(?:[.,]\d+)?)\s*[xXхХ*×]\s*([\d\s]+(?:[.,]\d+)?)\s*$")
     def extract(self, cell: Cell) -> tuple[int, int] | None:
         if not isinstance(cell.value, str):
@@ -131,7 +141,48 @@ class FieldSpec:
     name: str
     anchors: list[str]
     extractors: list[Extractor]
+    aliases: list[str] = field(default_factory=list)
     direction: Direction = Direction.DOWN
+
+
+@dataclass(frozen=True, slots=True)
+class PushCallback:
+    extracted: bool = False
+    extractor_id: ExtractorID | None = None
+
+
+@dataclass(slots=True)
+class FieldState:
+    spec: FieldSpec
+    header: str
+    start: tuple[int, int]
+    block_id: int
+    cells: list[Cell] = field(default_factory=list)
+    closed: bool = False
+
+    @property
+    def size(self) -> int:
+        return len(self.cells)
+
+    @property
+    def empty(self) -> bool:
+        return len(self.cells) == 0
+
+    def push(self, cell: Cell) -> PushCallback:
+        if self.closed:
+            return PushCallback()
+        callback = PushCallback()
+        for extractor in self.spec.extractors:
+            extracted = extractor.extract(cell)
+            if extracted is not None:
+                new_cell = Cell(extracted, cell.row, cell.col, is_merge_child=cell.is_merge_child)
+                self.cells.append(new_cell)
+                callback = PushCallback(extracted=True, extractor_id=extractor.extractor_id)
+                break
+
+        if self.spec.direction == Direction.RIGHT and self.size >= 1:
+            self.closed = True
+        return callback
 
 
 class FieldMatcher:
@@ -193,6 +244,15 @@ class FieldMatcher:
         return self.classify_text(value)
 
 
+@dataclass(slots=True)
+class Block:
+    id: int
+    start_row: int
+    end_row: int = -1
+    vertical_fields: dict[int, FieldState] = field(default_factory=dict)
+    horizontal_fields: dict[int, FieldState] = field(default_factory=dict)
+
+
 MATCHER = FieldMatcher([
     FieldSpec("material", ["наименование", "обозначение", "номенклатура", "артикул", "тип пакета", "формула", "формула заполнения", "формула сп"], [AsStr()]),
     FieldSpec("amount", ["кол-во", "количество", "кол-во(шт)", "количество(шт)", "колич", "n"], [AsInt()]),
@@ -205,15 +265,101 @@ MATCHER = FieldMatcher([
 ])
 
 
-@dataclass(frozen=True, slots=True)
-class CursorState:
-    ...
+class TableParser:
+    def __init__(self, table: SparseTable, matcher: FieldMatcher) -> None:
+        self.matcher: FieldMatcher = matcher
+        self.table: SparseTable = table
+        self.blocks: list[Block] = []
+        self._new_block_id: int = 0
+
+    def last_block(self) -> Block | None:
+        if self._new_block_id == 0:
+            return None
+        return self.blocks[-1]
+
+    def create_block(self, row: int) -> Block:
+        self.blocks.append(Block(id=self._new_block_id, start_row=row))
+        self._new_block_id += 1
+        return self.blocks[-1]
+
+    def get_block_or_create(self, row: int) -> Block:
+        last_block = self.last_block()
+        if last_block:
+            return last_block
+        return self.create_block(row)
+
+    def close_block_and_create_new(self, row: int) -> Block:
+        last_block = self.last_block()
+        if last_block is not None:
+            last_block.end_row = row
+        return self.create_block(row)
+
+    def push_value_in_block(self, block: Block, row: int, col: int, cell: Cell) -> PushCallback:
+        vfield = block.vertical_fields.get(col)
+        if vfield is not None and not vfield.closed:
+            return vfield.push(cell)
+
+        hfield = block.horizontal_fields.get(row)
+        if hfield is not None and not hfield.closed:
+            return hfield.push(cell)
+
+        return PushCallback()
+
+    def add_field_in_block(self, block: Block, row: int, col: int, header: str, spec: FieldSpec) -> bool:
+        field = FieldState(spec, header, (row, col), block.id)
+        match spec.direction:
+            case Direction.DOWN:
+                block_field = block.vertical_fields.get(col)
+                if block_field is None:
+                    block.vertical_fields[col] = field
+                    return True
+            case Direction.RIGHT:
+                block_field = block.horizontal_fields.get(row)
+                if block_field is None:
+                    block.horizontal_fields[row] = field
+                    return True
+        return False
+
+    def parse(self) -> list[Block]:
+        for row, col, cell in self.table.iter_cells():
+            if isinstance(cell.value, int):
+                block = self.last_block()
+                if block is None:
+                    continue
+                response = self.push_value_in_block(block, row, col, cell)
+            elif isinstance(cell.value, str):
+                spec = self.matcher.match(cell.value)
+                if spec is None:
+                    block = self.last_block()
+                    if block is None:
+                        continue
+                    response = self.push_value_in_block(block, row, col, cell)
+                else:
+                    block = self.last_block()
+                    if block is None:
+                        block = self.create_block(row)
+                    field_added = self.add_field_in_block(block, row, col, spec)
+                    if not field_added:
+                        block = self.close_block_and_create_new(row)
+                        field_added = self.add_field_in_block(block, row, col, spec)
+        return self.blocks
 
 
-@dataclass
-class Context:
-    ...
-
-
-class Trigger(Protocol):
-    def match(self, cell: Cell, state: CursorState, context: Context) -> bool: ...
+def read(wb: Workbook) -> tuple[WorkbookReport, list[SparseTable]]:
+    report = WorkbookReport(wb.name, with_metadata=wb.with_metadata)
+    tables: list[SparseTable] = []
+    for sheet in wb.sheets:
+        subtable = SparseTable(name=sheet.name, nrows=sheet.nrows, ncols=sheet.ncols)
+        report.add_sheet(name=sheet.name, nrows=sheet.nrows, ncols=sheet.ncols)
+        for cell in sheet.cells:
+            new_cell = subtable.add_cell(cell.value, cell.row, cell.col, cell.merged, cell.parent)
+            report.add_cell_on_last_sheet(cell.row, cell.col, None if new_cell is None else new_cell.value, cell.merged)
+            if cell.parent is not None:
+                report.add_parent_on_last_sheet(*cell.parent)
+        keeped_rows, keeped_cols = subtable.normalize()
+        report.last_table_normalized(subtable.nrows, subtable.ncols, keeped_rows, keeped_cols)
+        if not subtable.empty:
+            tables.append(subtable)
+        else:
+            print(f"WARN: Empty sheet '{sheet.name}' in the workbook '{wb.name}'")
+    return report, tables

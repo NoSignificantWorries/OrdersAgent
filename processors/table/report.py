@@ -54,7 +54,6 @@ class TableReport:
         self.cells[row][col].is_merged_parent = True
 
     def to_html(self) -> str:
-        print(self.cells)
         rows = []
         for row in self.cells:
             row = "\n".join([cell.to_html() for cell in row])

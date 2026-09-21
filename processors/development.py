@@ -9,6 +9,7 @@ from table import (
     TableWorker,
     make_callculation_xlsx,
     make_request_xlsx,
+    schemes,
     tpv5,
 )
 from table import config as conf
@@ -154,10 +155,18 @@ def mainv5():
 
 
 def mainv5_one_file():
-    input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
-    # input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
+    # input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
+    input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
     output = Path("../private/")
     output.mkdir(parents=True, exist_ok=True)
+
+    # schm_maker = schemes.SchemeMaker(schemes.Schemes.REQUEST)
+    # schm_maker.make_scheme()
+    # schm_maker.wb.save(output / Path("test_request.xlsx"))
+
+    # schm_maker = schemes.SchemeMaker(schemes.Schemes.CALC)
+    # schm_maker.make_scheme()
+    # schm_maker.wb.save(output / Path("test_calc.xlsx"))
 
     try:
         data = tl.TableLoader.load(input)
@@ -168,6 +177,12 @@ def mainv5_one_file():
     print(data.name, data.fmt, data.with_metadata)
 
     report, tables = tp.read(data)
+
+    # for sheet in report.sheets:
+    #     print(sheet.rows_match)
+    #     print(sheet.cols_match)
+    #     print("\n")
+
     print(len(tables))
     for table in tables:
         parser = tp.TableParser(table, tp.MATCHER)
@@ -177,8 +192,8 @@ def mainv5_one_file():
             print("\thorizontal:")
             for row, field in block.horizontal_fields.items():
                 print(f"\t\t{row}:", field.spec.name, len(field.cells))
-                for cell in field.cells:
-                    print("\t\t\t", cell)
+                # for cell in field.cells:
+                #     print("\t\t\t", cell)
             print("\tvertical:")
             for col, field in block.vertical_fields.items():
                 print(f"\t\t{col}:", field.spec.name, len(field.cells))
