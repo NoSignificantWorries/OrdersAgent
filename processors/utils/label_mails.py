@@ -227,24 +227,54 @@ class TextLabeler:
 
         if file_path:
             try:
+                # === ПОЛНАЯ ОТЛАДКА ===
+                print(f"\n=== ЗАГРУЗКА РАЗМЕТКИ ===")
+                print(f"Файл: {file_path}")
+                print(f"Всего файлов в папке: {len(self.files)}")
+                print(f"Первые 10 файлов:")
+                for f in self.files[:10]:
+                    print(f"  {os.path.basename(f)}")
+                
                 loaded_labels = {}
+                total_lines = 0
+                matched_lines = 0
+                
                 with open(file_path, "r", encoding="utf-8") as f:
                     next(f)  # пропускаем заголовок
                     for line in f:
+                        total_lines += 1
                         parts = line.strip().split(",")
-                        if len(parts) == 2:
-                            filename, label = parts
-                            # Ищем полный путь к файлу
+                        if len(parts) >= 2:
+                            filename, label = parts[0], parts[1]
+                            
+                            # Пробуем разные варианты
+                            filename_variants = [
+                                filename,
+                                filename[6:] if filename.startswith('email_') else filename,
+                                'email_' + filename if not filename.startswith('email_') else filename,
+                            ]
+                            
                             for full_path in self.files:
-                                if os.path.basename(full_path) == filename:
+                                basename = os.path.basename(full_path)
+                                if basename in filename_variants or filename in basename:
                                     loaded_labels[full_path] = label
+                                    matched_lines += 1
+                                    print(f"✓ Найдено совпадение: {filename} -> {basename}")
                                     break
-
+                            else:
+                                print(f"✗ Не найдено: {filename}")
+                
+                print(f"\nВсего строк в CSV: {total_lines}")
+                print(f"Найдено совпадений: {matched_lines}")
+                print(f"Загружено меток: {len(loaded_labels)}")
+                # =======================
+                
                 self.labels = loaded_labels
                 self.update_display()
                 self.status_var.set(f"Загружено {len(self.labels)} меток")
                 messagebox.showinfo("Успех", f"Загружено {len(self.labels)} меток")
             except Exception as e:
+                print(f"Ошибка: {e}")
                 messagebox.showerror("Ошибка", f"Не удалось загрузить разметку: {e}")
 
 
