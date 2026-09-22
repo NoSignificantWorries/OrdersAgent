@@ -1,24 +1,13 @@
-import json
-from collections import defaultdict
 from pathlib import Path
-
-from sqlalchemy.sql.expression import table
 
 from materials import DELIMETERS, ParserV2
 from table import (
     TableWorker,
     make_callculation_xlsx,
     make_request_xlsx,
-    schemes,
-    tpv5,
 )
-from table import config as conf
-from table import (
-    loader as tl,
-)
-from table import (
-     as tp,
-)
+from table import loader as tl
+from table import parser_v6 as tp
 
 
 def test_callculation_table():
@@ -155,8 +144,8 @@ def mainv5():
 
 
 def mainv5_one_file():
-    # input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
-    input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
+    input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
+    # input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
     output = Path("../private/")
     output.mkdir(parents=True, exist_ok=True)
 
@@ -185,18 +174,8 @@ def mainv5_one_file():
 
     print(len(tables))
     for table in tables:
-        parser = tp.TableParser(table, tp.MATCHER)
-        blocks = parser.parse()
-        for block in blocks:
-            print("Block:", block.id)
-            print("\thorizontal:")
-            for row, field in block.horizontal_fields.items():
-                print(f"\t\t{row}:", field.spec.name, len(field.cells))
-                # for cell in field.cells:
-                #     print("\t\t\t", cell)
-            print("\tvertical:")
-            for col, field in block.vertical_fields.items():
-                print(f"\t\t{col}:", field.spec.name, len(field.cells))
+        ann = tp.annotate_table(table)
+        print(ann)
         print("\n")
 
     with open(output / Path(f"{report.name}.html"), "w") as file:
