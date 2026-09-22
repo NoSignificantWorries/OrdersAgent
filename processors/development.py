@@ -17,7 +17,7 @@ from table import (
     loader as tl,
 )
 from table import (
-    parser as tp,
+     as tp,
 )
 
 
