@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from app.db import get_db_pool
 
+MAX_THREAD_CANDIDATES = 800
 
 def _task_status_order_sql(task_alias: str = "tt") -> str:
     return f"""
@@ -994,8 +995,13 @@ async def get_email_thread_for_user(
                 t.attempts,
                 t.created_at,
                 t.completed_at
+            ORDER BY
+                COALESCE(e.email_date, e.created_at) DESC,
+                e.id DESC
+            LIMIT $2
             """,
             mailbox,
+            MAX_THREAD_CANDIDATES,
         )
 
         sent_rows = await conn.fetch(
@@ -1071,8 +1077,13 @@ async def get_email_thread_for_user(
                 se.email_subject,
                 se.sent_at,
                 se.created_at
+            ORDER BY
+                COALESCE(se.sent_at, se.created_at) DESC,
+                se.id DESC
+            LIMIT $2
             """,
             mailbox,
+            MAX_THREAD_CANDIDATES,
         )
 
     candidates: list[dict[str, Any]] = []
