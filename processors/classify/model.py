@@ -2,15 +2,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
-import pandas as pd
 
 try:
     import lightgbm as lgb
     LIGHTGBM_AVAILABLE = True
 except ImportError:
     LIGHTGBM_AVAILABLE = False
-
-from .features import FeaturesExtractor
 
 
 class LightGBMModel:    
@@ -165,6 +162,8 @@ class RFModel:
     def predict(
         self, features: List[Dict[str, Any]]
     ) -> Tuple[List[str], List[int], List[float]]:
+        import pandas as pd
+        
         if self._model is None or self._features is None or self._label_encoder is None:
             raise ValueError("Model not loaded")
         
@@ -195,13 +194,14 @@ def decide_by_thresholds(
 
 
 def train() -> None:
+    import pandas as pd
+
     if not LIGHTGBM_AVAILABLE:
         print("LightGBM не установлен. Выполните: uv add lightgbm")
         return
     
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.pipeline import Pipeline
-    from sklearn.calibration import CalibratedClassifierCV
     
     datapath = Path("~/Projects/OrdersAgent/private/mails/emails_parsed.parquet").expanduser()
     if not datapath.exists():
