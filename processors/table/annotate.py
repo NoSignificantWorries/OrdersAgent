@@ -56,7 +56,7 @@ class HeaderMatcher:
 
     def __init__(self, patterns: list[HeaderSpec]) -> None:
         self.fields: list[HeaderSpec] = patterns
-        self.name_to_field: dict[str, HeaderSpec] = {field.kind: field for field in self.fields}
+        self.name_to_field: dict[CellKind, HeaderSpec] = {field.kind: field for field in self.fields}
         self.anchors_to_field: dict[str, HeaderSpec] = {}
         self.max_length = 0
 
@@ -93,7 +93,7 @@ class HeaderMatcher:
             return best_field
         return None
 
-    def field_by_name(self, name: str) -> HeaderSpec | None:
+    def field_by_kind(self, name: CellKind) -> HeaderSpec | None:
         return self.name_to_field.get(name, None)
 
     def match(self, value: int | str) -> HeaderSpec | None:
@@ -144,6 +144,68 @@ class CellAnnotation:
 class Annotation:
     cells: dict[tuple[int, int], CellAnnotation] = field(default_factory=dict)
 
+    def get_cell(self, row: int, col: int) -> CellAnnotation | None:
+        return self.cells.get((row, col), None)
+
+
+@dataclass(slots=True)
+class CellRun:
+    start: int
+    count: int
+    kind: CellKind
+    role: CellRole
+
+    @property
+    def end(self) -> int:
+        return self.start + self.count
+
+    def add(self) -> None:
+        self.count += 1
+
+    @property
+    def columns(self) -> range:
+        return range(self.start, self.start + self.count)
+
+
+@dataclass(slots=True)
+class LineAnnotation:
+    runs: list[CellRun] = field(default_factory=list[CellRun])
+
+    @property
+    def is_header(self) -> bool:
+        return any(section.role == CellRole.HEADER for section in self.runs)
+
+    def add_cell(self, idx: int, role: CellRole, kind: CellKind) -> None:
+        if self.runs:
+            last = self.runs[-1]
+            if last.role == role and last.kind == kind:
+                last.add()
+                return
+        self.runs.append(CellRun(idx, 1, kind, role))
+
+
+@dataclass
+class TableShape:
+    rows: dict[int, LineAnnotation] = field(default_factory=dict[int, LineAnnotation])
+    cols: dict[int, LineAnnotation] = field(default_factory=dict[int, LineAnnotation])
+
+    def get_row(self, row_index: int) -> LineAnnotation | None:
+        return self.rows.get(row_index, None)
+
+    def get_col(self, col_index: int) -> LineAnnotation | None:
+        return self.cols.get(col_index, None)
+
+    def add_cell(self, row_index: int, col_index: int, role: CellRole, kind: CellKind) -> None:
+        row = self.get_row(row_index)
+        if not row:
+            row = self.rows[row_index] = LineAnnotation()
+        row.add_cell(col_index, role, kind)
+
+        col = self.get_col(col_index)
+        if not col:
+            col = self.cols[col_index] = LineAnnotation()
+        col.add_cell(row_index, role, kind)
+
 
 class AnnotateEngine:
     def __init__(self, actions: list[Action]) -> None:
@@ -153,12 +215,16 @@ class AnnotateEngine:
         annotation = Annotation()
         for row, col, cell in table.iter_cells():
             for action in self.actions:
-                if action.trigger(cell.value):
-                    cell_role, cell_kind = action.annotate(cell.value)
-                    if action.transform:
-                        new_value = action.transform(cell.value)
-                        annotation.cells[(row, col)] = CellAnnotation(cell_role, cell_kind, new_value)
-                    else:
-                        annotation.cells[(row, col)] = CellAnnotation(cell_role, cell_kind)
-                    break
+                if not action.trigger(cell.value):
+                    continue
+                cell_role, cell_kind = action.annotate(cell.value)
+                new_value = action.transform(cell.value) if action.transform else None
+                annotation.cells[(row, col)] = CellAnnotation(cell_role, cell_kind, new_value)
+                break
         return annotation
+
+    def shape(self, annotation: Annotation) -> TableShape:
+        table_shape = TableShape()
+        for (r, c), cell_ann in annotation.cells.items():
+            table_shape.add_cell(r, c, cell_ann.role, cell_ann.kind)
+        return table_shape

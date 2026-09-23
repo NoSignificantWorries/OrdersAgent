@@ -175,7 +175,13 @@ def mainv5_one_file():
     print(len(tables))
     for table in tables:
         ann = tp.annotate_table(table)
-        print(ann)
+        shape = tp.make_shape(ann)
+        # print(ann)
+        tp.assemble(table, ann)
+        for idx, line_ann in shape.rows.items():
+            print(idx, ":", line_ann)
+        for idx, line_ann in shape.cols.items():
+            print(idx, ":", line_ann)
         print("\n")
 
     with open(output / Path(f"{report.name}.html"), "w") as file:
