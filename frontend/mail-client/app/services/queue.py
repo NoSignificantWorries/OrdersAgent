@@ -765,12 +765,6 @@ def _item_matches_thread(item: dict[str, Any], thread_keys: set[str]) -> bool:
     in_reply_to = _normalize_message_id(item.get("in_reply_to"))
     references = _extract_message_ids(item.get("references"))
 
-    print("MATCH DEBUG item:", item.get("thread_source"), item.get("source_id"),
-          "message_id=", message_id,
-          "in_reply_to=", in_reply_to,
-          "references=", references,
-          "thread_keys=", thread_keys)
-
     if message_id and message_id in thread_keys:
         return True
     if in_reply_to and in_reply_to in thread_keys:
@@ -897,7 +891,6 @@ async def get_email_thread_for_user(
                 e.to_header,
                 e.cc_header,
                 e.email_subject,
-                e.raw_email,
                 e.email_date,
                 e.model_decision AS email_model_decision,
                 e.archived AS email_archived,
@@ -986,7 +979,6 @@ async def get_email_thread_for_user(
                 e.to_header,
                 e.cc_header,
                 e.email_subject,
-                e.raw_email,
                 e.email_date,
                 e.model_decision,
                 e.archived,
@@ -1022,7 +1014,6 @@ async def get_email_thread_for_user(
                 se.to_header,
                 se.cc_header,
                 se.email_subject,
-                se.raw_email,
                 se.sent_at AS email_date,
                 'sent'::text AS email_model_decision,
                 false AS email_archived,
@@ -1078,7 +1069,6 @@ async def get_email_thread_for_user(
                 se.to_header,
                 se.cc_header,
                 se.email_subject,
-                se.raw_email,
                 se.sent_at,
                 se.created_at
             """,
@@ -1120,7 +1110,6 @@ async def get_email_thread_for_user(
             "toheader": row["to_header"],
             "ccheader": row["cc_header"],
             "emailsubject": row["email_subject"],
-            "rawemail": row["raw_email"],
             "emaildate": row["email_date"].isoformat() if row["email_date"] else None,
             "createdat": row["email_created_at"].isoformat() if row["email_created_at"] else None,
             "archived": bool(row["email_archived"]),
@@ -1190,7 +1179,6 @@ async def get_email_thread_for_user(
             "toheader": row["to_header"],
             "ccheader": row["cc_header"],
             "emailsubject": row["email_subject"],
-            "rawemail": row["raw_email"],
             "emaildate": _to_novosibirsk_iso(row["email_created_at"]),
             "createdat": _to_novosibirsk_iso(row["email_created_at"]),
             "sentat": _to_novosibirsk_iso(row["email_date"]),
@@ -1260,10 +1248,6 @@ async def get_email_thread_for_user(
             if item_key in matched_keys:
                 continue
             if _item_matches_thread(item, thread_keys):
-                print("THREAD DEBUG matched item:", item.get("thread_source"), item.get("source_id"),
-                      "message_id=", item.get("messageid"),
-                      "in_reply_to=", item.get("in_reply_to"),
-                      "references=", item.get("references"))
                 matched_keys.add(item_key)
                 related.append(item)
                 before = len(thread_keys)

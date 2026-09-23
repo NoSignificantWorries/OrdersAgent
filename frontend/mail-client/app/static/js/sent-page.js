@@ -711,10 +711,6 @@ function renderSentPagination(state) {
                                                 <span class="email-thread-item-subject">
                                                     ${escapeHtml(threadEmail.subject || threadEmail.emailsubject || "(без темы)")}
                                                 </span>
-
-                                                <span class="email-thread-item-preview">
-                                                    ${preview || "Без текста"}
-                                                </span>
                                             </span>
                                         </button>
                                     `;

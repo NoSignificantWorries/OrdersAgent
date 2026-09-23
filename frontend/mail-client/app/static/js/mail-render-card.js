@@ -327,13 +327,13 @@
                 ? extractDisplayBodyFromRawEmail(rawSource)
                 : rawSource;
 
-        const preview =
-            threadEmail?.preview ||
-            String(rawText)
-                .replace(/\r/g, "\n")
-                .replace(/\n{2,}/g, "\n")
-                .replace(/\s+/g, " ")
-                .trim();
+        // const preview =
+        //     threadEmail?.preview ||
+        //     String(rawText)
+        //         .replace(/\r/g, "\n")
+        //         .replace(/\n{2,}/g, "\n")
+        //         .replace(/\s+/g, " ")
+        //         .trim();
 
         const date =
             threadEmail?.date ||
@@ -361,7 +361,7 @@
             thread_source: threadEmail?.thread_source || threadEmail?.source_type || "inbox",
             subject,
             content: rawText,
-            preview,
+            //preview,
             date,
             sender,
             mailbox,
@@ -532,10 +532,7 @@
                                         threadSource === currentThreadSource &&
                                         threadSourceId === currentSourceId;
 
-                                    const previewSource =
-                                        threadEmail.preview || threadEmail.content || threadEmail.rawemail || "";
-
-                                    const preview = escapeHtml(String(previewSource).slice(0, 180));
+                                    const preview = "";
 
                                     return `
                                         <button
@@ -566,10 +563,6 @@
 
                                                 <span class="email-thread-item-subject">
                                                     ${escapeHtml(threadEmail.subject || threadEmail.emailsubject || "(без темы)")}
-                                                </span>
-
-                                                <span class="email-thread-item-preview">
-                                                    ${preview || "Без текста"}
                                                 </span>
                                             </span>
                                         </button>
