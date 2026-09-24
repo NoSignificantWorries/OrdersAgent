@@ -1,6 +1,5 @@
 from collections.abc import Generator
 from dataclasses import dataclass
-from typing import Self
 
 
 @dataclass(slots=True)
@@ -8,13 +7,10 @@ class Cell:
     row: int
     col: int
     value: int | str | tuple[int, int] | None = None
-    is_merge_child: bool = False
-    merge_parent: Self | None = None
 
 
 class SparseTable:
-    def __init__(self, name: str | None, nrows: int, ncols: int) -> None:
-        self.name = name
+    def __init__(self, nrows: int, ncols: int) -> None:
         self.nrows = nrows
         self.ncols = ncols
 
@@ -24,11 +20,8 @@ class SparseTable:
     def empty(self) -> bool:
         return self.nrows == 0 or self.ncols == 0
 
-    def add_cell(self, value: int | str | None, row: int, col: int, merged: bool = False, parent: tuple[int, int] | None = None) -> Cell | None:
-        if parent is not None:
-            cell = Cell(row, col, value, is_merge_child=True, merge_parent=self.get_cell(*parent))
-        else:
-            cell = Cell(row, col, value)
+    def add_cell(self, value: int | str | None, row: int, col: int) -> Cell | None:
+        cell = Cell(row, col, value)
         self.cells[row][col] = cell
         return cell
 

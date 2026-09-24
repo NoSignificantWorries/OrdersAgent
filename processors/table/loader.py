@@ -1,5 +1,4 @@
 import re
-from collections.abc import Generator
 from dataclasses import dataclass
 from enum import Enum
 from io import BytesIO
@@ -63,8 +62,6 @@ class Cell:
     value: int | str | None
     row: int
     col: int
-    merged: bool = False
-    parent: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,50 +69,47 @@ class Sheet:
     name: str
     nrows: int
     ncols: int
-    cells: Generator[Cell, None, None]
+    cells: list[Cell]
 
 
 @dataclass(slots=True)
 class Workbook:
     name: str | None
     fmt: TableType
-    with_metadata: bool
-    sheets: Generator[Sheet, None, None]
+    sheets:list[Sheet]
 
 
 class TableLoader:
     @staticmethod
-    def get_name(src: BytesIO | Path) -> str | None:
+    def _get_name(src: BytesIO | Path) -> str | None:
         if isinstance(src, BytesIO):
             return getattr(src, "name", None)
         elif isinstance(src, Path):
             return src.name
 
     @staticmethod
-    def _open_by_type(src: BytesIO | Path, fmt: TableType, with_metadata: bool = True) -> xlrd.Book | openpyxl.Workbook:
+    def _open_by_type(src: BytesIO | Path, fmt: TableType) -> xlrd.Book | openpyxl.Workbook:
         match fmt:
             case TableType.XLS:
                 if isinstance(src, BytesIO):
-                    return xlrd.open_workbook(file_contents=src.getvalue(), formatting_info=with_metadata)
+                    return xlrd.open_workbook(file_contents=src.getvalue(), on_demand=True, formatting_info=False)
                 else:
-                    return xlrd.open_workbook(str(src), formatting_info=with_metadata)
+                    return xlrd.open_workbook(str(src), on_demand=True, formatting_info=False)
             case TableType.XLSX:
                 if isinstance(src, BytesIO):
                     src.seek(0)
-                return openpyxl.load_workbook(src, data_only=not with_metadata)
+                return openpyxl.load_workbook(src, read_only=True, data_only=True)
             case _:
                 raise ValueError(f"Unsupported format: {fmt}")
 
     @staticmethod
-    def _open_with_metadata_check(src: BytesIO | Path, fmt: TableType) -> WorkbookResults:
-        for with_metadata in (True, False):
-            try:
-                wb = TableLoader._open_by_type(src, fmt, with_metadata)
-                return WorkbookResults(TableLoader.get_name(src), fmt, with_metadata, wb)
-            except Exception as err:
-                if not with_metadata:
-                    raise
-                # TODO: logging with WARN for metadata errors
+    def _close_by_type(wb: xlrd.Book | openpyxl.Workbook) -> None:
+        if isinstance(wb, xlrd.Book):
+            wb.release_resources()
+        elif isinstance(wb, openpyxl.Workbook):
+            wb.close()
+        else:
+            raise TypeError(f"Unsupported object '{type(wb).__name__}'")
 
     # @staticmethod
     # def  close_by_type(wb: xlrd.Book | openpyxl.Workbook, fmt: TableType) -> None:
@@ -146,30 +140,8 @@ class TableLoader:
             raise TypeError(f"Unsupported data type '{type(src).__name__}'! Use Path or BytesIO objects instead.")
 
     @staticmethod
-    def _iter_xls_merge_ranges(sheet) -> Generator[tuple[int, int, int, int], None, None]:
-        yield from sheet.merged_cells
-
-    @staticmethod
-    def _iter_xlsx_merge_ranges(sheet) -> Generator[tuple[int, int, int, int], None, None]:
-        for rng in sheet.merged_cells.ranges:
-            yield rng.min_row - 1, rng.max_row, rng.min_col - 1, rng.max_col
-
-    @staticmethod
-    def _build_merged_map(ranges: Generator[tuple[int, int, int, int]]) -> dict[tuple[int, int], tuple[int, int]]:
-        merged: dict[tuple[int, int], tuple[int, int]] = {}
-        for rlo, rhi, clo, chi in ranges:
-            parent = (rlo, clo)
-            for r in range(rlo, rhi):
-                for c in range(clo, chi):
-                    if (r, c) != parent:
-                        merged[(r, c)] = parent
-        return merged
-
-    @staticmethod
-    def _make_cell(value, row: int, col: int, parent: tuple[int, int] | None = None) -> Cell | None:
+    def _make_cell(value, row: int, col: int) -> Cell | None:
         value = parse_value(value)
-        if parent is not None:
-            return Cell(value=None, row=row, col=col, merged=True, parent=parent)
 
         if value is None or value == "":
             return None
@@ -178,68 +150,77 @@ class TableLoader:
 
 
     @staticmethod
-    def _iter_xls_sheets(wb: xlrd.Book) -> Generator[Sheet, None, None]:
+    def _iter_xls_sheets(wb: xlrd.Book) -> list[Sheet]:
+        sheets: list[Sheet] = []
         for sheetname in wb.sheet_names():
             sheet = wb[sheetname]
-            merged = TableLoader._build_merged_map(TableLoader._iter_xls_merge_ranges(sheet))
-            yield Sheet(
+            new_sheet = Sheet(
                 name=sheetname,
                 nrows=sheet.nrows,
                 ncols=sheet.ncols,
-                cells=TableLoader._iter_xls_cells(sheet, merged)
+                cells=TableLoader._iter_xls_cells(sheet)
             )
+            sheets.append(new_sheet)
+            wb.unload_sheet(sheetname)
+        return sheets
 
     @staticmethod
-    def _iter_xls_cells(sheet, merged: dict[tuple[int, int], tuple[int, int]]) -> Generator[Cell, None, None]:
+    def _iter_xls_cells(sheet) -> list[Cell]:
+        sparse: list[Cell] = []
         for row in range(sheet.nrows):
             for col in range(sheet.ncols):
                 value = sheet.cell_value(row, col)
-                cell = TableLoader._make_cell(value, row, col, merged.get((row, col), None))
+                cell = TableLoader._make_cell(value, row, col)
                 if cell is not None:
-                    yield cell
+                    sparse.append(cell)
+        return sparse
 
     @staticmethod
-    def _iter_xlsx_sheets(wb: openpyxl.Workbook) -> Generator[Sheet, None, None]:
+    def _iter_xlsx_sheets(wb: openpyxl.Workbook) -> list[Sheet]:
+        sheets: list[Sheet] = []
         for sheetname in wb.sheetnames:
             sheet = wb[sheetname]
-            merged = TableLoader._build_merged_map(TableLoader._iter_xlsx_merge_ranges(sheet))
-            yield Sheet(
+            new_sheet = Sheet(
                 name=sheetname,
                 nrows=sheet.max_row,
                 ncols=sheet.max_column,
-                cells=TableLoader._iter_xlsx_cells(sheet, merged)
+                cells=TableLoader._iter_xlsx_cells(sheet)
             )
+            sheets.append(new_sheet)
+        return sheets
 
     @staticmethod
-    def _iter_xlsx_cells(sheet, merged: dict[tuple[int, int], tuple[int, int]]) -> Generator[Cell, None, None]:
-        for row in sheet.iter_rows():
-            for cell in row:
+    def _iter_xlsx_cells(sheet) -> list[Cell]:
+        sparse: list[Cell] = []
+        for row_idx, row in enumerate(sheet.iter_rows()):
+            for col_idx, cell in enumerate(row):
                 value = cell.value
                 cell_object = TableLoader._make_cell(
                     value=value,
-                    row=cell.row - 1,
-                    col=cell.column - 1,
-                    parent=merged.get((cell.row -1, cell.column - 1), None)
+                    row=row_idx,
+                    col=col_idx,
                 )
                 if cell_object is not None:
-                    yield cell_object
+                    sparse.append(cell_object)
+        return sparse
 
     @staticmethod
     def load(src: BytesIO | Path) -> Workbook:
         fmt = TableLoader._detect_type(src)
-        workbook = TableLoader._open_with_metadata_check(src, fmt)
+        workbook = TableLoader._open_by_type(src, fmt)
 
         match fmt:
             case TableType.XLS:
-                sheets = TableLoader._iter_xls_sheets(workbook.workbook)
+                sheets = TableLoader._iter_xls_sheets(workbook)
             case TableType.XLSX:
-                sheets = TableLoader._iter_xlsx_sheets(workbook.workbook)
+                sheets = TableLoader._iter_xlsx_sheets(workbook)
             case _:
                 raise ValueError(f"Unsupported format: {fmt}")
 
+        TableLoader._close_by_type(workbook)
+
         return Workbook(
-            name=workbook.name,
+            name=TableLoader._get_name(src),
             fmt=fmt,
-            with_metadata=workbook.with_metadata,
             sheets=sheets
         )

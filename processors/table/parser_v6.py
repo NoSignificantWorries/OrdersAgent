@@ -39,16 +39,14 @@ def make_shape(annotation: Annotation) -> TableShape:
 
 
 def read(wb: Workbook) -> tuple[WorkbookReport, list[SparseTable]]:
-    report = WorkbookReport(wb.name, with_metadata=wb.with_metadata)
+    report = WorkbookReport(wb.name)
     tables: list[SparseTable] = []
     for sheet in wb.sheets:
-        subtable = SparseTable(name=sheet.name, nrows=sheet.nrows, ncols=sheet.ncols)
+        subtable = SparseTable(nrows=sheet.nrows, ncols=sheet.ncols)
         report.add_sheet(name=sheet.name, nrows=sheet.nrows, ncols=sheet.ncols)
         for cell in sheet.cells:
-            new_cell = subtable.add_cell(cell.value, cell.row, cell.col, cell.merged, cell.parent)
-            report.add_cell_on_last_sheet(cell.row, cell.col, None if new_cell is None else new_cell.value, cell.merged)
-            if cell.parent is not None:
-                report.add_parent_on_last_sheet(*cell.parent)
+            new_cell = subtable.add_cell(cell.value, cell.row, cell.col)
+            report.add_cell_on_last_sheet(cell.row, cell.col, None if new_cell is None else new_cell.value)
         keeped_rows, keeped_cols = subtable.normalize()
         report.last_table_normalized(subtable.nrows, subtable.ncols, keeped_rows, keeped_cols)
         if not subtable.empty:

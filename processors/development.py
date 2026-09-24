@@ -117,22 +117,8 @@ def mainv5():
             error_files.append(file)
             continue
 
-        print(data.name, data.fmt, data.with_metadata)
-
-        tables = tp.read(data)
-        print(len(tables))
-        for table in tables:
-            parser = tp.TableParser(table, tp.MATCHER)
-            blocks = parser.parse()
-            for block in blocks:
-                print("Block:", block.id)
-                print("\thorizontal:")
-                for row, field in block.horizontal_fields.items():
-                    print(f"\t\t{row}:", field.spec.name, len(field.cells))
-                print("\tvertical:")
-                for col, field in block.vertical_fields.items():
-                    print(f"\t\t{col}:", field.spec.name, len(field.cells))
-            print("\n")
+        print(data.name, data.fmt)
+        print("\n")
 
         parsed_cnt += 1
 
@@ -163,7 +149,7 @@ def mainv5_one_file():
         print(f"ERROR: Wrong file '{input.name}'!", err)
         return
 
-    print(data.name, data.fmt, data.with_metadata)
+    print(data.name, data.fmt)
 
     report, tables = tp.read(data)
 
@@ -198,5 +184,5 @@ if __name__ == "__main__":
     # mainv4()
     # mainv4_1()
 
-    # mainv5()
-    mainv5_one_file()
+    mainv5()
+    # mainv5_one_file()

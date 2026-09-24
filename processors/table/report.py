@@ -4,8 +4,6 @@ from dataclasses import dataclass
 @dataclass(slots=True)
 class ReportCell:
     value: int | str | tuple[int, int] | None = None
-    is_merged_parent: bool = False
-    is_merged_child: bool = False
     group: str = "empty"
 
     def to_html(self) -> str:
@@ -50,9 +48,6 @@ class TableReport:
             col = self._match_col(col)
         self.cells[row][col] = cell
 
-    def add_parent(self, row: int, col: int) -> None:
-        self.cells[row][col].is_merged_parent = True
-
     def to_html(self) -> str:
         rows = []
         for row in self.cells:
@@ -63,10 +58,9 @@ class TableReport:
 
 
 class WorkbookReport:
-    def __init__(self, name: str | None, with_metadata: bool = True) -> None:
+    def __init__(self, name: str | None) -> None:
         self.name: str | None = name
         self.nsheets: int = 0
-        self.with_metadata: bool = with_metadata
 
         self.sheets: list[TableReport] = []
 
@@ -74,11 +68,8 @@ class WorkbookReport:
         self.sheets.append(TableReport(name, nrows, ncols))
         self.nsheets += 1
 
-    def add_cell_on_last_sheet(self, row: int, col: int, value: int | str | tuple[int, int] | None, is_merged_child: bool, origin_coords: bool = True) -> None:
-        self.sheets[-1].add_cell(row, col, ReportCell(value=value, is_merged_child=is_merged_child), origin_coords=origin_coords)
-
-    def add_parent_on_last_sheet(self, row: int, col: int) -> None:
-        self.sheets[-1].add_parent(row, col)
+    def add_cell_on_last_sheet(self, row: int, col: int, value: int | str | tuple[int, int] | None, origin_coords: bool = True) -> None:
+        self.sheets[-1].add_cell(row, col, ReportCell(value=value), origin_coords=origin_coords)
 
     def last_table_normalized(self, new_nrows: int, new_ncols: int, keeped_rows: list[int], keeped_cols: list[int]) -> None:
         self.sheets[-1].normilized_table(new_nrows, new_ncols, keeped_rows, keeped_cols)
