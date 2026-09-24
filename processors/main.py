@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List
 
 # from  import LLM, decide_by_thresholds
-from classify import FeaturesExtractor, LightGBMModel, decide_by_thresholds
+from classify import FeaturesExtractor, RFModel, decide_by_thresholds
 from cloud import MinIOClient, get_bytes_object, put_bytes_object
 from database import (
     DatabaseManager,
@@ -72,16 +72,12 @@ def process_new(
         task_repo.update_status(task.id, "ml_classified")
         return
 
-    # Удалить потом если все норм:
-    # features = FeaturesExtractor.extract_text_features(text)
-    # files_features = FeaturesExtractor.extract_files_features(file_names)
-    # features.update(files_features)
+    features = FeaturesExtractor.extract_text_features(text)
+    files_features = FeaturesExtractor.extract_files_features(file_names)
+    features.update(files_features)
 
     # prob_1 = llm_worker.predict_prob_1(text)
-    # pred_labels, pred_indexes, pred_proba = classify_worker.predict([features])
-    
-    pred_labels, pred_indexes, pred_proba = classify_worker.predict_from_texts([text])
-
+    pred_labels, pred_indexes, pred_proba = classify_worker.predict([features])
     model_decision, predicted_class, new_status, proba = decide_by_thresholds(
         pred_labels, pred_indexes, pred_proba
     )[0]
@@ -597,8 +593,7 @@ def main() -> None:
     material_repo = MappingRepository()
     cloud = MinIOClient.get_client()
     # llm_worker = LLM(MODEL_PATH)
-    # classify_worker = RFModel()
-    classify_worker = LightGBMModel()
+    classify_worker = RFModel()
     classify_worker.load(MODEL_PATH)
 
     try:
@@ -711,8 +706,7 @@ def dev_llm():
     model_path = Path("model_out/final_lora")
 
     # llm_worker = LLM(model_path)
-    # classify_worker = RFModel()
-    classify_worker = LightGBMModel()
+    classify_worker = RFModel()
     classify_worker.load(MODEL_PATH)
     print("Model loaded:", classify_worker)
 
@@ -723,13 +717,10 @@ def dev_llm():
     ]
 
     for text in examples:
-        # prob_1 = llm_worker.predict_prob_1(text)
-        # print(f"{text}: {prob_1}")
-        # model_decision, predicted_class, new_status = decide_by_thresholds(prob_1)
-        # print(model_decision, predicted_class, new_status)
-        
-        pred_labels, pred_indexes, pred_proba = classify_worker.predict_from_texts([text])
-        print(f"{text}: {pred_labels[0]} ({pred_proba[0]:.3f})")
+        prob_1 = llm_worker.predict_prob_1(text)
+        print(f"{text}: {prob_1}")
+        model_decision, predicted_class, new_status = decide_by_thresholds(prob_1)
+        print(model_decision, predicted_class, new_status)
 
 
 if __name__ == "__main__":
