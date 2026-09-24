@@ -183,6 +183,12 @@ class LineAnnotation:
                 return
         self.runs.append(CellRun(idx, 1, kind, role))
 
+    def kind_in(self, kind: CellKind) -> bool:
+        return any(section.kind == kind for section in self.runs)
+
+    def runs_by_kind(self, kind: CellKind) -> list[CellRun]:
+        return [section for section in self.runs if section.kind == kind]
+
 
 @dataclass
 class TableShape:

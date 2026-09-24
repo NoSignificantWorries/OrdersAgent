@@ -177,7 +177,7 @@ def mainv5_one_file():
         ann = tp.annotate_table(table)
         shape = tp.make_shape(ann)
         # print(ann)
-        tp.assemble(table, ann)
+        # tp.assemble(table, ann)
         for idx, line_ann in shape.rows.items():
             print(idx, ":", line_ann)
         for idx, line_ann in shape.cols.items():

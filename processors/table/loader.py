@@ -117,6 +117,12 @@ class TableLoader:
                     raise
                 # TODO: logging with WARN for metadata errors
 
+    # @staticmethod
+    # def  close_by_type(wb: xlrd.Book | openpyxl.Workbook, fmt: TableType) -> None:
+    #     match fmt:
+    #         case TableType.XLS:
+    #             wb.close()
+
     @staticmethod
     def _detect_type(src: BytesIO | Path) -> TableType:
         if isinstance(src, BytesIO):

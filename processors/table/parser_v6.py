@@ -38,11 +38,6 @@ def make_shape(annotation: Annotation) -> TableShape:
     return engine.shape(annotation)
 
 
-def assemble(table: SparseTable, annotation: Annotation) -> None:
-    assembler = Assembler(table, annotation)
-    return assembler.build_groups()
-
-
 def read(wb: Workbook) -> tuple[WorkbookReport, list[SparseTable]]:
     report = WorkbookReport(wb.name, with_metadata=wb.with_metadata)
     tables: list[SparseTable] = []
