@@ -8,6 +8,7 @@ from table import (
 )
 from table import loader as tl
 from table import parser_v6 as tp
+from table.assembler import find_header_rows
 
 
 def test_callculation_table():
@@ -120,6 +121,24 @@ def mainv5():
         print(data.name, data.fmt)
         print("\n")
 
+        report, tables = tp.read(data)
+
+        # for sheet in report.sheets:
+        #     print(sheet.rows_match)
+        #     print(sheet.cols_match)
+        #     print("\n")
+
+        print(len(tables))
+        for table in tables:
+            ann = tp.annotate_table(table)
+            shape = tp.make_shape(ann)
+            find_header_rows(shape)
+            # for idx, line_ann in shape.rows.items():
+            #     print(idx, ":", line_ann)
+            # for idx, line_ann in shape.cols.items():
+            #     print(idx, ":", line_ann)
+            print("\n")
+
         parsed_cnt += 1
 
     if all_cnt == 0:
@@ -162,12 +181,11 @@ def mainv5_one_file():
     for table in tables:
         ann = tp.annotate_table(table)
         shape = tp.make_shape(ann)
-        # print(ann)
-        # tp.assemble(table, ann)
-        for idx, line_ann in shape.rows.items():
-            print(idx, ":", line_ann)
-        for idx, line_ann in shape.cols.items():
-            print(idx, ":", line_ann)
+        find_header_rows(shape)
+        # for idx, line_ann in shape.rows.items():
+        #     print(idx, ":", line_ann)
+        # for idx, line_ann in shape.cols.items():
+        #     print(idx, ":", line_ann)
         print("\n")
 
     with open(output / Path(f"{report.name}.html"), "w") as file:

@@ -1,5 +1,3 @@
-from table.assembler import Assembler
-
 from .annotate import (
     AnnotateEngine,
     Annotation,
@@ -17,10 +15,10 @@ from .sparse_table import SparseTable
 def build_default_headers() -> HeaderMatcher:
     return HeaderMatcher([
         HeaderSpec(CellKind.MATERIALS, ["наименование", "обозначение", "номенклатура", "артикул", "тип пакета", "формула", "формула заполнения", "формула сп"]),
-        HeaderSpec(CellKind.AMOUNT, ["кол-во", "количество", "кол-во(шт)", "количество(шт)", "колич", "n"]),
-        HeaderSpec(CellKind.SIZE, ["размер", "размеры", "размер мм", "размеры мм", "длина", "длина мм", "ширина мм", "ширина", "высота", "высота мм", "стекла"]),
-        HeaderSpec(CellKind.BARCODE, ["штрихкод", "шк"]),
-        HeaderSpec(CellKind.MARKING, ["маркировка"]),
+        HeaderSpec(CellKind.AMOUNT, ["кол-во", "количество", "кол-во(шт)", "количество(шт)", "колич", "n", "количес"]),
+        HeaderSpec(CellKind.SIZE, ["размер", "размеры", "размер мм", "размеры мм", "длина", "длина мм", "ширина мм", "ширина", "высота", "высота мм", "стекла", "габариты", "габариты мм"]),
+        HeaderSpec(CellKind.BARCODE, ["штрихкод", "шк", "штрих"]),
+        HeaderSpec(CellKind.MARKING, ["маркировка", "маркир"]),
         HeaderSpec(CellKind.NAME, ["имя:"]),
         HeaderSpec(CellKind.AUFBAU, ["aufbau:"]),
         HeaderSpec(CellKind.THIKNESS, ["толщина:"])
