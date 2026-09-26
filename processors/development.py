@@ -7,8 +7,7 @@ from table import (
     make_request_xlsx,
 )
 from table import loader as tl
-from table import parser_v6 as tp
-from table.assembler import find_header_rows
+from table import parser_v7 as tp
 
 
 def test_callculation_table():
@@ -132,7 +131,6 @@ def mainv5():
         for table in tables:
             ann = tp.annotate_table(table)
             shape = tp.make_shape(ann)
-            find_header_rows(shape)
             # for idx, line_ann in shape.rows.items():
             #     print(idx, ":", line_ann)
             # for idx, line_ann in shape.cols.items():
@@ -181,7 +179,6 @@ def mainv5_one_file():
     for table in tables:
         ann = tp.annotate_table(table)
         shape = tp.make_shape(ann)
-        find_header_rows(shape)
         # for idx, line_ann in shape.rows.items():
         #     print(idx, ":", line_ann)
         # for idx, line_ann in shape.cols.items():

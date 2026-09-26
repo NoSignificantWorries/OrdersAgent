@@ -1,4 +1,5 @@
 import re
+from collections.abc import Generator
 from dataclasses import dataclass
 from enum import Enum
 from io import BytesIO
@@ -6,6 +7,63 @@ from pathlib import Path
 
 import openpyxl
 import xlrd
+
+
+@dataclass(slots=True)
+class Cell:
+    row: int
+    col: int
+    value: int | str | tuple[int, int] | None = None
+
+
+class SparseTable:
+    def __init__(self, nrows: int, ncols: int) -> None:
+        self.nrows = nrows
+        self.ncols = ncols
+
+        self.cells: list[list[Cell]] = [[Cell(r, c) for c in range(self.ncols)] for r in range(self.nrows)]
+
+    @property
+    def empty(self) -> bool:
+        return self.nrows == 0 or self.ncols == 0
+
+    def add_cell(self, cell: Cell) -> None:
+        self.cells[cell.row][cell.col] = cell
+
+    def from_cells_generator(self, generator: Generator[Cell, None, None]) -> None:
+        for cell in generator:
+            self.add_cell(cell)
+
+    def normalize(self) -> tuple[list[int], list[int]]:
+        keep_rows: set[int] | list[int] = set()
+        keep_cols: set[int] | list[int] = set()
+        for r in range(self.nrows):
+            for c in range(self.ncols):
+                if self.cells[r][c].value is not None:
+                    keep_cols.add(c)
+                    keep_rows.add(r)
+        keep_rows = sorted(keep_rows)
+        keep_cols = sorted(keep_cols)
+        self.cells = [[self.cells[r][c] for c in keep_cols] for r in keep_rows]
+        self.nrows = len(keep_rows)
+        self.ncols = len(keep_cols)
+
+        for i in range(self.nrows):
+            for j in range(self.ncols):
+                self.cells[i][j].row = i
+                self.cells[i][j].col = j
+
+        return keep_rows, keep_cols
+
+    def get_cell(self, row: int, col: int) -> Cell:
+        return self.cells[row][col]
+
+    def iter_cells(self) -> Generator[tuple[int, int, Cell], None, None]:
+        for i in range(self.nrows):
+            for j in range(self.ncols):
+                cell = self.get_cell(i, j)
+                yield i, j, cell
+
 
 NUMBER = re.compile(r"^\s*((\d+)([.,]\d+)?)\s*$")
 WHITESPACE = re.compile(r"\s*")
@@ -58,18 +116,11 @@ class WorkbookResults:
 
 
 @dataclass(frozen=True, slots=True)
-class Cell:
-    value: int | str | None
-    row: int
-    col: int
-
-
-@dataclass(frozen=True, slots=True)
 class Sheet:
     name: str
     nrows: int
     ncols: int
-    cells: list[Cell]
+    table: SparseTable
 
 
 @dataclass(slots=True)
@@ -150,48 +201,49 @@ class TableLoader:
 
 
     @staticmethod
-    def _iter_xls_sheets(wb: xlrd.Book) -> list[Sheet]:
+    def _make_xls_sheets(wb: xlrd.Book) -> list[Sheet]:
         sheets: list[Sheet] = []
         for sheetname in wb.sheet_names():
             sheet = wb[sheetname]
+            sparse_table = SparseTable(sheet.nrows, sheet.ncols)
+            sparse_table.from_cells_generator(TableLoader._iter_xls_cells(sheet))
             new_sheet = Sheet(
                 name=sheetname,
                 nrows=sheet.nrows,
                 ncols=sheet.ncols,
-                cells=TableLoader._iter_xls_cells(sheet)
+                table=sparse_table
             )
             sheets.append(new_sheet)
             wb.unload_sheet(sheetname)
         return sheets
 
     @staticmethod
-    def _iter_xls_cells(sheet) -> list[Cell]:
-        sparse: list[Cell] = []
+    def _iter_xls_cells(sheet) -> Generator[Cell, None, None]:
         for row in range(sheet.nrows):
             for col in range(sheet.ncols):
                 value = sheet.cell_value(row, col)
                 cell = TableLoader._make_cell(value, row, col)
                 if cell is not None:
-                    sparse.append(cell)
-        return sparse
+                    yield cell
 
     @staticmethod
-    def _iter_xlsx_sheets(wb: openpyxl.Workbook) -> list[Sheet]:
+    def _make_xlsx_sheets(wb: openpyxl.Workbook) -> list[Sheet]:
         sheets: list[Sheet] = []
         for sheetname in wb.sheetnames:
             sheet = wb[sheetname]
+            sparse_table = SparseTable(sheet.max_row, sheet.max_column)
+            sparse_table.from_cells_generator(TableLoader._iter_xlsx_cells(sheet))
             new_sheet = Sheet(
                 name=sheetname,
                 nrows=sheet.max_row,
                 ncols=sheet.max_column,
-                cells=TableLoader._iter_xlsx_cells(sheet)
+                table=sparse_table
             )
             sheets.append(new_sheet)
         return sheets
 
     @staticmethod
-    def _iter_xlsx_cells(sheet) -> list[Cell]:
-        sparse: list[Cell] = []
+    def _iter_xlsx_cells(sheet) -> Generator[Cell, None, None]:
         for row_idx, row in enumerate(sheet.iter_rows()):
             for col_idx, cell in enumerate(row):
                 value = cell.value
@@ -201,8 +253,7 @@ class TableLoader:
                     col=col_idx,
                 )
                 if cell_object is not None:
-                    sparse.append(cell_object)
-        return sparse
+                    yield cell_object
 
     @staticmethod
     def load(src: BytesIO | Path) -> Workbook:
@@ -211,9 +262,9 @@ class TableLoader:
 
         match fmt:
             case TableType.XLS:
-                sheets = TableLoader._iter_xls_sheets(workbook)
+                sheets = TableLoader._make_xls_sheets(workbook)
             case TableType.XLSX:
-                sheets = TableLoader._iter_xlsx_sheets(workbook)
+                sheets = TableLoader._make_xlsx_sheets(workbook)
             case _:
                 raise ValueError(f"Unsupported format: {fmt}")
 

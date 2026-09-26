@@ -1,12 +1,12 @@
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 from rapidfuzz import fuzz
 
-from .sparse_table import Cell, SparseTable
+from .loader import SparseTable
 
 
 class CellKind(str, Enum):
@@ -186,8 +186,8 @@ class LineAnnotation:
     def kind_in(self, kind: CellKind) -> bool:
         return any(section.kind == kind for section in self.runs)
 
-    def runs_by_kind(self, kind: CellKind) -> list[CellRun]:
-        return [section for section in self.runs if section.kind == kind]
+    def runs_by_kind(self, kind: CellKind) -> list[tuple[int, CellRun]]:
+        return [(i, section) for i, section in enumerate(self.runs) if section.kind == kind]
 
 
 @dataclass
@@ -200,6 +200,16 @@ class TableShape:
 
     def get_col(self, col_index: int) -> LineAnnotation | None:
         return self.cols.get(col_index, None)
+
+    def iter_row_headers(self) -> Generator[tuple[int, LineAnnotation], None, None]:
+        for idx, row in self.rows.items():
+            if row.is_header:
+                yield idx, row
+
+    def iter_col_headers(self) -> Generator[tuple[int, LineAnnotation], None, None]:
+        for idx, col in self.cols.items():
+            if col.is_header:
+                yield idx, col
 
     def add_cell(self, row_index: int, col_index: int, role: CellRole, kind: CellKind) -> None:
         row = self.get_row(row_index)

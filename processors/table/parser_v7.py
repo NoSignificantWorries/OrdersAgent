@@ -7,9 +7,8 @@ from .annotate import (
     TableShape,
     build_default_actions,
 )
-from .loader import Workbook
+from .loader import SparseTable, Workbook
 from .report import WorkbookReport
-from .sparse_table import SparseTable
 
 
 def build_default_headers() -> HeaderMatcher:
@@ -36,19 +35,19 @@ def make_shape(annotation: Annotation) -> TableShape:
     return engine.shape(annotation)
 
 
-def read(wb: Workbook) -> tuple[WorkbookReport, list[SparseTable]]:
-    report = WorkbookReport(wb.name)
-    tables: list[SparseTable] = []
-    for sheet in wb.sheets:
-        subtable = SparseTable(nrows=sheet.nrows, ncols=sheet.ncols)
-        report.add_sheet(name=sheet.name, nrows=sheet.nrows, ncols=sheet.ncols)
-        for cell in sheet.cells:
-            new_cell = subtable.add_cell(cell.value, cell.row, cell.col)
-            report.add_cell_on_last_sheet(cell.row, cell.col, None if new_cell is None else new_cell.value)
-        keeped_rows, keeped_cols = subtable.normalize()
-        report.last_table_normalized(subtable.nrows, subtable.ncols, keeped_rows, keeped_cols)
-        if not subtable.empty:
-            tables.append(subtable)
-        else:
-            print(f"WARN: Empty sheet '{sheet.name}' in the workbook '{wb.name}'")
-    return report, tables
+# def read(wb: Workbook) -> tuple[WorkbookReport, list[SparseTable]]:
+#     report = WorkbookReport(wb.name)
+#     tables: list[SparseTable] = []
+#     for sheet in wb.sheets:
+#         subtable = SparseTable(nrows=sheet.nrows, ncols=sheet.ncols)
+#         report.add_sheet(name=sheet.name, nrows=sheet.nrows, ncols=sheet.ncols)
+#         for cell in sheet.table:
+#             new_cell = subtable.add_cell(cell.value, cell.row, cell.col)
+#             report.add_cell_on_last_sheet(cell.row, cell.col, None if new_cell is None else new_cell.value)
+#         keeped_rows, keeped_cols = subtable.normalize()
+#         report.last_table_normalized(subtable.nrows, subtable.ncols, keeped_rows, keeped_cols)
+#         if not subtable.empty:
+#             tables.append(subtable)
+#         else:
+#             print(f"WARN: Empty sheet '{sheet.name}' in the workbook '{wb.name}'")
+#     return report, tables
