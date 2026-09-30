@@ -8,6 +8,7 @@ from table import (
 )
 from table import loader as tl
 from table import parser_v7 as tp
+from table.puller import find_anchors, parse
 
 
 def test_callculation_table():
@@ -130,7 +131,6 @@ def mainv5():
         print(len(tables))
         for table in tables:
             ann = tp.annotate_table(table)
-            shape = tp.make_shape(ann)
             # for idx, line_ann in shape.rows.items():
             #     print(idx, ":", line_ann)
             # for idx, line_ann in shape.cols.items():
@@ -147,8 +147,8 @@ def mainv5():
 
 
 def mainv5_one_file():
-    input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
-    # input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
+    # input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
+    input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
     output = Path("../private/")
     output.mkdir(parents=True, exist_ok=True)
 
@@ -178,11 +178,9 @@ def mainv5_one_file():
     print(len(tables))
     for table in tables:
         ann = tp.annotate_table(table)
-        shape = tp.make_shape(ann)
-        # for idx, line_ann in shape.rows.items():
-        #     print(idx, ":", line_ann)
-        # for idx, line_ann in shape.cols.items():
-        #     print(idx, ":", line_ann)
+        anchors = find_anchors(ann)
+        print(anchors)
+        parse(anchors, table, ann)
         print("\n")
 
     with open(output / Path(f"{report.name}.html"), "w") as file:
@@ -199,5 +197,5 @@ if __name__ == "__main__":
     # mainv4()
     # mainv4_1()
 
-    mainv5()
-    # mainv5_one_file()
+    # mainv5()
+    mainv5_one_file()

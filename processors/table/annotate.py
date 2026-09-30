@@ -10,14 +10,14 @@ from .loader import SparseTable
 
 
 class CellKind(str, Enum):
-    MATERIALS = "materials"
+    MATERIAL = "materials"
     AMOUNT = "amount"
     SIZE = "size"
     BARCODE = "barcode"
     MARKING = "marking"
     NAME = "name"
     AUFBAU = "aufbau"
-    THIKNESS = "thikness"
+    THICKNESS = "thikness"
     UNKNOWN = "unknown"
 
 
@@ -147,80 +147,8 @@ class Annotation:
     def get_cell(self, row: int, col: int) -> CellAnnotation | None:
         return self.cells.get((row, col), None)
 
-
-@dataclass(slots=True)
-class CellRun:
-    start: int
-    count: int
-    kind: CellKind
-    role: CellRole
-
-    @property
-    def end(self) -> int:
-        return self.start + self.count
-
-    def add(self) -> None:
-        self.count += 1
-
-    @property
-    def columns(self) -> range:
-        return range(self.start, self.start + self.count)
-
-
-@dataclass(slots=True)
-class LineAnnotation:
-    runs: list[CellRun] = field(default_factory=list[CellRun])
-
-    @property
-    def is_header(self) -> bool:
-        return any(section.role == CellRole.HEADER for section in self.runs)
-
-    def add_cell(self, idx: int, role: CellRole, kind: CellKind) -> None:
-        if self.runs:
-            last = self.runs[-1]
-            if last.role == role and last.kind == kind:
-                last.add()
-                return
-        self.runs.append(CellRun(idx, 1, kind, role))
-
-    def kind_in(self, kind: CellKind) -> bool:
-        return any(section.kind == kind for section in self.runs)
-
-    def runs_by_kind(self, kind: CellKind) -> list[tuple[int, CellRun]]:
-        return [(i, section) for i, section in enumerate(self.runs) if section.kind == kind]
-
-
-@dataclass
-class TableShape:
-    rows: dict[int, LineAnnotation] = field(default_factory=dict[int, LineAnnotation])
-    cols: dict[int, LineAnnotation] = field(default_factory=dict[int, LineAnnotation])
-
-    def get_row(self, row_index: int) -> LineAnnotation | None:
-        return self.rows.get(row_index, None)
-
-    def get_col(self, col_index: int) -> LineAnnotation | None:
-        return self.cols.get(col_index, None)
-
-    def iter_row_headers(self) -> Generator[tuple[int, LineAnnotation], None, None]:
-        for idx, row in self.rows.items():
-            if row.is_header:
-                yield idx, row
-
-    def iter_col_headers(self) -> Generator[tuple[int, LineAnnotation], None, None]:
-        for idx, col in self.cols.items():
-            if col.is_header:
-                yield idx, col
-
-    def add_cell(self, row_index: int, col_index: int, role: CellRole, kind: CellKind) -> None:
-        row = self.get_row(row_index)
-        if not row:
-            row = self.rows[row_index] = LineAnnotation()
-        row.add_cell(col_index, role, kind)
-
-        col = self.get_col(col_index)
-        if not col:
-            col = self.cols[col_index] = LineAnnotation()
-        col.add_cell(row_index, role, kind)
+    def get_in_row(self, row: int) -> dict[tuple[int, int], CellAnnotation]:
+        return {pos: ann for pos, ann in self.cells.items() if pos[0] == row}
 
 
 class AnnotateEngine:
@@ -238,9 +166,3 @@ class AnnotateEngine:
                 annotation.cells[(row, col)] = CellAnnotation(cell_role, cell_kind, new_value)
                 break
         return annotation
-
-    def shape(self, annotation: Annotation) -> TableShape:
-        table_shape = TableShape()
-        for (r, c), cell_ann in annotation.cells.items():
-            table_shape.add_cell(r, c, cell_ann.role, cell_ann.kind)
-        return table_shape

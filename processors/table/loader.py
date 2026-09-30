@@ -15,13 +15,28 @@ class Cell:
     col: int
     value: int | str | tuple[int, int] | None = None
 
+    @property
+    def empty(self) -> bool:
+        return self.value is None
+
 
 class SparseTable:
-    def __init__(self, nrows: int, ncols: int) -> None:
-        self.nrows = nrows
-        self.ncols = ncols
+    def __init__(self, name: str, nrows: int, ncols: int) -> None:
+        self.name: str = name
+        self.nrows: int = nrows
+        self.ncols: int = ncols
 
         self.cells: list[list[Cell]] = [[Cell(r, c) for c in range(self.ncols)] for r in range(self.nrows)]
+
+        self._normilized: bool = False
+
+    @property
+    def size(self) -> tuple[int, int]:
+        return self.nrows, self.ncols
+
+    @property
+    def norm(self) -> bool:
+        return self._normilized
 
     @property
     def empty(self) -> bool:
@@ -52,6 +67,8 @@ class SparseTable:
             for j in range(self.ncols):
                 self.cells[i][j].row = i
                 self.cells[i][j].col = j
+
+        self._normilized = True
 
         return keep_rows, keep_cols
 
@@ -115,19 +132,11 @@ class WorkbookResults:
     workbook: xlrd.Book | openpyxl.Workbook
 
 
-@dataclass(frozen=True, slots=True)
-class Sheet:
-    name: str
-    nrows: int
-    ncols: int
-    table: SparseTable
-
-
 @dataclass(slots=True)
 class Workbook:
     name: str | None
     fmt: TableType
-    sheets:list[Sheet]
+    sheets: list[SparseTable]
 
 
 class TableLoader:
@@ -201,19 +210,13 @@ class TableLoader:
 
 
     @staticmethod
-    def _make_xls_sheets(wb: xlrd.Book) -> list[Sheet]:
-        sheets: list[Sheet] = []
+    def _make_xls_sheets(wb: xlrd.Book) -> list[SparseTable]:
+        sheets: list[SparseTable] = []
         for sheetname in wb.sheet_names():
             sheet = wb[sheetname]
-            sparse_table = SparseTable(sheet.nrows, sheet.ncols)
+            sparse_table = SparseTable(sheetname, sheet.nrows, sheet.ncols)
             sparse_table.from_cells_generator(TableLoader._iter_xls_cells(sheet))
-            new_sheet = Sheet(
-                name=sheetname,
-                nrows=sheet.nrows,
-                ncols=sheet.ncols,
-                table=sparse_table
-            )
-            sheets.append(new_sheet)
+            sheets.append(sparse_table)
             wb.unload_sheet(sheetname)
         return sheets
 
@@ -227,19 +230,13 @@ class TableLoader:
                     yield cell
 
     @staticmethod
-    def _make_xlsx_sheets(wb: openpyxl.Workbook) -> list[Sheet]:
-        sheets: list[Sheet] = []
+    def _make_xlsx_sheets(wb: openpyxl.Workbook) -> list[SparseTable]:
+        sheets: list[SparseTable] = []
         for sheetname in wb.sheetnames:
             sheet = wb[sheetname]
-            sparse_table = SparseTable(sheet.max_row, sheet.max_column)
+            sparse_table = SparseTable(sheetname, sheet.max_row, sheet.max_column)
             sparse_table.from_cells_generator(TableLoader._iter_xlsx_cells(sheet))
-            new_sheet = Sheet(
-                name=sheetname,
-                nrows=sheet.max_row,
-                ncols=sheet.max_column,
-                table=sparse_table
-            )
-            sheets.append(new_sheet)
+            sheets.append(sparse_table)
         return sheets
 
     @staticmethod
