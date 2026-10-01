@@ -8,7 +8,7 @@ from table import (
 )
 from table import loader as tl
 from table import parser_v7 as tp
-from table.puller import find_anchors, parse
+from table.runner import find_targets, parse_column, parse_columns
 
 
 def test_callculation_table():
@@ -147,8 +147,8 @@ def mainv5():
 
 
 def mainv5_one_file():
-    # input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
-    input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
+    input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
+    # input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
     output = Path("../private/")
     output.mkdir(parents=True, exist_ok=True)
 
@@ -178,9 +178,7 @@ def mainv5_one_file():
     print(len(tables))
     for table in tables:
         ann = tp.annotate_table(table)
-        anchors = find_anchors(ann)
-        print(anchors)
-        parse(anchors, table, ann)
+        parse_columns(table, ann)
         print("\n")
 
     with open(output / Path(f"{report.name}.html"), "w") as file:
