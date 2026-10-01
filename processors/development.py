@@ -8,7 +8,7 @@ from table import (
 )
 from table import loader as tl
 from table import parser_v7 as tp
-from table.runner import find_targets, parse_column, parse_columns
+from table.puller import build_horizontal_chains
 
 
 def test_callculation_table():
@@ -178,7 +178,8 @@ def mainv5_one_file():
     print(len(tables))
     for table in tables:
         ann = tp.annotate_table(table)
-        parse_columns(table, ann)
+        chains = build_horizontal_chains(table, ann)
+        print(chains)
         print("\n")
 
     with open(output / Path(f"{report.name}.html"), "w") as file:
