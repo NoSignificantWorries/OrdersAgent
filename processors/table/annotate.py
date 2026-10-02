@@ -26,6 +26,7 @@ class CellRole(str, Enum):
     LABEL = "label"
     NUMERIC = "numeric"
     SIZES = "sizes"
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,11 +152,42 @@ class Annotation:
         return {pos: ann for pos, ann in self.cells.items() if pos[0] == row}
 
 
+@dataclass
+class Stats:
+    kinds_per_row: dict[int, set[CellKind]] = field(default_factory=dict)
+    kinds_per_col: dict[int, set[CellKind]] = field(default_factory=dict)
+    roles_per_row: dict[int, set[CellRole]] = field(default_factory=dict)
+    roles_per_col: dict[int, set[CellRole]] = field(default_factory=dict)
+
+    def add(self, row: int, col: int, cell_annotation: CellAnnotation) -> None:
+        kpr = self.kinds_per_row.get(row, set())
+        kpr.add(cell_annotation.kind)
+        self.kinds_per_row[row] = kpr
+
+        kpc = self.kinds_per_col.get(col, set())
+        kpc.add(cell_annotation.kind)
+        self.kinds_per_row[col] = kpc
+
+        rpr = self.roles_per_row.get(row, set())
+        rpr.add(cell_annotation.role)
+        self.roles_per_row[row] = rpr
+
+        rpc = self.roles_per_col.get(col, set())
+        rpc.add(cell_annotation.role)
+        self.roles_per_col[col] = rpc
+
+    def header_in_row(self, row: int) -> bool:
+        obj = self.roles_per_row.get(row, None)
+        if obj is None:
+            return False
+        return CellRole.HEADER in obj
+
+
 class AnnotateEngine:
     def __init__(self, actions: list[Action]) -> None:
         self.actions = sorted(actions, key=lambda act: act.priority, reverse=True)
 
-    def process(self, table: SparseTable) -> Annotation:
+    def make_annotations(self, table: SparseTable) -> Annotation:
         annotation = Annotation()
         for row, col, cell in table.iter_cells():
             for action in self.actions:
@@ -166,3 +198,9 @@ class AnnotateEngine:
                 annotation.cells[(row, col)] = CellAnnotation(cell_role, cell_kind, new_value)
                 break
         return annotation
+
+    def build_stats(self, annotation: Annotation) -> Stats:
+        stats = Stats()
+        for (row, col), ann in annotation.cells.items():
+            stats.add(row, col, ann)
+        return stats

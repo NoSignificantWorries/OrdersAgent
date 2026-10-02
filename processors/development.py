@@ -8,7 +8,7 @@ from table import (
 )
 from table import loader as tl
 from table import parser_v7 as tp
-from table.puller import build_horizontal_chains
+from table.puller import Source, get_data_by_horizontal_chains, make_horizontal_chains
 
 
 def test_callculation_table():
@@ -131,10 +131,15 @@ def mainv5():
         print(len(tables))
         for table in tables:
             ann = tp.annotate_table(table)
-            # for idx, line_ann in shape.rows.items():
-            #     print(idx, ":", line_ann)
-            # for idx, line_ann in shape.cols.items():
-            #     print(idx, ":", line_ann)
+            stats = tp.make_stats(ann)
+            source = Source(table, ann, stats)
+            chains = make_horizontal_chains(source)
+            # print(chains)
+            subtables = get_data_by_horizontal_chains(chains, source)
+            for subtable in subtables:
+                for row in subtable.data_rows.values():
+                    print(row)
+                print("\n")
             print("\n")
 
         parsed_cnt += 1
@@ -178,8 +183,15 @@ def mainv5_one_file():
     print(len(tables))
     for table in tables:
         ann = tp.annotate_table(table)
-        chains = build_horizontal_chains(table, ann)
-        print(chains)
+        stats = tp.make_stats(ann)
+        source = Source(table, ann, stats)
+        chains = make_horizontal_chains(source)
+        # print(chains)
+        subtables = get_data_by_horizontal_chains(chains, source)
+        for subtable in subtables:
+            for row in subtable.data_rows.values():
+                print(row)
+            print("\n")
         print("\n")
 
     with open(output / Path(f"{report.name}.html"), "w") as file:
@@ -189,12 +201,6 @@ def mainv5_one_file():
 if __name__ == "__main__":
     # test_callculation_table()
     # main()
-    # test_text()
-    # mainv2()
-    # test_ascii_table()
-    # mainv3()
-    # mainv4()
-    # mainv4_1()
 
-    # mainv5()
-    mainv5_one_file()
+    mainv5()
+    # mainv5_one_file()

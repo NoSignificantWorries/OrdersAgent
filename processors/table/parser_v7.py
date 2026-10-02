@@ -4,6 +4,7 @@ from .annotate import (
     CellKind,
     HeaderMatcher,
     HeaderSpec,
+    Stats,
     build_default_actions,
 )
 from .loader import SparseTable, Workbook
@@ -27,7 +28,12 @@ engine = AnnotateEngine(build_default_actions(build_default_headers()))
 
 
 def annotate_table(table: SparseTable) -> Annotation:
-    return engine.process(table)
+    return engine.make_annotations(table)
+
+
+def make_stats(annotations: Annotation) -> Stats:
+    return engine.build_stats(annotations)
+
 
 def read(wb: Workbook) -> tuple[WorkbookReport, list[SparseTable]]:
     report = WorkbookReport(wb.name)
