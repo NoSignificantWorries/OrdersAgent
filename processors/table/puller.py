@@ -1,7 +1,8 @@
+import itertools
 from collections.abc import Generator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import ClassVar
+from typing import ClassVar, Self
 
 from table.annotate import Annotation, CellAnnotation, CellKind, CellRole, Stats
 from table.loader import SparseTable
@@ -46,9 +47,9 @@ class Source:
             role=ann_cell.role
         )
 
-    def iter_through_row(self, row: int) -> Generator[ResCell | None, None, None]:
+    def iter_through_row(self, row: int) -> Generator[tuple[int, ResCell | None], None, None]:
         for ic in range(self.table.ncols):
-            yield self.get_cell(row, ic)
+            yield ic, self.get_cell(row, ic)
 
     def header_in_row(self, row: int) -> bool:
         return self.stats.header_in_row(row)
@@ -58,6 +59,10 @@ class Source:
 class Direct(str, Enum):
     VERTICAL = "vertical"
     HORIZONTAL = "horizontal"
+
+    @classmethod
+    def kind_to_direction(cls, kind: CellKind) -> "Direct":
+        return cls.VERTICAL
 
 
 @dataclass
@@ -73,13 +78,6 @@ class Chain:
     direction: Direct
     fields: list[Field] = field(default_factory=list)
     kind_counts: dict[CellKind, int] = field(default_factory=dict)
-
-    # TODO: Recreate to the automatic ruleset matcher and validator
-    _BASIC_RULESET: ClassVar[dict[CellKind, int]] = {
-        CellKind.AMOUNT: 1,
-        CellKind.MATERIAL: 1,
-        CellKind.SIZE: 2
-    }
 
     @property
     def size(self) -> int:
@@ -97,15 +95,9 @@ class Chain:
             return self.fields[-1].index
         return -1
 
-    def push_field(self, field: Field) -> bool:
-        if field.kind in Chain._BASIC_RULESET:
-            kind_count = self.kind_counts.get(field.kind, 0)
-            if kind_count >= Chain._BASIC_RULESET[field.kind]:
-                return False
-
+    def push_field(self, field: Field) -> None:
         self.fields.append(field)
         self.kind_counts[field.kind] = self.kind_counts.get(field.kind, 0) + 1
-        return True
 
     def last(self) -> Field | None:
         if self.size > 0:
@@ -113,20 +105,34 @@ class Chain:
         return None
 
 
-@dataclass
-class Table:
-    header_chain: Chain
-    data_rows: dict[int, list[ResCell | None]] = field(default_factory=dict)
+def _break_chain_by_basic_rule(chain: Chain, field: Field) -> bool:
+    _BASIC_RULESET: dict[CellKind, int] = {
+        CellKind.AMOUNT: 1,
+        CellKind.MATERIAL: 1,
+        CellKind.SIZE: 2,
+        CellKind.MARKING: 1,
+        CellKind.BARCODE: 1
+    }
 
-    @property
-    def nrows(self) -> int:
-        return len(self.data_rows)
+    if field.kind in _BASIC_RULESET:
+        kind_count = chain.kind_counts.get(field.kind, 0)
+        if kind_count >= _BASIC_RULESET[field.kind]:
+            return True
+    return False
 
-    def add_row(self, idx: int, row: list[ResCell | None]) -> None:
-        self.data_rows[idx] = row
 
+def _empty_cell_after_sizes(chain: Chain, idx: int, cell: ResCell | None) -> tuple[bool, CellKind | None]:
+    if chain.last() is None:
+        return False, None
 
-def kind_to_direction(kind: CellKind) -> Direct: ...
+    if chain.last().kind == CellKind.SIZE and \
+       cell is None and \
+       chain.kind_counts.get(CellKind.SIZE, 0) == 1 and \
+       idx - chain.last().index == 1:
+        return True, CellKind.SIZE
+
+    return False, None
+
 
 
 def make_chains_in_row(row: int, source: Source) -> list[Chain]:
@@ -134,25 +140,37 @@ def make_chains_in_row(row: int, source: Source) -> list[Chain]:
             CellKind.MATERIAL: {CellRole.LABEL},
             CellKind.AMOUNT: {CellRole.NUMERIC},
             CellKind.SIZE: {CellRole.NUMERIC, CellRole.SIZES},
+            CellKind.MARKING: {CellRole.NUMERIC, CellRole.LABEL},
+            CellKind.BARCODE: {CellRole.NUMERIC, CellRole.LABEL}
         }
 
     chains = []
     last_chain = None
-    for cell in source.iter_through_row(row):
-        # TODO: Create ruleset (mainly for the SIZE)
+    for ic, cell in source.iter_through_row(row):
+        if last_chain is not None:
+            rule_valid, kind_for_cell = _empty_cell_after_sizes(last_chain, ic, cell)
+            if rule_valid and kind_for_cell is not None:
+                last_chain.push_field(Field(
+                    index=ic,
+                    kind=kind_for_cell,
+                    data_roles=roles_by_kind.get(kind_for_cell, set()),
+                    sources=[(row, ic)]
+                ))
+                continue
 
         if cell is None or cell.kind not in roles_by_kind:
             continue
 
         if last_chain is None:
             last_chain = Chain(Direct.HORIZONTAL)
+
         new_field = Field(
             index=cell.col,
             kind=cell.kind,
             data_roles=roles_by_kind.get(cell.kind, set()),
             sources=[(cell.row, cell.col)]
         )
-        if not last_chain.push_field(new_field):
+        if _break_chain_by_basic_rule(last_chain, new_field):
             chains.append(last_chain)
             last_chain = Chain(Direct.HORIZONTAL)
         last_chain.push_field(new_field)
@@ -161,7 +179,6 @@ def make_chains_in_row(row: int, source: Source) -> list[Chain]:
         chains.append(last_chain)
 
     return chains
-
 
 
 def make_horizontal_chains(source: Source) -> dict[int, list[Chain]]:
@@ -177,29 +194,120 @@ def make_horizontal_chains(source: Source) -> dict[int, list[Chain]]:
     return chains_per_row
 
 
-def merge_chains(chn1: Chain, chn2: Chain) -> Chain | None:
-    if chn1.direction != chn2.direction:
+def chains_overlapse(chain1: Chain, chain2: Chain) -> bool:
+    return not (chain1.end < chain2.start or chain2.end < chain1.start)
+
+
+def merge_chains(chain1: Chain, chain2: Chain) -> Chain | None:
+    if chain1.direction != chain2.direction:
         return None
-    if chn1.end < chn2.start or chn2.end < chn1.start:
+    if not chains_overlapse(chain1, chain2):
         return None
-    new_chain = Chain(chn1.direction)
 
-    ch1_pointer = 0
-    ch2_pointer = 0
+    new_chain = Chain(chain1.direction)
+    i = j = 0
+    f1, f2 = chain1.fields, chain2.fields
 
-    field1 = chn1.fields[ch1_pointer]
-    field2 = chn2.fields[ch2_pointer]
+    while i < len(f1) and j < len(f2):
+        a, b = f1[i], f2[j]
+        if a.index < b.index:
+            new_chain.push_field(a)
+            i += 1
+        elif a.index > b.index:
+            new_chain.push_field(b)
+            j += 1
+        elif a.kind != b.kind:
+            return None
+        else:
+            new_chain.push_field(Field(a.index, a.kind, a.data_roles, a.sources + b.sources))
+            i += 1
+            j += 1
 
-    # TODO: Complete chains merger
+    for a in f1[i:]:
+        new_chain.push_field(a)
+    for b in f2[j:]:
+        new_chain.push_field(b)
+
+    return new_chain
+
+def merge_chain_rows(upper: list[Chain], lower: list[Chain]) -> tuple[list[Chain], list[Chain]]:
+    upper = sorted(upper, key=lambda o: o.start)
+    lower = sorted(lower, key=lambda o: o.start)
+
+    new_upper: list[Chain] = []
+    new_lower: list[Chain] = []
+    i = j = 0
+
+    while i < len(upper) and j < len(lower):
+        u, l = upper[i], lower[j]
+
+        if u.start <= l.end and l.start <= u.end:
+            merged = merge_chains(u, l)
+            if merged is not None:
+                new_lower.append(merged)
+                i += 1
+                j += 1
+                continue
+
+            if u.end <= l.end:
+                new_upper.append(u)
+                i += 1
+            else:
+                new_lower.append(l)
+                j += 1
+        elif u.end < l.start:
+            new_upper.append(u)
+            i += 1
+        else:
+            new_lower.append(l)
+            j += 1
+
+    new_upper.extend(upper[i:])
+    new_lower.extend(lower[j:])
+
+    return new_upper, new_lower
 
 
-def merge_chains_in_table(chains: dict[int, list[Chain]]) -> dict[int, list[Chain]]: ...
+def merge_chains_in_table(chains: dict[int, list[Chain]]) -> dict[int, list[Chain]]:
+    if len(chains) < 2:
+        return chains
+
+    keys = sorted(chains)
+    result = {keys[0]: chains[keys[0]]}
+    for i in range(len(chains) - 1):
+        current_row = result[keys[i]]
+        next_row = chains[keys[i + 1]]
+        if keys[i + 1] - keys[i] == 1:
+            m1, m2 = merge_chain_rows(current_row, next_row)
+            if m1:
+                result[keys[i]] = m1
+                result[keys[i + 1]] = m2
+            else:
+                del result[keys[i]]
+                result[keys[i + 1]] = m2
+        else:
+            result[keys[i + 1]] = chains[keys[i + 1]]
+
+    return result
 
 
-def get_data_by_horizontal_chain(chain_row_index: int, chain: Chain, source: Source) -> Table:
+@dataclass
+class Table:
+    header_chain: Chain
+    data_rows: dict[int, list[ResCell | None]] = field(default_factory=dict)
+
+    @property
+    def nrows(self) -> int:
+        return len(self.data_rows)
+
+    def add_row(self, idx: int, row: list[ResCell | None]) -> None:
+        self.data_rows[idx] = row
+
+
+def get_data_by_horizontal_chain(chain_row: int, chain: Chain, source: Source) -> Table:
     subtable: Table = Table(chain)
     row_error: bool = False
-    for row_index in range(chain_row_index + 1, source.table.nrows):
+    for row_index in range(chain_row + 1, source.table.nrows):
         if row_error:
             break
         data_row: list[ResCell | None] = []
@@ -208,7 +316,7 @@ def get_data_by_horizontal_chain(chain_row_index: int, chain: Chain, source: Sou
 
             if cell is None:
                 data_row.append(None)
-            elif cell.role not in field.data_roles:
+            elif source.stats.header_in_row(row_index):
                 row_error = True
                 break
             else:
@@ -220,9 +328,9 @@ def get_data_by_horizontal_chain(chain_row_index: int, chain: Chain, source: Sou
 
 def get_data_by_horizontal_chains(chains: dict[int, list[Chain]], source: Source) -> list[Table]:
     subtables: list[Table] = []
-    for chain_row_index, row_chains in chains.items():
-        for chain in row_chains:
-            subtable = get_data_by_horizontal_chain(chain_row_index, chain, source)
+    for chain_row, chains_in_row in chains.items():
+        for chain in chains_in_row:
+            subtable = get_data_by_horizontal_chain(chain_row, chain, source)
             subtables.append(subtable)
 
     return subtables

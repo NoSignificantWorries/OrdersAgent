@@ -1,3 +1,4 @@
+from itertools import pairwise
 from pathlib import Path
 
 from materials import DELIMETERS, ParserV2
@@ -8,7 +9,7 @@ from table import (
 )
 from table import loader as tl
 from table import parser_v7 as tp
-from table.puller import Source, get_data_by_horizontal_chains, make_horizontal_chains
+from table.puller import Source, get_data_by_horizontal_chains, make_horizontal_chains, merge_chains_in_table
 
 
 def test_callculation_table():
@@ -134,8 +135,9 @@ def mainv5():
             stats = tp.make_stats(ann)
             source = Source(table, ann, stats)
             chains = make_horizontal_chains(source)
+            merged_chains = merge_chains_in_table(chains)
             # print(chains)
-            subtables = get_data_by_horizontal_chains(chains, source)
+            subtables = get_data_by_horizontal_chains(merged_chains, source)
             for subtable in subtables:
                 for row in subtable.data_rows.values():
                     print(row)
@@ -152,8 +154,16 @@ def mainv5():
 
 
 def mainv5_one_file():
-    input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
+    # input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
+    # input = Path("Заявка на стеклопакеты часть 4.xlsx")
+    # input = Path("Заявка 17 М1.xlsx")  # for merged materials
+    # input = Path("Заявка М1 на СП от 26.02.26.xlsx")  # two tables on nearest rows
+    input = Path("Заявка на СП захватка №2.xlsx")
+    # input = Path("Заявка на СП захватка №3.xlsx")
+    # input = Path("ЗАЯВКА СП раскладка №1 вар №2 (MF Silver 70 + бр200).xlsx")
     # input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
+
+    input = Path("../private/tables") / input
     output = Path("../private/")
     output.mkdir(parents=True, exist_ok=True)
 
@@ -186,21 +196,26 @@ def mainv5_one_file():
         stats = tp.make_stats(ann)
         source = Source(table, ann, stats)
         chains = make_horizontal_chains(source)
-        # print(chains)
-        subtables = get_data_by_horizontal_chains(chains, source)
+        merged_chains = merge_chains_in_table(chains)
+        for ir, chn in chains.items():
+            print(f"{ir}:", chn)
+        print("\n")
+        for ir, chn in merged_chains.items():
+            print(f"{ir}:", chn)
+        subtables = get_data_by_horizontal_chains(merged_chains, source)
         for subtable in subtables:
             for row in subtable.data_rows.values():
                 print(row)
             print("\n")
         print("\n")
 
-    with open(output / Path(f"{report.name}.html"), "w") as file:
-        file.write(report.to_html())
+    # with open(output / Path(f"{report.name}.html"), "w") as file:
+    #     file.write(report.to_html())
 
 
 if __name__ == "__main__":
     # test_callculation_table()
     # main()
 
-    mainv5()
-    # mainv5_one_file()
+    # mainv5()
+    mainv5_one_file()
