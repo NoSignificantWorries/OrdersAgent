@@ -1,8 +1,6 @@
-import itertools
 from collections.abc import Generator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import ClassVar, Self
 
 from table.annotate import Annotation, CellAnnotation, CellKind, CellRole, Stats
 from table.loader import SparseTable
@@ -291,17 +289,59 @@ def merge_chains_in_table(chains: dict[int, list[Chain]]) -> dict[int, list[Chai
     return result
 
 
+def validate_table_by_header_scheme(chain: Chain, scheme: dict[CellKind, list[int]]) -> bool:
+    for key, counts in scheme.items():
+        table_count = chain.kind_counts.get(key, 0)
+        if table_count not in counts:
+            return False
+    return True
+
+
+class Scheme(str, Enum):
+    STANDART = "standart"
+    ONE_COLUMN_SIZE = "one_column_size"
+    WITHOUT_MATERIAL = "without_material"
+    UNKNOWN = "unknown"
+
+
 @dataclass
 class Table:
     header_chain: Chain
     data_rows: dict[int, list[ResCell | None]] = field(default_factory=dict)
+    scheme: Scheme | None = None
 
     @property
     def nrows(self) -> int:
         return len(self.data_rows)
 
+    @property
+    def empty(self) -> bool:
+        return self.nrows == 0
+
     def add_row(self, idx: int, row: list[ResCell | None]) -> None:
         self.data_rows[idx] = row
+
+    def classify_table(self) -> Scheme:
+        standart = {
+            CellKind.MATERIAL: [1],
+            CellKind.AMOUNT: [1],
+            CellKind.SIZE: [2],
+            CellKind.MARKING: [0, 1],
+            CellKind.BARCODE: [0, 1]
+        }
+        one_column_size = {
+            CellKind.MATERIAL: [1],
+            CellKind.AMOUNT: [1],
+            CellKind.SIZE: [1],
+            CellKind.MARKING: [0, 1],
+            CellKind.BARCODE: [0, 1]
+        }
+        if validate_table_by_header_scheme(self.header_chain, standart):
+            return Scheme.STANDART
+        if validate_table_by_header_scheme(self.header_chain, one_column_size):
+            return Scheme.ONE_COLUMN_SIZE
+
+        return Scheme.UNKNOWN
 
 
 def get_data_by_horizontal_chain(chain_row: int, chain: Chain, source: Source) -> Table:
@@ -334,3 +374,35 @@ def get_data_by_horizontal_chains(chains: dict[int, list[Chain]], source: Source
             subtables.append(subtable)
 
     return subtables
+
+
+def clean_dirty_rows_in_table(subtable: Table) -> Table:
+    new_table = Table(subtable.header_chain)
+    for i, row in enumerate(subtable.data_rows.values()):
+        if all(obj is None for obj in row):
+            continue
+        new_row: list[ResCell | None] = []
+        error_row = False
+        for elem, field in zip(row, subtable.header_chain.fields):
+            if elem is not None and elem.role not in field.data_roles:
+                error_row = True
+                break
+            new_row.append(elem)
+        if not error_row:
+            new_table.add_row(i, new_row)
+    return new_table
+
+
+def clean_dirty_tables(subtables: list[Table]) -> list[Table]:
+    result: list[Table] = []
+    for subtable in subtables:
+        result.append(clean_dirty_rows_in_table(subtable))
+    return result
+
+
+def clean_empty_tables(subtables: list[Table]) -> list[Table]:
+    result: list[Table] = []
+    for subtable in subtables:
+        if not subtable.empty:
+            result.append(subtable)
+    return result

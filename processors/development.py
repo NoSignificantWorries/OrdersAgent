@@ -9,7 +9,15 @@ from table import (
 )
 from table import loader as tl
 from table import parser_v7 as tp
-from table.puller import Source, get_data_by_horizontal_chains, make_horizontal_chains, merge_chains_in_table
+from table.puller import (
+    Scheme,
+    Source,
+    clean_dirty_tables,
+    clean_empty_tables,
+    get_data_by_horizontal_chains,
+    make_horizontal_chains,
+    merge_chains_in_table,
+)
 
 
 def test_callculation_table():
@@ -136,11 +144,20 @@ def mainv5():
             source = Source(table, ann, stats)
             chains = make_horizontal_chains(source)
             merged_chains = merge_chains_in_table(chains)
-            # print(chains)
+            for ir, chns in chains.items():
+                for chn in chns:
+                    print(f"{ir}:", [field.kind.value for field in chn.fields])
+            print("\n")
+            for ir, chns in merged_chains.items():
+                for chn in chns:
+                    print(f"{ir}:", [field.kind.value for field in chn.fields], chn.kind_counts)
             subtables = get_data_by_horizontal_chains(merged_chains, source)
-            for subtable in subtables:
+            clean_subtables = clean_empty_tables(clean_dirty_tables(subtables))
+            for subtable in clean_subtables:
+                subtable_class = subtable.classify_table()
+                print(subtable_class)
                 for row in subtable.data_rows.values():
-                    print(row)
+                    print([elem if elem is None else elem.value for elem in row])
                 print("\n")
             print("\n")
 
@@ -157,9 +174,10 @@ def mainv5_one_file():
     # input = Path("../private/tables/Бланк заявки Иван Баня 26.02.2026.xls")
     # input = Path("Заявка на стеклопакеты часть 4.xlsx")
     # input = Path("Заявка 17 М1.xlsx")  # for merged materials
-    # input = Path("Заявка М1 на СП от 26.02.26.xlsx")  # two tables on nearest rows
-    input = Path("Заявка на СП захватка №2.xlsx")
+    input = Path("Заявка М1 на СП от 26.02.26.xlsx")  # two tables on nearest rows
+    # input = Path("Заявка на СП захватка №2.xlsx")
     # input = Path("Заявка на СП захватка №3.xlsx")
+    # input = Path("27.01.26 г.Новосибирск, НА СИЛЬВЕР 70 только низ.xls")  # one column size
     # input = Path("ЗАЯВКА СП раскладка №1 вар №2 (MF Silver 70 + бр200).xlsx")
     # input = Path("../private/tables/BTs_Kirova_steklopakety.xlsx")
 
@@ -197,15 +215,21 @@ def mainv5_one_file():
         source = Source(table, ann, stats)
         chains = make_horizontal_chains(source)
         merged_chains = merge_chains_in_table(chains)
-        for ir, chn in chains.items():
-            print(f"{ir}:", chn)
+        for ir, chns in chains.items():
+            for chn in chns:
+                print(f"{ir}:", [field.kind.value for field in chn.fields])
         print("\n")
-        for ir, chn in merged_chains.items():
-            print(f"{ir}:", chn)
+        for ir, chns in merged_chains.items():
+            for chn in chns:
+                print(f"{ir}:", [field.kind.value for field in chn.fields], chn.kind_counts)
         subtables = get_data_by_horizontal_chains(merged_chains, source)
-        for subtable in subtables:
+        clean_subtables = clean_empty_tables(clean_dirty_tables(subtables))
+        for subtable in clean_subtables:
+            table_class = subtable.classify_table()
+            if table_class is None:
+                continue
             for row in subtable.data_rows.values():
-                print(row)
+                print([elem if elem is None else elem.value for elem in row])
             print("\n")
         print("\n")
 
