@@ -443,10 +443,19 @@
         state.composeDraft.to = typeof draftData?.to === "string" ? draftData.to : "";
         state.composeDraft.subject =
             typeof draftData?.subject === "string" ? draftData.subject : "";
+
+        const htmlToPlainText = window.MailFormatters?.htmlToPlainText;
+
+        const forwardDraftBody =
+            typeof htmlToPlainText === "function"
+                ? htmlToPlainText(draftData?.body)
+                : String(draftData?.body || "");
+
         state.composeDraft.body = prependSignatureToDraft(
-            typeof draftData?.body === "string" ? draftData.body : "",
+            forwardDraftBody,
             state.userSignature,
         );
+
         state.composeDraft.files = [];
         state.composeDraft.sourceAttachments = attachments;
         state.composeDraft.selectedDocumentIds = attachments

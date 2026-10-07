@@ -75,6 +75,111 @@
             .replace(/"/g, "&quot;");
     }
 
+    function decodeHtmlEntities(value) {
+        const source = String(value || "");
+
+        if (!source) {
+            return "";
+        }
+
+        const textarea = document.createElement("textarea");
+        textarea.innerHTML = source;
+
+        return textarea.value;
+    }
+
+    function hasHtmlMarkup(value) {
+        const text = String(value || "").trim();
+
+        if (!text) {
+            return false;
+        }
+
+        return /<\/?(?:html|head|body|div|p|br|span|table|thead|tbody|tfoot|tr|th|td|ul|ol|li|blockquote|pre|a|strong|b|em|i|u)\b[^>]*>/i.test(
+            text,
+        );
+    }
+
+    function htmlToPlainText(value) {
+        const source = String(value || "");
+
+        if (!source.trim()) {
+            return "";
+        }
+
+        const decoded = decodeHtmlEntities(source);
+
+        if (!hasHtmlMarkup(decoded)) {
+            return decoded
+                .replace(/\r\n/g, "\n")
+                .replace(/\r/g, "\n")
+                .replace(/\n{3,}/g, "\n\n")
+                .trim();
+        }
+
+        const doc = new DOMParser().parseFromString(decoded, "text/html");
+
+        doc.querySelectorAll(
+            [
+                "script",
+                "style",
+                "noscript",
+                "iframe",
+                "object",
+                "embed",
+                "form",
+                "input",
+                "button",
+                "textarea",
+                "select",
+                "option",
+                "link",
+                "meta",
+                "base",
+                "svg",
+                "math",
+            ].join(", "),
+        ).forEach((node) => node.remove());
+
+        doc.querySelectorAll("br").forEach((node) => {
+            node.replaceWith(document.createTextNode("\n"));
+        });
+
+        doc.querySelectorAll(
+            [
+                "p",
+                "div",
+                "section",
+                "article",
+                "header",
+                "footer",
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "h5",
+                "h6",
+                "li",
+                "tr",
+                "blockquote",
+                "pre",
+            ].join(", "),
+        ).forEach((node) => {
+            node.appendChild(document.createTextNode("\n"));
+        });
+
+        doc.querySelectorAll("th, td").forEach((node) => {
+            node.appendChild(document.createTextNode("\t"));
+        });
+
+        return String(doc.body.textContent || "")
+            .replace(/\u00a0/g, " ")
+            .replace(/[ \t]+\n/g, "\n")
+            .replace(/\n[ \t]+/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+    }
+
     function pluralizeRu(count, one, few, many) {
         const abs = Math.abs(Number(count)) % 100;
         const last = abs % 10;
@@ -145,6 +250,9 @@
         formatTimeOnly,
         escapeHtml,
         escapeAttr,
+        decodeHtmlEntities,
+        hasHtmlMarkup,
+        htmlToPlainText,
         pluralizeRu,
         formatUnreadCount,
         mapTaskStatusToUiStatus,

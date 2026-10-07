@@ -66,7 +66,7 @@
     function buildListHistoryState(pageType, state) {
         return {
             currentPage: Math.max(1, Number(state.currentPage) || 1),
-            perPage: Math.max(1, Number(state.perPage) || 100),
+            perPage: Math.max(1, Number(state.perPage) || 50),
             currentSearchTerm: String(state.currentSearchTerm || ""),
             sortNewestFirst: state.sortNewestFirst !== false,
             currentStatusFilter:
@@ -198,13 +198,17 @@
 
             if (tabId === "chat") {
                 const email = state.emails.find(
-                    (e) => Number(e.id) === Number(state.selectedEmailId),
+                    (e) =>
+                        Number(e.email_id || e.emailid || e.id) ===
+                        Number(state.selectedEmailId),
                 );
                 renderChatForEmail(email);
             } else if (tabId === "emails") {
                 if (state.selectedEmailId) {
                     const email = state.emails.find(
-                        (e) => Number(e.id) === Number(state.selectedEmailId),
+                        (e) =>
+                            Number(e.email_id || e.emailid || e.id) ===
+                            Number(state.selectedEmailId),
                     );
                     if (email) {
                         await renderEmailCard(email);
@@ -489,7 +493,7 @@
             String(snapshot.selectedSourceType || pageConfig.pageType) === pageConfig.pageType;
 
         state.currentPage = Math.max(1, Number(snapshot.page) || 1);
-        state.perPage = Math.max(1, Number(snapshot.perPage) || 100);
+        state.perPage = Math.max(1, Number(snapshot.perPage) || 50);
         state.currentSearchTerm = String(snapshot.search || "");
         state.currentStatusFilter =
             pageConfig.pageType === "sent"
@@ -598,46 +602,31 @@
             const result = await reloadEmails({ showLoadingState: true });
             if (!result?.ok) return;
 
-            if (state.selectedEmailSnapshot && snapshotIdMatches) {
-                await renderEmailCard(state.selectedEmailSnapshot);
-                return;
-            }
-
             if (
                 state.selectedSourceType === pageConfig.pageType &&
                 state.selectedEmailId != null
             ) {
-                const selectedEmail = state.emails.find(
-                    (email) =>
-                        Number(email.email_id || email.emailid || email.id) === Number(state.selectedEmailId),
-                );
+                const selectedEmailId = Number(state.selectedEmailId);
 
-                if (selectedEmail) {
-                    await selectEmail(selectedEmail.id, { historyMode: "replace" });
-                    return;
-                }
-
-                if (
-                    state.selectedEmailSnapshot &&
-                    Number(
-                        state.selectedEmailSnapshot.email_id ||
-                        state.selectedEmailSnapshot.emailid ||
-                        state.selectedEmailSnapshot.id
-                    ) === Number(state.selectedEmailId)
-                ) {
-                    await renderEmailCard(state.selectedEmailSnapshot);
-                    return;
-                }
-
-                try {
-                    const detailEmail = await window.MailApi.loadEmailDetail?.(state.selectedEmailId);
-                    if (detailEmail) {
-                        state.selectedEmailSnapshot = detailEmail;
-                        await renderEmailCard(detailEmail);
+                if (!Number.isInteger(selectedEmailId) || selectedEmailId <= 0) {
+                    console.error(
+                        "Некорректный selectedEmailId:",
+                        state.selectedEmailId,
+                    );
+                } else {
+                    try {
+                        await selectEmail(
+                            selectedEmailId,
+                            deps,
+                            { historyMode: "replace" },
+                        );
                         return;
+                    } catch (error) {
+                        console.error(
+                            "Не удалось восстановить выбранное письмо",
+                            error,
+                        );
                     }
-                } catch (error) {
-                    console.error("Не удалось загрузить detail письма при восстановлении истории", error);
                 }
             }
 
@@ -692,22 +681,20 @@
                 state.selectedSourceType === pageConfig.pageType &&
                 state.selectedEmailId != null
             ) {
-                const selectedEmail = state.emails.find(
-                    (email) =>
-                        Number(email.email_id || email.emailid || email.id) === Number(state.selectedEmailId),
-                );
+                const selectedEmailId = Number(state.selectedEmailId);
 
-                if (selectedEmail) {
-                    await selectEmail(selectedEmail.id, { historyMode: "replace" });
-                } else {
+                if (Number.isInteger(selectedEmailId) && selectedEmailId > 0) {
                     try {
-                        const detailEmail = await window.MailApi.loadEmailDetail?.(state.selectedEmailId);
-                        if (detailEmail) {
-                            state.selectedEmailSnapshot = detailEmail;
-                            await renderEmailCard(detailEmail);
-                        }
+                        await selectEmail(
+                            selectedEmailId,
+                            deps,
+                            { historyMode: "replace" },
+                        );
                     } catch (error) {
-                        console.error("Не удалось загрузить detail письма при старте страницы", error);
+                        console.error(
+                            "Не удалось автоматически открыть письмо",
+                            error,
+                        );
                     }
                 }
             }

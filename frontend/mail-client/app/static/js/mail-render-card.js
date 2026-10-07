@@ -14,6 +14,113 @@
         };
     }
 
+    function sanitizeHtmlKeepTables(html) {
+        const allowedTags = new Set([
+            "p",
+            "div",
+            "br",
+            "span",
+            "b",
+            "strong",
+            "i",
+            "em",
+            "u",
+            "a",
+            "ul",
+            "ol",
+            "li",
+            "table",
+            "thead",
+            "tbody",
+            "tfoot",
+            "tr",
+            "th",
+            "td",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "blockquote",
+            "pre",
+            "code",
+        ]);
+
+        const allowedAttrs = new Set([
+            "href",
+            "title",
+            "colspan",
+            "rowspan",
+        ]);
+
+        let doc;
+        try {
+            doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+        } catch (error) {
+            console.warn("Не удалось распарсить HTML письма", error);
+            return "";
+        }
+
+        doc.querySelectorAll(
+            [
+                "script",
+                "style",
+                "noscript",
+                "iframe",
+                "object",
+                "embed",
+                "form",
+                "input",
+                "button",
+                "textarea",
+                "select",
+                "option",
+                "link",
+                "meta",
+                "base",
+                "svg",
+                "math",
+            ].join(", "),
+        ).forEach((node) => node.remove());
+
+        Array.from(doc.body.querySelectorAll("*")).forEach((element) => {
+            const tagName = element.tagName.toLowerCase();
+
+            if (!allowedTags.has(tagName)) {
+                const parent = element.parentNode;
+
+                while (element.firstChild) {
+                    parent.insertBefore(element.firstChild, element);
+                }
+
+                element.remove();
+                return;
+            }
+
+            Array.from(element.attributes).forEach((attr) => {
+                const attrName = attr.name.toLowerCase();
+
+                if (!allowedAttrs.has(attrName)) {
+                    element.removeAttribute(attr.name);
+                }
+            });
+
+            if (tagName === "a") {
+                const href = String(element.getAttribute("href") || "").trim();
+
+                if (
+                    href &&
+                    !/^(https?:|mailto:|tel:|#|\/)/i.test(href)
+                ) {
+                    element.removeAttribute("href");
+                }
+            }
+        });
+
+        return doc.body.innerHTML.trim();
+    }
+
     function prependSignatureToReplyDraft(draftBody, signatureText) {
         const body = String(draftBody || "").trim();
         const rawSignature = String(signatureText || "").trim();
@@ -220,13 +327,13 @@
                 ? extractDisplayBodyFromRawEmail(rawSource)
                 : rawSource;
 
-        const preview =
-            threadEmail?.preview ||
-            String(rawText)
-                .replace(/\r/g, "\n")
-                .replace(/\n{2,}/g, "\n")
-                .replace(/\s+/g, " ")
-                .trim();
+        // const preview =
+        //     threadEmail?.preview ||
+        //     String(rawText)
+        //         .replace(/\r/g, "\n")
+        //         .replace(/\n{2,}/g, "\n")
+        //         .replace(/\s+/g, " ")
+        //         .trim();
 
         const date =
             threadEmail?.date ||
@@ -254,7 +361,7 @@
             thread_source: threadEmail?.thread_source || threadEmail?.source_type || "inbox",
             subject,
             content: rawText,
-            preview,
+            //preview,
             date,
             sender,
             mailbox,
@@ -326,17 +433,31 @@
         const emailMailbox = email.mailbox || email.toheader || "";
         const emailContentSource = email.content || email.rawemail || "";
 
-        const formattedContent =
-            (emailContentSource || "")
-                .split("\n")
-                .map((line) => {
-                    if (line.trim() === "") return "<br>";
-                    if (line.includes("•")) {
-                        return `<p style="margin-left:20px;">${escapeHtml(line)}</p>`;
-                    }
-                    return `<p>${escapeHtml(line)}</p>`;
-                })
-                .join("") || "<p>...</p>";
+        const rawContent = String(emailContentSource || "")
+            .replace(/\r\n/g, "\n")
+            .trim();
+
+        const { decodeHtmlEntities, hasHtmlMarkup } = window.MailFormatters || {};
+
+        const decodedContent =
+            typeof decodeHtmlEntities === "function"
+                ? decodeHtmlEntities(rawContent)
+                : rawContent;
+
+        const isHtmlContent =
+            typeof hasHtmlMarkup === "function"
+                ? hasHtmlMarkup(decodedContent)
+                : false;
+
+        let formattedContent;
+
+        if (!rawContent) {
+            formattedContent = "<p>...</p>";
+        } else if (isHtmlContent) {
+            formattedContent = sanitizeHtmlKeepTables(decodedContent);
+        } else {
+            formattedContent = escapeHtml(rawContent);
+        }
 
         const docsWithName = getDisplayDocuments(email);
         const realEmailId = Number(email.email_id || email.emailid || email.id);
@@ -411,10 +532,7 @@
                                         threadSource === currentThreadSource &&
                                         threadSourceId === currentSourceId;
 
-                                    const previewSource =
-                                        threadEmail.preview || threadEmail.content || threadEmail.rawemail || "";
-
-                                    const preview = escapeHtml(String(previewSource).slice(0, 180));
+                                    const preview = "";
 
                                     return `
                                         <button
@@ -445,10 +563,6 @@
 
                                                 <span class="email-thread-item-subject">
                                                     ${escapeHtml(threadEmail.subject || threadEmail.emailsubject || "(без темы)")}
-                                                </span>
-
-                                                <span class="email-thread-item-preview">
-                                                    ${preview || "Без текста"}
                                                 </span>
                                             </span>
                                         </button>
@@ -642,9 +756,7 @@
 
                 ${attachmentBlock}
 
-                <div class="email-body">
-                    ${formattedContent}
-                </div>
+                <div class="email-body">${formattedContent}</div>
 
                 <div class="reply-block">
                     <div
@@ -977,8 +1089,13 @@
 
                         await ensureUserSignature(state);
 
+                        const replyDraftText =
+                            typeof window.MailFormatters?.htmlToPlainText === "function"
+                                ? window.MailFormatters.htmlToPlainText(draft?.body)
+                                : String(draft?.body || "");
+
                         nextValue = prependSignatureToReplyDraft(
-                            draft?.body,
+                            replyDraftText,
                             state.userSignature || "",
                         );
                     }

@@ -664,12 +664,13 @@ func parseBody(email *Email, literal io.Reader) error {
                 )
             }
 
-            text := strings.TrimSpace(
-                extractTextFromHTML(string(bodyBytes)),
-            )
+            htmlStr := string(bodyBytes)
 
-            if text != "" && !htmlProcessed {
-                htmlParts = append(htmlParts, text)
+            // Очистить HTML, но оставить таблицы и базовую разметку
+            cleaned := sanitizeHTMLKeepTables(htmlStr)
+
+            if cleaned != "" && !htmlProcessed {
+                htmlParts = append(htmlParts, cleaned)
                 htmlProcessed = true
             }
 
@@ -687,15 +688,23 @@ func parseBody(email *Email, literal io.Reader) error {
     }
 
     var body string
+    var isHTML bool
 
     if len(plainParts) > 0 {
         body = strings.Join(plainParts, "\n\n")
+        isHTML = false
     } else if len(htmlParts) > 0 {
         body = strings.Join(htmlParts, "\n\n")
+        isHTML = true
     }
 
     email.Files = append(email.Files, nestedAttachments...)
-    email.Body = cleanBodyText(body)
+
+    if isHTML {
+        email.Body = strings.TrimSpace(body)
+    } else {
+        email.Body = cleanBodyText(body)
+    }
 
     log.Printf(
         "UID=%d: body length=%d, plain parts=%d, html parts=%d, attachments=%d",
@@ -790,6 +799,66 @@ func extractTextFromHTML(htmlStr string) string {
 	}
 
 	return strings.TrimSpace(strings.Join(cleaned, "\n"))
+}
+
+// удаляет ненужные части HTML,но оставляет таблицы и базовую разметку
+func sanitizeHTMLKeepTables(htmlStr string) string {
+    if htmlStr == "" {
+        return ""
+    }
+
+    doc, err := htmllib.Parse(strings.NewReader(htmlStr))
+    if err != nil {
+        return htmlStr
+    }
+
+    // Теги, которые точно удаляем
+    skipTags := map[string]bool{
+        "script":   true,
+        "style":    true,
+        "noscript": true,
+        "iframe":   true,
+        "object":   true,
+        "embed":    true,
+        "form":     true,
+        "input":    true,
+        "link":     true,
+        "meta":     true,
+        "base":     true,
+    }
+
+    var removeNodes []*htmllib.Node
+
+    var walkRemove func(*htmllib.Node)
+    walkRemove = func(n *htmllib.Node) {
+        if n == nil {
+            return
+        }
+
+        if n.Type == htmllib.ElementNode && skipTags[n.Data] {
+            removeNodes = append(removeNodes, n)
+            return
+        }
+
+        for c := n.FirstChild; c != nil; c = c.NextSibling {
+            walkRemove(c)
+        }
+    }
+
+    walkRemove(doc)
+
+    for _, n := range removeNodes {
+        if n.Parent != nil {
+            n.Parent.RemoveChild(n)
+        }
+    }
+
+    var b strings.Builder
+    if err := htmllib.Render(&b, doc); err != nil {
+        return htmlStr
+    }
+
+    return strings.TrimSpace(b.String())
 }
 
 func extractFilename(disposition, contentType string) string {

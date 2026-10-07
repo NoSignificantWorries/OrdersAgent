@@ -2,12 +2,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
+
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 
 from .features import FeaturesExtractor
-
 
 class RFModel:
     def __init__(self) -> None:
@@ -77,6 +77,8 @@ class RFModel:
     def predict(
         self, features: List[Dict[str, Any]]
     ) -> Tuple[List[str], List[int], List[float]]:
+        import pandas as pd
+        
         if self._model is None or self._features is None or self._label_encoder is None:
             raise ValueError("Model not loaded, run train() or load() first")
 
