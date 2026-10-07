@@ -2,6 +2,7 @@ from collections.abc import Generator
 from dataclasses import dataclass, field
 from enum import Enum
 
+from table import schemes
 from table.annotate import Annotation, CellAnnotation, CellKind, CellRole, Stats
 from table.loader import SparseTable
 
@@ -63,10 +64,43 @@ class Direct(str, Enum):
         return cls.VERTICAL
 
 
+class FieldReq(str, Enum):
+    REQUIRED = "required"
+    OPTIONAL = "optional"
+
+
+@dataclass(frozen=True)
+class FieldSpec:
+    kind: CellKind
+    roles: frozenset[CellRole] = frozenset()
+    min_count: int = 1
+    max_count: int = 1
+    allow_none: bool = False
+    req: FieldReq = FieldReq.REQUIRED
+
+
+class TableKind(str, Enum):
+    STANDART = "standart"
+    ONE_SIZE_COLUMN = "one_size_column"
+
+
+@dataclass(frozen=True)
+class TableScheme:
+    kind: TableKind
+    priority: int
+    fields: tuple[FieldSpec, ...]
+
+    def spec_by_kind(self, kind: CellKind) -> FieldSpec | None:
+        for spec in self.fields:
+            if kind == spec.kind:
+                return spec
+        return None
+
+
 @dataclass
 class Field:
-    index: int
     kind: CellKind
+    index: int
     data_roles: set[CellRole]
     sources: list[tuple[int, int]]
 
@@ -101,6 +135,46 @@ class Chain:
         if self.size > 0:
             return self.fields[-1]
         return None
+
+
+@dataclass
+class SchemeRegistry:
+    schemes: dict[TableKind, TableScheme] = field(default_factory=dict)
+
+    def register(self, scheme: TableScheme) -> None:
+        self.schemes[scheme.kind] = scheme
+
+    def get(self, kind: TableKind) -> TableScheme | None:
+        return self.schemes.get(kind)
+
+    def match(self, chain: Chain) -> list[TableScheme]:
+        return [spec for spec in self.schemes.values() if self._fits(chain, spec)]
+
+    @staticmethod
+    def _fits(chain: Chain, scheme: TableScheme) -> bool:
+        ...
+
+
+def make_schemes_defaults() -> SchemeRegistry:
+    registry = SchemeRegistry()
+
+    registry.register(TableScheme(kind=TableKind.STANDART, priority=100, fields=(
+        FieldSpec(CellKind.MARKING, frozenset({CellRole.LABEL}), allow_none=True),
+        FieldSpec(CellKind.SIZE, frozenset({CellRole.NUMERIC}), min_count=2, max_count=2),
+        FieldSpec(CellKind.AMOUNT, frozenset({CellRole.NUMERIC})),
+        FieldSpec(CellKind.MARKING, frozenset({CellRole.NUMERIC, CellRole.LABEL}), allow_none=True, req=FieldReq.OPTIONAL),
+        FieldSpec(CellKind.BARCODE, frozenset({CellRole.NUMERIC, CellRole.LABEL}), allow_none=True, req=FieldReq.OPTIONAL)
+    )))
+
+    registry.register(TableScheme(kind=TableKind.ONE_SIZE_COLUMN, priority=200, fields=(
+        FieldSpec(CellKind.MARKING, frozenset({CellRole.LABEL}), allow_none=True),
+        FieldSpec(CellKind.SIZE, frozenset({CellRole.NUMERIC})),
+        FieldSpec(CellKind.AMOUNT, frozenset({CellRole.NUMERIC})),
+        FieldSpec(CellKind.MARKING, frozenset({CellRole.NUMERIC, CellRole.LABEL}), allow_none=True, req=FieldReq.OPTIONAL),
+        FieldSpec(CellKind.BARCODE, frozenset({CellRole.NUMERIC, CellRole.LABEL}), allow_none=True, req=FieldReq.OPTIONAL)
+    )))
+
+    return registry
 
 
 def _break_chain_by_basic_rule(chain: Chain, field: Field) -> bool:
@@ -381,6 +455,7 @@ def clean_dirty_rows_in_table(subtable: Table) -> Table:
     for i, row in enumerate(subtable.data_rows.values()):
         if all(obj is None for obj in row):
             continue
+
         new_row: list[ResCell | None] = []
         error_row = False
         for elem, field in zip(row, subtable.header_chain.fields):
@@ -388,15 +463,18 @@ def clean_dirty_rows_in_table(subtable: Table) -> Table:
                 error_row = True
                 break
             new_row.append(elem)
+
         if not error_row:
             new_table.add_row(i, new_row)
+
     return new_table
 
 
 def clean_dirty_tables(subtables: list[Table]) -> list[Table]:
     result: list[Table] = []
     for subtable in subtables:
-        result.append(clean_dirty_rows_in_table(subtable))
+        clean_table = clean_dirty_rows_in_table(subtable)
+        result.append(clean_table)
     return result
 
 
