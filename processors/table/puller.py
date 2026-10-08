@@ -2,7 +2,6 @@ from collections.abc import Generator
 from dataclasses import dataclass, field
 from enum import Enum
 
-from table import schemes
 from table.annotate import Annotation, CellAnnotation, CellKind, CellRole, Stats
 from table.loader import SparseTable
 
@@ -152,7 +151,16 @@ class SchemeRegistry:
 
     @staticmethod
     def _fits(chain: Chain, scheme: TableScheme) -> bool:
-        ...
+        for kind, cnt in chain.kind_counts.items():
+            field_spec = scheme.spec_by_kind(kind)
+            # kind not in the table scheme, doesn't fit
+            if field_spec is None:
+                return False
+
+            # check field counts in the chain by the scheme
+            if not (field_spec.min_count <= cnt <= field_spec.max_count):
+                return False
+        return True
 
 
 def make_schemes_defaults() -> SchemeRegistry:
