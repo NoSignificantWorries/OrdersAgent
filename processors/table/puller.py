@@ -53,14 +53,13 @@ class Source:
         return self.stats.header_in_row(row)
 
 
+###################
+## SPECIFICATION ##
+###################
 
 class Direct(str, Enum):
     VERTICAL = "vertical"
     HORIZONTAL = "horizontal"
-
-    @classmethod
-    def kind_to_direction(cls, kind: CellKind) -> "Direct":
-        return cls.VERTICAL
 
 
 class FieldReq(str, Enum):
@@ -78,14 +77,15 @@ class FieldSpec:
     req: FieldReq = FieldReq.REQUIRED
 
 
-class TableKind(str, Enum):
+class TableFormat(str, Enum):
     STANDART = "standart"
     ONE_SIZE_COLUMN = "one_size_column"
 
 
 @dataclass(frozen=True)
 class TableScheme:
-    kind: TableKind
+    format: TableFormat
+    direction: Direct
     priority: int
     fields: tuple[FieldSpec, ...]
 
@@ -98,15 +98,13 @@ class TableScheme:
 
 @dataclass
 class Field:
-    kind: CellKind
+    spec: FieldSpec
     index: int
-    data_roles: set[CellRole]
     sources: list[tuple[int, int]]
 
 
 @dataclass
 class Chain:
-    direction: Direct
     fields: list[Field] = field(default_factory=list)
     kind_counts: dict[CellKind, int] = field(default_factory=dict)
 
@@ -128,7 +126,7 @@ class Chain:
 
     def push_field(self, field: Field) -> None:
         self.fields.append(field)
-        self.kind_counts[field.kind] = self.kind_counts.get(field.kind, 0) + 1
+        self.kind_counts[field.spec.kind] = self.kind_counts.get(field.spec.kind, 0) + 1
 
     def last(self) -> Field | None:
         if self.size > 0:
@@ -138,44 +136,42 @@ class Chain:
 
 @dataclass
 class SchemeRegistry:
-    schemes: dict[TableKind, TableScheme] = field(default_factory=dict)
+    schemes: dict[TableFormat, TableScheme] = field(default_factory=dict)
 
     def register(self, scheme: TableScheme) -> None:
-        self.schemes[scheme.kind] = scheme
+        self.schemes[scheme.format] = scheme
 
-    def get(self, kind: TableKind) -> TableScheme | None:
-        return self.schemes.get(kind)
+    def get(self, format: TableFormat) -> TableScheme | None:
+        return self.schemes.get(format)
 
-    def match(self, chain: Chain) -> list[TableScheme]:
-        return [spec for spec in self.schemes.values() if self._fits(chain, spec)]
+    def get_by_direction(self, direction: Direct) -> list[TableScheme]:
+        return [scheme for scheme in self.schemes.values() if scheme.direction == direction]
 
-    @staticmethod
-    def _fits(chain: Chain, scheme: TableScheme) -> bool:
-        for kind, cnt in chain.kind_counts.items():
-            field_spec = scheme.spec_by_kind(kind)
-            # kind not in the table scheme, doesn't fit
-            if field_spec is None:
-                return False
-
-            # check field counts in the chain by the scheme
-            if not (field_spec.min_count <= cnt <= field_spec.max_count):
-                return False
-        return True
+    def _check_cell(self, cell: ResCell) -> list[TableScheme]:
+        return [scheme for scheme in self.schemes.values() if scheme.spec_by_kind(cell.kind)]
 
 
 def make_schemes_defaults() -> SchemeRegistry:
     registry = SchemeRegistry()
 
-    registry.register(TableScheme(kind=TableKind.STANDART, priority=100, fields=(
-        FieldSpec(CellKind.MARKING, frozenset({CellRole.LABEL}), allow_none=True),
+    registry.register(TableScheme(
+        format=TableFormat.STANDART,
+        direction=Direct.VERTICAL,
+        priority=100,
+        fields=(
+        FieldSpec(CellKind.MATERIAL, frozenset({CellRole.LABEL}), allow_none=True),
         FieldSpec(CellKind.SIZE, frozenset({CellRole.NUMERIC}), min_count=2, max_count=2),
         FieldSpec(CellKind.AMOUNT, frozenset({CellRole.NUMERIC})),
         FieldSpec(CellKind.MARKING, frozenset({CellRole.NUMERIC, CellRole.LABEL}), allow_none=True, req=FieldReq.OPTIONAL),
         FieldSpec(CellKind.BARCODE, frozenset({CellRole.NUMERIC, CellRole.LABEL}), allow_none=True, req=FieldReq.OPTIONAL)
     )))
 
-    registry.register(TableScheme(kind=TableKind.ONE_SIZE_COLUMN, priority=200, fields=(
-        FieldSpec(CellKind.MARKING, frozenset({CellRole.LABEL}), allow_none=True),
+    registry.register(TableScheme(
+        format=TableFormat.ONE_SIZE_COLUMN,
+        direction=Direct.VERTICAL,
+        priority=200,
+        fields=(
+        FieldSpec(CellKind.MATERIAL, frozenset({CellRole.LABEL}), allow_none=True),
         FieldSpec(CellKind.SIZE, frozenset({CellRole.NUMERIC})),
         FieldSpec(CellKind.AMOUNT, frozenset({CellRole.NUMERIC})),
         FieldSpec(CellKind.MARKING, frozenset({CellRole.NUMERIC, CellRole.LABEL}), allow_none=True, req=FieldReq.OPTIONAL),
@@ -185,80 +181,83 @@ def make_schemes_defaults() -> SchemeRegistry:
     return registry
 
 
-def _break_chain_by_basic_rule(chain: Chain, field: Field) -> bool:
-    _BASIC_RULESET: dict[CellKind, int] = {
-        CellKind.AMOUNT: 1,
-        CellKind.MATERIAL: 1,
-        CellKind.SIZE: 2,
-        CellKind.MARKING: 1,
-        CellKind.BARCODE: 1
-    }
-
-    if field.kind in _BASIC_RULESET:
-        kind_count = chain.kind_counts.get(field.kind, 0)
-        if kind_count >= _BASIC_RULESET[field.kind]:
-            return True
-    return False
-
-
-def _empty_cell_after_sizes(chain: Chain, idx: int, cell: ResCell | None) -> tuple[bool, CellKind | None]:
-    if chain.last() is None:
-        return False, None
-
-    if chain.last().kind == CellKind.SIZE and \
-       cell is None and \
-       chain.kind_counts.get(CellKind.SIZE, 0) == 1 and \
-       idx - chain.last().index == 1:
-        return True, CellKind.SIZE
-
-    return False, None
+# def _break_chain_by_basic_rule(chain: Chain, field: Field) -> bool:
+#     _BASIC_RULESET: dict[CellKind, int] = {
+#         CellKind.AMOUNT: 1,
+#         CellKind.MATERIAL: 1,
+#         CellKind.SIZE: 2,
+#         CellKind.MARKING: 1,
+#         CellKind.BARCODE: 1
+#     }
+#
+#     if field.kind in _BASIC_RULESET:
+#         kind_count = chain.kind_counts.get(field.kind, 0)
+#         if kind_count >= _BASIC_RULESET[field.kind]:
+#             return True
+#     return False
 
 
+# def _empty_cell_after_sizes(chain: Chain, idx: int, cell: ResCell | None) -> tuple[bool, CellKind | None]:
+#     if chain.last() is None:
+#         return False, None
+#
+#     if chain.last().kind == CellKind.SIZE and \
+#        cell is None and \
+#        chain.kind_counts.get(CellKind.SIZE, 0) == 1 and \
+#        idx - chain.last().index == 1:
+#         return True, CellKind.SIZE
+#
+#     return False, None
 
-def make_chains_in_row(row: int, source: Source) -> list[Chain]:
-    roles_by_kind: dict[CellKind, set[CellRole]] = {
-            CellKind.MATERIAL: {CellRole.LABEL},
-            CellKind.AMOUNT: {CellRole.NUMERIC},
-            CellKind.SIZE: {CellRole.NUMERIC, CellRole.SIZES},
-            CellKind.MARKING: {CellRole.NUMERIC, CellRole.LABEL},
-            CellKind.BARCODE: {CellRole.NUMERIC, CellRole.LABEL}
-        }
 
-    chains = []
-    last_chain = None
-    for ic, cell in source.iter_through_row(row):
-        if last_chain is not None:
-            rule_valid, kind_for_cell = _empty_cell_after_sizes(last_chain, ic, cell)
-            if rule_valid and kind_for_cell is not None:
-                last_chain.push_field(Field(
-                    index=ic,
-                    kind=kind_for_cell,
-                    data_roles=roles_by_kind.get(kind_for_cell, set()),
-                    sources=[(row, ic)]
-                ))
-                continue
 
-        if cell is None or cell.kind not in roles_by_kind:
+def make_chains_in_row(row_index: int, source: Source, registry: SchemeRegistry) -> list[Chain]:
+    for column_index, cell in source.iter_through_row(row_index):
+        # TODO: Check specific ruleset
+
+        # skip empty cells and non-headers without any specific rule
+        if cell is None or cell.role != CellRole.UNKNOWN:
             continue
 
-        if last_chain is None:
-            last_chain = Chain(Direct.HORIZONTAL)
+        # TODO: Build chain
 
-        new_field = Field(
-            index=cell.col,
-            kind=cell.kind,
-            data_roles=roles_by_kind.get(cell.kind, set()),
-            sources=[(cell.row, cell.col)]
-        )
-        if _break_chain_by_basic_rule(last_chain, new_field):
-            chains.append(last_chain)
-            last_chain = Chain(Direct.HORIZONTAL)
-        last_chain.push_field(new_field)
+    return []
 
-    if last_chain is not None:
-        chains.append(last_chain)
-
-    return chains
+#     chains = []
+#     last_chain = None
+#     for ic, cell in source.iter_through_row(row):
+#         if last_chain is not None:
+#             rule_valid, kind_for_cell = _empty_cell_after_sizes(last_chain, ic, cell)
+#             if rule_valid and kind_for_cell is not None:
+#                 last_chain.push_field(Field(
+#                     index=ic,
+#                     kind=kind_for_cell,
+#                     data_roles=roles_by_kind.get(kind_for_cell, set()),
+#                     sources=[(row, ic)]
+#                 ))
+#                 continue
+#
+#         if cell is None or cell.kind not in roles_by_kind:
+#             continue
+#
+#         if last_chain is None:
+#             last_chain = Chain(Direct.HORIZONTAL)
+#
+#         new_field = Field(
+#             index=cell.col,
+#             kind=cell.kind,
+#             data_roles=roles_by_kind.get(cell.kind, set()),
+#             sources=[(cell.row, cell.col)]
+#         )
+#         if _break_chain_by_basic_rule(last_chain, new_field):
+#             chains.append(last_chain)
+#             last_chain = Chain(Direct.HORIZONTAL)
+#         last_chain.push_field(new_field)
+#
+#     if last_chain is not None:
+#         chains.append(last_chain)
+#
+#     return chains
 
 
 def make_horizontal_chains(source: Source) -> dict[int, list[Chain]]:
