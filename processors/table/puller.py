@@ -2,6 +2,7 @@ from collections.abc import Generator
 from dataclasses import dataclass, field
 from enum import Enum
 
+from table import schemes
 from table.annotate import Annotation, CellAnnotation, CellKind, CellRole, Stats
 from table.loader import SparseTable
 
@@ -105,6 +106,7 @@ class Field:
 
 @dataclass
 class Chain:
+    direction: Direct
     fields: list[Field] = field(default_factory=list)
     kind_counts: dict[CellKind, int] = field(default_factory=dict)
 
@@ -146,6 +148,9 @@ class SchemeRegistry:
 
     def get_by_direction(self, direction: Direct) -> list[TableScheme]:
         return [scheme for scheme in self.schemes.values() if scheme.direction == direction]
+
+    def knows_kind(self, kind: CellKind) -> bool:
+        return any(s.spec_by_kind(kind) is not None for s in self.schemes.values())
 
     def _check_cell(self, cell: ResCell) -> list[TableScheme]:
         return [scheme for scheme in self.schemes.values() if scheme.spec_by_kind(cell.kind)]
