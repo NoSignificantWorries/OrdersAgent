@@ -26,18 +26,14 @@ app.include_router(mappings.router)
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     """Точка входа - только для авторизованных"""
-    print(f"\n=== ROOT / ===")
-    print(f"Cookies: {request.cookies}")
-
     user = auth.get_current_user(request)
-    print(f"Пользователь: {user}")
 
     if user:
-        print("Пользователь авторизован - редирект на /inbox")
+        print(f"Authenticated user_id={user['id']} redirected to /inbox")
         return RedirectResponse(url="/inbox", status_code=302)
-    else:
-        print("Пользователь НЕ авторизован - редирект на /login")
-        return RedirectResponse(url="/login", status_code=302)
+
+    print("Unauthenticated user redirected to /login")
+    return RedirectResponse(url="/login", status_code=302)
 
 
 @app.get("/inbox", response_class=HTMLResponse)
@@ -117,7 +113,6 @@ async def login_page(request: Request):
     """Страница входа"""
     user = auth.get_current_user(request)
     if user:
-        print("Уже авторизован - редирект на /inbox")
         return RedirectResponse(url="/inbox", status_code=302)
 
     return templates.TemplateResponse(
@@ -125,39 +120,6 @@ async def login_page(request: Request):
         name="login.html",
         context={"request": request}
     )
-
-
-@app.get("/debug")
-async def debug_session(request: Request):
-    """Отладка - посмотреть все сессии"""
-    return {
-        "cookies": dict(request.cookies),
-        "sessions": {k: v for k, v in auth.sessions.items()},
-        "session_count": len(auth.sessions)
-    }
-
-
-@app.get("/test-cookie")
-async def test_cookie(request: Request):
-    """Тестовый маршрут для проверки установки кук"""
-    from fastapi.responses import JSONResponse
-
-    response = JSONResponse({
-        "message": "Тестовая кука установлена",
-        "cookies": dict(request.cookies)
-    })
-
-    response.set_cookie(
-        key="test_cookie",
-        value="test_value_123",
-        httponly=True,
-        max_age=60,
-        samesite="lax",
-        secure=False,
-        path="/"
-    )
-
-    return response
 
 
 if __name__ == "__main__":
