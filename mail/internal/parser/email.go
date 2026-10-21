@@ -434,22 +434,31 @@ func cleanBodyText(body string) string {
 }
 
 func isInlinePart(contentType, disposition, contentID string) bool {
-    ctLower := strings.ToLower(contentType)
-    dispLower := strings.ToLower(disposition)
+	ctLower := strings.ToLower(contentType)
+	dispLower := strings.ToLower(disposition)
 
-    if strings.Contains(dispLower, "inline") {
-        return true
-    }
+	if strings.HasPrefix(ctLower, "text/plain") ||
+		strings.HasPrefix(ctLower, "text/html") {
+		return false
+	}
 
-    if contentID != "" && !strings.Contains(dispLower, "attachment") {
-        return true
-    }
+	if strings.Contains(dispLower, "attachment") {
+		return false
+	}
 
-    if strings.HasPrefix(ctLower, "image/") && contentID != "" {
-        return true
-    }
+	if strings.Contains(dispLower, "inline") {
+		return true
+	}
 
-    return false
+	if contentID != "" {
+		return true
+	}
+
+	if strings.HasPrefix(ctLower, "image/") && contentID != "" {
+		return true
+	}
+
+	return false
 }
 
 func parseBody(email *Email, literal io.Reader) error {

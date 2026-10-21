@@ -354,35 +354,38 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
 }
 
 func isReconnectableError(err error) bool {
-	if err == nil {
-		return false
-	}
+    if err == nil {
+        return false
+    }
 
-	msg := strings.ToLower(err.Error())
+    msg := strings.ToLower(err.Error())
 
-	if strings.Contains(msg, "use of closed network connection") ||
-		strings.Contains(msg, "connection reset by peer") ||
-		strings.Contains(msg, "broken pipe") ||
-		strings.Contains(msg, "unexpected eof") ||
-		strings.Contains(msg, "eof") ||
-		strings.Contains(msg, "i/o timeout") ||
-		strings.Contains(msg, "connection refused") {
-		return true
-	}
+    if strings.Contains(msg, "use of closed network connection") ||
+        strings.Contains(msg, "connection reset by peer") ||
+        strings.Contains(msg, "broken pipe") ||
+        strings.Contains(msg, "unexpected eof") ||
+        strings.Contains(msg, "eof") ||
+        strings.Contains(msg, "i/o timeout") ||
+        strings.Contains(msg, "connection refused") ||
+        strings.Contains(msg, "unavailable") ||
+        strings.Contains(msg, "backend error") ||
+        strings.Contains(msg, "try again") {
+        return true
+    }
 
-	if errors.Is(err, io.EOF) ||
-		errors.Is(err, net.ErrClosed) ||
-		errors.Is(err, syscall.EPIPE) ||
-		errors.Is(err, syscall.ECONNRESET) {
-		return true
-	}
+    if errors.Is(err, io.EOF) ||
+        errors.Is(err, net.ErrClosed) ||
+        errors.Is(err, syscall.EPIPE) ||
+        errors.Is(err, syscall.ECONNRESET) {
+        return true
+    }
 
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
+    var netErr net.Error
+    if errors.As(err, &netErr) && netErr.Timeout() {
+        return true
+    }
 
-	return false
+    return false
 }
 
 func isAuthError(err error) bool {
