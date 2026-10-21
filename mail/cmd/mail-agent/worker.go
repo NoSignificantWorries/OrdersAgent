@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -41,6 +42,44 @@ func runUserWorker(
 	processor := orders.New(repo, userID)
 
 	consecutiveReconnectErrors := 0
+
+	forceRefreshToken := func() error {
+		mailAuth, err := storage.GetUserMailAuth(db, userID)
+		if err != nil {
+			return fmt.Errorf("get user mail auth: %w", err)
+		}
+
+		if mailAuth.RefreshToken == "" {
+			return errors.New("empty mail refresh token")
+		}
+
+		newToken, err := client.RefreshYandexToken(
+			os.Getenv("YANDEX_TOKEN_URL"),
+			os.Getenv("YANDEX_CLIENT_ID"),
+			os.Getenv("YANDEX_CLIENT_SECRET"),
+			mailAuth.RefreshToken,
+		)
+		if err != nil {
+			return fmt.Errorf("refresh yandex token: %w", err)
+		}
+
+		mailAuth.AccessToken = newToken.AccessToken
+		mailAuth.RefreshToken = newToken.RefreshToken
+		mailAuth.AccessExpiresAt = newToken.AccessExpiresAt
+
+		if err := storage.UpdateUserMailTokens(db, userID, mailAuth); err != nil {
+			return fmt.Errorf("update user mail tokens: %w", err)
+		}
+
+		log.Printf(
+			"access token force refreshed | user_id=%d email=%s new_expires_at=%s",
+			userID,
+			mailAuth.Email,
+			mailAuth.AccessExpiresAt.Format(time.RFC3339),
+		)
+
+		return nil
+	}
 
 	var imapClient *client.Client
 	defer func() {
@@ -145,6 +184,27 @@ func runUserWorker(
 		c, err := getConnectedClient()
 		if err != nil {
 			log.Printf("get IMAP client | user_id=%d err=%v", userID, err)
+
+			if isAuthError(err) {
+				log.Printf(
+					"authentication failed, forcing token refresh | user_id=%d email=%s err=%v",
+					userID,
+					userEmail,
+					err,
+				)
+
+				if refreshErr := forceRefreshToken(); refreshErr != nil {
+					log.Printf(
+						"force token refresh failed | user_id=%d email=%s err=%v",
+						userID,
+						userEmail,
+						refreshErr,
+					)
+				}
+
+				resetClient(err)
+			}
+
 			return
 		}
 
@@ -163,13 +223,34 @@ func runUserWorker(
 			return
 		}
 
-		log.Printf(
-			"process emails | user_id=%d email=%s session_id=%s err=%v",
-			userID,
-			userEmail,
-			c.SessionID(),
-			err,
-		)
+		    log.Printf(
+				"process emails | user_id=%d email=%s session_id=%s err=%v",
+				userID,
+				userEmail,
+				c.SessionID(),
+				err,
+			)
+
+			if isAuthError(err) {
+				log.Printf(
+					"authentication failed during processing, forcing token refresh | user_id=%d email=%s err=%v",
+					userID,
+					userEmail,
+					err,
+				)
+
+				if refreshErr := forceRefreshToken(); refreshErr != nil {
+					log.Printf(
+						"force token refresh failed | user_id=%d email=%s err=%v",
+						userID,
+						userEmail,
+						refreshErr,
+					)
+				}
+
+				resetClient(err)
+				return
+			}
 
 		if isReconnectableError(err) {
 			consecutiveReconnectErrors++
@@ -302,4 +383,18 @@ func isReconnectableError(err error) bool {
 	}
 
 	return false
+}
+
+func isAuthError(err error) bool {
+    if err == nil {
+        return false
+    }
+
+    msg := strings.ToLower(err.Error())
+
+    return strings.Contains(msg, "authenticationfailed") ||
+        strings.Contains(msg, "invalid credentials") ||
+        strings.Contains(msg, "imap is disabled") ||
+        strings.Contains(msg, "535") ||
+        strings.Contains(msg, "invalid user or password")
 }
