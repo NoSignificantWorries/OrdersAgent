@@ -14,6 +14,6 @@ __all__ = [
     "loader",
     "make_callculation_xlsx",
     "make_request_xlsx",
-    "parser_v6",
+    "parser_v7",
     "schemes"
 ]
