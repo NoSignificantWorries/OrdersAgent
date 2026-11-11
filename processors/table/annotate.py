@@ -1,5 +1,5 @@
 import re
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -10,6 +10,7 @@ from .loader import SparseTable
 
 
 class CellKind(str, Enum):
+    EMPTY = "empty"
     MATERIAL = "materials"
     AMOUNT = "amount"
     SIZE = "size"
@@ -19,6 +20,7 @@ class CellKind(str, Enum):
     AUFBAU = "aufbau"
     THICKNESS = "thikness"
     UNKNOWN = "unknown"
+    ITOGO = "itogo"
 
 
 class CellRole(str, Enum):
@@ -30,8 +32,9 @@ class CellRole(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class HeaderSpec:
+class TextSpec:
     kind: CellKind
+    role: CellRole
     anchors: list[str]
 
 
@@ -44,21 +47,21 @@ class Action:
     priority: int = 0
 
 
-class HeaderMatcher:
+class TextMatcher:
     _WS = re.compile(r"\s+", re.UNICODE)
     _STRIP = re.compile(r"[\(\)\[\]\{\}\.,]")
 
     @staticmethod
     def normalize(text: str) -> str:
         s = str(text).lower()
-        s = HeaderMatcher._WS.sub("", s)
-        s = HeaderMatcher._STRIP.sub("", s)
+        s = TextMatcher._WS.sub("", s)
+        s = TextMatcher._STRIP.sub("", s)
         return s
 
-    def __init__(self, patterns: list[HeaderSpec]) -> None:
-        self.fields: list[HeaderSpec] = patterns
-        self.name_to_field: dict[CellKind, HeaderSpec] = {field.kind: field for field in self.fields}
-        self.anchors_to_field: dict[str, HeaderSpec] = {}
+    def __init__(self, patterns: list[TextSpec]) -> None:
+        self.fields: list[TextSpec] = patterns
+        self.name_to_field: dict[CellKind, TextSpec] = {field.kind: field for field in self.fields}
+        self.anchors_to_field: dict[str, TextSpec] = {}
         self.max_length = 0
 
         self.normalize_all_anchors()
@@ -66,11 +69,11 @@ class HeaderMatcher:
     def normalize_all_anchors(self) -> None:
         for field in self.fields:
             for anchor in field.anchors:
-                norm_anchor = HeaderMatcher.normalize(anchor)
+                norm_anchor = TextMatcher.normalize(anchor)
                 self.anchors_to_field[norm_anchor] = field
                 self.max_length = max(self.max_length, len(norm_anchor))
 
-    def classify_text(self, text: str, threshold: float = 90.0) -> HeaderSpec | None:
+    def classify_text(self, text: str, threshold: float = 90.0) -> TextSpec | None:
         norm = self.normalize(text)
         exact = self.anchors_to_field.get(norm)
         if exact is not None:
@@ -94,16 +97,16 @@ class HeaderMatcher:
             return best_field
         return None
 
-    def field_by_kind(self, name: CellKind) -> HeaderSpec | None:
+    def field_by_kind(self, name: CellKind) -> TextSpec | None:
         return self.name_to_field.get(name, None)
 
-    def match(self, value: int | str) -> HeaderSpec | None:
+    def match(self, value: int | str) -> TextSpec | None:
         if isinstance(value, int):
             return None
         return self.classify_text(value)
 
 
-def build_default_actions(matcher: HeaderMatcher) -> list[Action]:
+def build_default_actions(matcher: TextMatcher) -> list[Action]:
     pattern = re.compile(r"^\s*([\d\s]+(?:[.,]\d+)?)\s*[xXхХ*×]\s*([\d\s]+(?:[.,]\d+)?)\s*$")
 
     def is_sizes(value: Any) -> bool:
@@ -126,8 +129,8 @@ def build_default_actions(matcher: HeaderMatcher) -> list[Action]:
         Action("sizes", is_sizes,
             lambda _: (CellRole.SIZES, CellKind.UNKNOWN),
             transform_sizes, priority=100),
-        Action("header", lambda val: isinstance(val, str) and matcher.classify_text(val) is not None,
-            lambda val: (CellRole.HEADER, matcher.classify_text(val).kind),
+        Action("text", lambda val: isinstance(val, str) and matcher.classify_text(val) is not None,
+            lambda val: (lambda cls: (cls.role, cls.kind))(matcher.classify_text(val)),
             priority=50),
         Action("str", lambda val: isinstance(val, str),
             lambda _: (CellRole.LABEL, CellKind.UNKNOWN), priority=30)
@@ -135,72 +138,92 @@ def build_default_actions(matcher: HeaderMatcher) -> list[Action]:
 
 
 @dataclass(frozen=True, slots=True)
-class CellAnnotation:
-    role: CellRole
-    kind: CellKind = CellKind.UNKNOWN
-    value: Any | None = None
+class ResCell:
+    value: int | str | tuple[int, int] | None
+    row: int
+    col: int
+    kind: CellKind = CellKind.EMPTY
+    role: CellRole = CellRole.UNKNOWN
 
 
-@dataclass
-class Annotation:
-    cells: dict[tuple[int, int], CellAnnotation] = field(default_factory=dict)
-
-    def get_cell(self, row: int, col: int) -> CellAnnotation | None:
-        return self.cells.get((row, col), None)
-
-    def get_in_row(self, row: int) -> dict[tuple[int, int], CellAnnotation]:
-        return {pos: ann for pos, ann in self.cells.items() if pos[0] == row}
-
-
-@dataclass
+@dataclass(frozen=True)
 class Stats:
-    kinds_per_row: dict[int, set[CellKind]] = field(default_factory=dict)
-    kinds_per_col: dict[int, set[CellKind]] = field(default_factory=dict)
-    roles_per_row: dict[int, set[CellRole]] = field(default_factory=dict)
-    roles_per_col: dict[int, set[CellRole]] = field(default_factory=dict)
-
-    def add(self, row: int, col: int, cell_annotation: CellAnnotation) -> None:
-        kpr = self.kinds_per_row.get(row, set())
-        kpr.add(cell_annotation.kind)
-        self.kinds_per_row[row] = kpr
-
-        kpc = self.kinds_per_col.get(col, set())
-        kpc.add(cell_annotation.kind)
-        self.kinds_per_row[col] = kpc
-
-        rpr = self.roles_per_row.get(row, set())
-        rpr.add(cell_annotation.role)
-        self.roles_per_row[row] = rpr
-
-        rpc = self.roles_per_col.get(col, set())
-        rpc.add(cell_annotation.role)
-        self.roles_per_col[col] = rpc
-
-    def header_in_row(self, row: int) -> bool:
-        obj = self.roles_per_row.get(row, None)
-        if obj is None:
-            return False
-        return CellRole.HEADER in obj
+    roles_in_row: dict[int, frozenset[CellRole]]
+    roles_in_col: dict[int, frozenset[CellRole]]
+    kinds_in_row: dict[int, frozenset[CellRole]]
+    kinds_in_col: dict[int, frozenset[CellRole]]
 
 
-class AnnotateEngine:
-    def __init__(self, actions: list[Action]) -> None:
-        self.actions = sorted(actions, key=lambda act: act.priority, reverse=True)
+@dataclass(frozen=True)
+class AnnotatedTable:
+    name: str
+    nrows: int
+    ncols: int
+    table: list[list[ResCell]]
+    stats: Stats
 
-    def make_annotations(self, table: SparseTable) -> Annotation:
-        annotation = Annotation()
+
+class AnnotationPipeline:
+    @classmethod
+    def make_annotations(cls, actions: list[Action], table: SparseTable) -> list[list[ResCell]]:
+        res_table = [[ResCell(None, irow, icol) for icol in range(table.ncols)] for irow in range(table.nrows)]
         for row, col, cell in table.iter_cells():
-            for action in self.actions:
+            for action in actions:
+
                 if not action.trigger(cell.value):
                     continue
+
                 cell_role, cell_kind = action.annotate(cell.value)
                 new_value = action.transform(cell.value) if action.transform else None
-                annotation.cells[(row, col)] = CellAnnotation(cell_role, cell_kind, new_value)
-                break
-        return annotation
 
-    def build_stats(self, annotation: Annotation) -> Stats:
-        stats = Stats()
-        for (row, col), ann in annotation.cells.items():
-            stats.add(row, col, ann)
-        return stats
+                res_table[row][col] = ResCell(
+                    cell.value if new_value is None else new_value,
+                    row,
+                    col,
+                    cell_kind,
+                    cell_role
+                )
+
+                break
+
+        return res_table
+
+    @classmethod
+    def make_stats(cls, table: list[list[ResCell]]) -> Stats:
+        per_row_roles = {}
+        per_col_roles = {}
+        per_row_kinds = {}
+        per_col_kinds = {}
+        for irow, row in enumerate(table):
+            for icol, cell in enumerate(row):
+
+                per_col_roles[icol] = per_col_roles.get(icol, set())
+                per_col_kinds[icol] = per_col_kinds.get(icol, set())
+                per_row_roles[irow] = per_row_roles.get(irow, set())
+                per_row_kinds[irow] = per_row_kinds.get(irow, set())
+
+                per_col_roles[icol].add(cell.role)
+                per_col_kinds[icol].add(cell.kind)
+                per_row_roles[irow].add(cell.role)
+                per_row_kinds[irow].add(cell.kind)
+
+        return Stats(
+            per_row_roles,
+            per_col_roles,
+            per_row_kinds,
+            per_col_kinds
+        )
+
+    @classmethod
+    def run(cls, actions: list[Action], table: SparseTable) -> AnnotatedTable:
+        sorted_actions = sorted(actions, key=lambda act: act.priority, reverse=True)
+        annotated_cells = cls.make_annotations(sorted_actions, table)
+        stats = cls.make_stats(annotated_cells)
+
+        return AnnotatedTable(
+            table.name,
+            table.nrows,
+            table.ncols,
+            annotated_cells,
+            stats
+        )

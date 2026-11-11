@@ -15,6 +15,7 @@ class ResCell:
     role: CellRole
 
 
+
 @dataclass(frozen=True)
 class Source:
     table: SparseTable
@@ -101,6 +102,25 @@ default_registry = FieldsRegistry([
     FieldSpec(CellKind.BARCODE, Direct.VERTICAL, frozenset({CellRole.NUMERIC, CellRole.LABEL}), True),
     FieldSpec(CellKind.MARKING, Direct.VERTICAL, frozenset({CellRole.NUMERIC, CellRole.LABEL}), True),
 ])
+
+
+@dataclass(frozen=True)
+class HeaderSpec:
+    fields: list[FieldSpec]
+
+    def kind_in(self, kind) -> bool:
+        for field in self.fields:
+            if field.kind == kind:
+                return True
+        return False
+
+
+class HeaderRegistry:
+    def __init__(self, specs: list[HeaderSpec]) -> None:
+        self.specs = specs
+
+    def match(self, cells: list[ResCell]) -> list[HeaderSpec]:
+
 
 
 @dataclass
@@ -191,6 +211,12 @@ class FieldsPipeline:
                 last_row = (ir, row_headers)
         res[last_row[0]] = last_row[1]
         return res
+
+    @classmethod
+    def empty_material_rule(cls, source: Source, headers: dict[int, dict[int, Field]]) -> dict[int, dict[int, Field]]:
+        for ir, row in headers.items():
+            for ic, field in row.items():
+                if field.kind == CellKind.SIZE
 
     @classmethod
     def run(cls, source: Source) -> dict[int, dict[int, Field]]:

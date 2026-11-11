@@ -1,50 +1,53 @@
+from table.extractor import CellRole
+
 from .annotate import (
-    AnnotateEngine,
-    Annotation,
+    AnnotatedTable,
+    AnnotationPipeline,
     CellKind,
-    HeaderMatcher,
-    HeaderSpec,
-    Stats,
+    TextMatcher,
+    TextSpec,
     build_default_actions,
 )
 from .loader import SparseTable, Workbook
 from .report import WorkbookReport
 
 
-def build_default_headers() -> HeaderMatcher:
-    return HeaderMatcher([
-        HeaderSpec(CellKind.MATERIAL, ["наименование", "обозначение", "номенклатура", "артикул", "тип пакета", "формула", "формула заполнения", "формула сп"]),
-        HeaderSpec(CellKind.AMOUNT, ["кол-во", "количество", "кол-во(шт)", "количество(шт)", "колич", "n", "количес", "шт"]),
-        HeaderSpec(CellKind.SIZE, ["размер", "размеры", "размер мм", "размеры мм", "длина", "длина мм", "ширина мм", "ширина", "высота", "высота мм", "стекла", "габариты", "габариты мм", "мм"]),
-        HeaderSpec(CellKind.BARCODE, ["штрихкод", "шк", "штрих"]),
-        HeaderSpec(CellKind.MARKING, ["маркировка", "маркир"]),
-        HeaderSpec(CellKind.NAME, ["имя:"]),
-        HeaderSpec(CellKind.AUFBAU, ["aufbau:"]),
-        HeaderSpec(CellKind.THICKNESS, ["толщина:"])
-    ])
+class ParserPipeline:
+    @classmethod
+    def build_default_headers(cls) -> TextMatcher:
+        return TextMatcher([
+            TextSpec(CellKind.MATERIAL, CellRole.HEADER, ["наименование", "обозначение", "номенклатура", "артикул", "тип пакета", "формула", "формула заполнения", "формула сп"]),
+            TextSpec(CellKind.AMOUNT, CellRole.HEADER, ["кол-во", "количество", "кол-во(шт)", "количество(шт)", "колич", "n", "количес", "шт"]),
+            TextSpec(CellKind.SIZE, CellRole.HEADER, ["размер", "размеры", "размер мм", "размеры мм", "длина", "длина мм", "ширина мм", "ширина", "высота", "высота мм", "стекла", "габариты", "габариты мм", "мм"]),
+            TextSpec(CellKind.BARCODE, CellRole.HEADER, ["штрихкод", "шк", "штрих"]),
+            TextSpec(CellKind.MARKING, CellRole.HEADER, ["маркировка", "маркир"]),
+            TextSpec(CellKind.NAME, CellRole.HEADER, ["имя:"]),
+            TextSpec(CellKind.AUFBAU, CellRole.HEADER, ["aufbau:"]),
+            TextSpec(CellKind.THICKNESS, CellRole.HEADER, ["толщина:"]),
+            TextSpec(CellKind.ITOGO, CellRole.UNKNOWN, ["итого", "итого:"])
+        ])
 
+    @classmethod
+    def read_workbook(cls, wb: Workbook) -> list[SparseTable]:
+        # report = WorkbookReport(wb.name)
+        tables: list[SparseTable] = []
+        for subtable in wb.sheets:
+            # report.add_sheet(name=subtable.name, nrows=subtable.nrows, ncols=subtable.ncols)
+            # report.add_cell_on_last_sheet(cell.row, cell.col, None if new_cell is None else new_cell.value)
+            keeped_rows, keeped_cols = subtable.normalize()
+            # report.last_table_normalized(subtable.nrows, subtable.ncols, keeped_rows, keeped_cols)
+            if not subtable.empty:
+                tables.append(subtable)
+            else:
+                print(f"WARN: Empty sheet '{subtable.name}' in the workbook '{wb.name}'")
+        return tables
 
-engine = AnnotateEngine(build_default_actions(build_default_headers()))
+    @classmethod
+    def run(cls, wb: Workbook) -> None:
+        actions = build_default_actions(cls.build_default_headers())
 
+        tables = cls.read_workbook(wb)
+        annotated_tables_generator = (AnnotationPipeline.run(actions, t) for t in tables)
 
-def annotate_table(table: SparseTable) -> Annotation:
-    return engine.make_annotations(table)
-
-
-def make_stats(annotations: Annotation) -> Stats:
-    return engine.build_stats(annotations)
-
-
-def read(wb: Workbook) -> tuple[WorkbookReport, list[SparseTable]]:
-    report = WorkbookReport(wb.name)
-    tables: list[SparseTable] = []
-    for subtable in wb.sheets:
-        report.add_sheet(name=subtable.name, nrows=subtable.nrows, ncols=subtable.ncols)
-        # report.add_cell_on_last_sheet(cell.row, cell.col, None if new_cell is None else new_cell.value)
-        keeped_rows, keeped_cols = subtable.normalize()
-        report.last_table_normalized(subtable.nrows, subtable.ncols, keeped_rows, keeped_cols)
-        if not subtable.empty:
-            tables.append(subtable)
-        else:
-            print(f"WARN: Empty sheet '{subtable.name}' in the workbook '{wb.name}'")
-    return report, tables
+        for annotated_table in annotated_tables_generator:
+            ...
