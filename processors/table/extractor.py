@@ -1,71 +1,44 @@
-from collections.abc import Generator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
-from table.annotate import Annotation, CellKind, CellRole, Stats
-from table.loader import SparseTable
+from table.annotate import AnnotatedTable, CellKind, CellRole, ResCell
 
 
-@dataclass(frozen=True, slots=True)
-class ResCell:
-    value: int | str | tuple[int, int]
-    row: int
-    col: int
-    kind: CellKind
-    role: CellRole
+class TableEngine:
+    def __init__(self, annotated_table: AnnotatedTable) -> None:
+        self.table = annotated_table
 
+    def cell(self, row: int, col: int) -> ResCell | None:
+        if 0 <= row < self.table.nrows and 0 <= col < self.table.ncols:
+            return self.table.table[row][col]
+        return None
 
+    def range_rows(self) -> range:
+        return range(self.table.nrows)
 
-@dataclass(frozen=True)
-class Source:
-    table: SparseTable
-    annotation: Annotation
-    stats: Stats
+    def range_cols(self) -> range:
+        return range(self.table.ncols)
 
-    def get_cell(self, row: int, col: int) -> ResCell | None:
-        origin_cell = self.table.get_cell(row, col)
-        ann_cell = self.annotation.get_cell(row, col)
+    def row_roles(self, row: int) -> set[CellRole]:
+        return self.table.stats.roles_in_row.get(row, set())
 
-        if origin_cell.value is None:
-            return None
+    def row_kinds(self, row: int) -> set[CellRole]:
+        return self.table.stats.roles_in_row.get(row, set())
 
-        if ann_cell is None:
-            return ResCell(
-                value=origin_cell.value,
-                row=origin_cell.row,
-                col=origin_cell.col,
-                kind=CellKind.UNKNOWN,
-                role=CellRole.UNKNOWN
-            )
+    def col_roles(self, col: int) -> set[CellRole]:
+        return self.table.stats.roles_in_row.get(col, set())
 
-        return ResCell(
-            value=origin_cell.value if ann_cell.value is None else ann_cell.value,
-            row=origin_cell.row,
-            col=origin_cell.col,
-            kind=ann_cell.kind,
-            role=ann_cell.role
-        )
-
-    def iter_rows(self) -> Generator[tuple[int, Generator], None, None]:
-        for ir in range(self.table.nrows):
-            yield ir, self.iter_through_row(ir)
-
-    def iter_through_row(self, row: int) -> Generator[tuple[int, ResCell | None], None, None]:
-        for ic in range(self.table.ncols):
-            yield ic, self.get_cell(row, ic)
+    def col_kinds(self, col: int) -> set[CellKind]:
+        return self.table.stats.kinds_in_col.get(col, set())
 
     def header_in_row(self, row: int) -> bool:
-        return self.stats.header_in_row(row)
+        return CellRole.HEADER in self.table.stats.roles_in_row.get(row, {})
 
-    def find_headers_in_row(self, row: int) -> dict[int, ResCell]:
-        result = {}
-        for ic, cell in self.iter_through_row(row):
-            if cell is not None and cell.role == CellRole.HEADER:
-                result[ic] = cell
-        return result
+    def header_in_col(self, col: int) -> bool:
+        return CellRole.HEADER in self.table.stats.roles_in_col.get(col, {})
 
 
-class Direct(str, Enum):
+class Direction(Enum):
     VERTICAL = "vertical"
     HORIZONTAL = "horizontal"
 
@@ -73,153 +46,121 @@ class Direct(str, Enum):
 @dataclass(frozen=True)
 class FieldSpec:
     kind: CellKind
-    direction: Direct
-    roles: frozenset[CellRole]
-    empty_allowed: bool
-
-
-class FieldsRegistry:
-    def __init__(self, specs: list[FieldSpec]) -> None:
-        self.specs = {spec.kind: spec for spec in specs}
-
-    def by_kind(self, kind: CellKind) -> FieldSpec | None:
-        return self.specs.get(kind)
-
-    def direction_by_kind(self, kind: CellKind) -> Direct | None:
-        spec = self.specs.get(kind)
-        if spec is None:
-            return spec
-        return spec.direction
-
-
-default_registry = FieldsRegistry([
-    FieldSpec(CellKind.AUFBAU, Direct.HORIZONTAL, frozenset({CellRole.LABEL}), False),
-    FieldSpec(CellKind.NAME, Direct.HORIZONTAL, frozenset({CellRole.LABEL}), False),
-    FieldSpec(CellKind.THICKNESS, Direct.HORIZONTAL, frozenset({CellRole.LABEL}), False),
-    FieldSpec(CellKind.MATERIAL, Direct.VERTICAL, frozenset({CellRole.LABEL}), False),
-    FieldSpec(CellKind.AMOUNT, Direct.VERTICAL, frozenset({CellRole.NUMERIC}), False),
-    FieldSpec(CellKind.SIZE, Direct.VERTICAL, frozenset({CellRole.NUMERIC}), False),
-    FieldSpec(CellKind.BARCODE, Direct.VERTICAL, frozenset({CellRole.NUMERIC, CellRole.LABEL}), True),
-    FieldSpec(CellKind.MARKING, Direct.VERTICAL, frozenset({CellRole.NUMERIC, CellRole.LABEL}), True),
-])
-
-
-@dataclass(frozen=True)
-class HeaderSpec:
-    fields: list[FieldSpec]
-
-    def kind_in(self, kind) -> bool:
-        for field in self.fields:
-            if field.kind == kind:
-                return True
-        return False
-
-
-class HeaderRegistry:
-    def __init__(self, specs: list[HeaderSpec]) -> None:
-        self.specs = specs
-
-    def match(self, cells: list[ResCell]) -> list[HeaderSpec]:
-
+    roles: set[CellRole]
+    direction: Direction
+    none_allowed: bool
 
 
 @dataclass
 class Field:
-    spec: FieldSpec
+    index: int
     sources: list[tuple[int, int]]
-
-    @property
-    def kind(self) -> CellKind:
-        return self.spec.kind
+    spec: FieldSpec
 
 
-class FieldsPipeline:
+class FieldsRegistry:
+    def __init__(self, specs: list[FieldSpec]) -> None:
+        self.specs = specs
+        self.by_kind = {spec.kind: spec for spec in specs}
+
+    def get_by_kind(self, kind: CellKind) -> FieldSpec | None:
+        return self.by_kind.get(kind)
+
+
+class ExtractorPipeline:
     @classmethod
-    def header_to_field(cls, cell: ResCell) -> Field | None:
-        spec = default_registry.by_kind(cell.kind)
-        if spec is None:
-            return None
-        return Field(spec, [(cell.row, cell.col)])
+    def build_default_fields_registry(cls) -> FieldsRegistry:
+        return FieldsRegistry([
+            FieldSpec(CellKind.MATERIAL, {CellRole.LABEL}, Direction.VERTICAL, False),
+            FieldSpec(CellKind.SIZE, {CellRole.SIZES, CellRole.NUMERIC}, Direction.VERTICAL, False),
+            FieldSpec(CellKind.AMOUNT, {CellRole.NUMERIC}, Direction.VERTICAL, False),
+            FieldSpec(CellKind.BARCODE, {CellRole.LABEL, CellRole.NUMERIC}, Direction.VERTICAL, True),
+            FieldSpec(CellKind.MARKING, {CellRole.LABEL, CellRole.NUMERIC}, Direction.VERTICAL, True),
+        ])
 
+    def __init__(self, annotated_table: AnnotatedTable) -> None:
+        self.engine = TableEngine(annotated_table)
+        self.fregistry = self.build_default_fields_registry()
 
-    @classmethod
-    def headers_to_fields(cls, headers: dict[int, ResCell]) -> dict[int, Field]:
-        result = {}
-        for ir, cell in headers.items():
-            field = cls.header_to_field(cell)
-            if field is not None:
-                result[ir] = field
-        return result
+    def mark_header_rows(self) -> list[int]:
+        return [irow for irow in self.engine.range_rows() if self.engine.header_in_row(irow)]
 
+    def mark_header_cols(self) -> list[int]:
+        return [icol for icol in self.engine.range_cols() if self.engine.header_in_col(icol)]
 
-    @classmethod
-    def find_target_headers(cls, source: Source) -> dict[int, dict[int, Field]]:
-        target_rows = {}
-        for ir, _ in source.iter_rows():
-            if source.header_in_row(ir):
-                headers = source.find_headers_in_row(ir)
-                target_rows[ir] = cls.headers_to_fields(headers)
-        return target_rows
+    def make_fields_in_row(self, irow: int, hcols: list[int]) -> dict[int, Field]:
+        fields = {}
+        for icol in hcols:
+            cell = self.engine.cell(irow, icol)
+            if cell is None:
+                break
+            if cell.role is CellRole.HEADER:
+                spec = self.fregistry.get_by_kind(cell.kind)
 
+                if spec is None:
+                    continue
 
-    @classmethod
-    def merge_fields(cls, up_field: Field | None, low_field: Field | None) -> Field | None:
-        if up_field is None and low_field is None:
-            return None
-        if up_field is not None and low_field is not None:
-            if up_field.kind == low_field.kind:
-                return Field(low_field.spec, up_field.sources + low_field.sources)
-            return None
+                fields[icol] = Field(
+                    icol,
+                    [(irow, icol)],
+                    spec
+                )
+        return fields
 
-        if up_field:
-            return up_field
-        return low_field
+    def make_fields(self, hrows: list[int], hcols: list[int]) -> dict[int, dict[int, Field]]:
+        fields = {}
+        for irow in hrows:
+            fields[irow] = self.make_fields_in_row(irow, hcols)
 
+        return fields
 
-    @classmethod
-    def merge_rows(cls, upper_row: dict[int, Field], lower_row: dict[int, Field]) -> dict[int, Field] | None:
-        keys = set(upper_row.keys()) | set(lower_row.keys())
-        result = {}
-        for key in keys:
-            up = upper_row.get(key)
-            low = lower_row.get(key)
-            merged_cells = cls.merge_fields(up, low)
-            if merged_cells is None:
-                return None
-            result[key] = merged_cells
-        return result
+    def size_pair(self, fields: dict[int, dict[int, Field]]):
+        def check_brother(ir: int, ic: int) -> bool:
+            right_cell = self.engine.cell(ir, ic + 1)
+            if right_cell is None or right_cell.kind != CellKind.EMPTY:
+                return False
 
+            cell = self.engine.cell(ir + 1, ic + 1)
+            while cell is not None:
+                left_cell = self.engine.cell(cell.row, cell.col - 1)
+                if left_cell is None:
+                    break
 
-    @classmethod
-    def merge_target_headers(cls, target_headers: dict[int, dict[int, Field]]) -> dict[int, dict[int, Field]]:
-        if len(target_headers) < 2:
-            return target_headers
+                if cell.role == CellRole.NUMERIC and left_cell.role == CellRole.NUMERIC:
+                    return True
 
-        res = {}
-        rows = list(target_headers.items())
-        last_row = rows[0]
-        for ir, row_headers in rows[1:]:
-            if ir - last_row[0] == 1:
-                merged = cls.merge_rows(last_row[1], row_headers)
-                if merged is None:
-                    res[last_row[0]] = last_row[1]
-                    last_row = (ir, row_headers)
-                else:
-                    last_row = (ir, merged)
-            else:
-                res[last_row[0]] = last_row[1]
-                last_row = (ir, row_headers)
-        res[last_row[0]] = last_row[1]
-        return res
+                if cell.kind == CellKind.EMPTY:
+                    cell = self.engine.cell(cell.row + 1, cell.col)
+                    continue
 
-    @classmethod
-    def empty_material_rule(cls, source: Source, headers: dict[int, dict[int, Field]]) -> dict[int, dict[int, Field]]:
-        for ir, row in headers.items():
-            for ic, field in row.items():
-                if field.kind == CellKind.SIZE
+                break
+            return False
 
-    @classmethod
-    def run(cls, source: Source) -> dict[int, dict[int, Field]]:
-        target_headers = cls.find_target_headers(source)
-        merged_fields = cls.merge_target_headers(target_headers)
-        return merged_fields
+        new_fields = {r: dict(row) for r, row in fields.items()}
+        for irow, row in fields.items():
+            for icol, field in row.items():
+                if field.spec.kind == CellKind.SIZE and check_brother(irow, icol):
+                    spec = self.fregistry.get_by_kind(CellKind.SIZE)
+
+                    if spec is None:
+                        return fields
+
+                    new_fields[irow][icol + 1] = Field(
+                        icol + 1,
+                        [(irow, icol)],
+                        spec
+                    )
+
+        return {
+            irow: {icol: row[icol] for icol in sorted(row)}
+            for irow, row in new_fields.items()
+        }
+
+    def run(self) -> None:
+        header_rows = self.mark_header_rows()
+        header_cols = self.mark_header_cols()
+
+        fields_matrix = self.make_fields(header_rows, header_cols)
+        print(fields_matrix)
+        size_paired_fields = self.size_pair(fields_matrix)
+        print(size_paired_fields)

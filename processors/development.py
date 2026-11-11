@@ -8,16 +8,6 @@ from table import (
 )
 from table import loader as tl
 from table import parser_v7 as tp
-from table.extractor import FieldsPipeline, Source
-from table.puller import (
-    Scheme,
-    # Source,
-    clean_dirty_tables,
-    clean_empty_tables,
-    get_data_by_horizontal_chains,
-    make_horizontal_chains,
-    merge_chains_in_table,
-)
 
 
 def test_callculation_table():
@@ -171,8 +161,8 @@ def mainv5():
 
 
 def mainv5_one_file():
-    # input = Path("Бланк заявки Иван Баня 26.02.2026.xls")
-    input = Path("Заявка на стеклопакеты часть 4.xlsx")
+    input = Path("Бланк заявки Иван Баня 26.02.2026.xls")
+    # input = Path("Заявка на стеклопакеты часть 4.xlsx")
     # input = Path("Заявка 17 М1.xlsx")  # for merged materials
     # input = Path("Заявка М1 на СП от 26.02.26.xlsx")  # two tables on nearest rows
     # input = Path("Заявка на СП захватка №2.xlsx")
@@ -201,22 +191,24 @@ def mainv5_one_file():
 
     print(data.name, data.fmt)
 
-    report, tables = tp.read(data)
+    tp.ParserPipeline.run(data)
+
+    # report, tables = tp.(data)
 
     # for sheet in report.sheets:
     #     print(sheet.rows_match)
     #     print(sheet.cols_match)
     #     print("\n")
 
-    print(len(tables))
-    for table in tables:
-        ann = tp.annotate_table(table)
-        stats = tp.make_stats(ann)
-        source = Source(table, ann, stats)
-        headers = FieldsPipeline.run(source)
-        for ir, row in headers.items():
-            print(ir, {ic: col.kind for ic, col in row.items()})
-        print("\n")
+    # print(len(tables))
+    # for table in tables:
+    #     ann = tp.annotate_table(table)
+    #     stats = tp.make_stats(ann)
+    #     source = Source(table, ann, stats)
+    #     headers = FieldsPipeline.run(source)
+    #     for ir, row in headers.items():
+    #         print(ir, {ic: col.kind for ic, col in row.items()})
+    #     print("\n")
 
     # with open(output / Path(f"{report.name}.html"), "w") as file:
     #     file.write(report.to_html())

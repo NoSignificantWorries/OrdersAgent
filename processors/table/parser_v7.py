@@ -1,13 +1,7 @@
 from table.extractor import CellRole
 
-from .annotate import (
-    AnnotatedTable,
-    AnnotationPipeline,
-    CellKind,
-    TextMatcher,
-    TextSpec,
-    build_default_actions,
-)
+from .annotate import AnnotationPipeline, CellKind, TextMatcher, TextSpec
+from .extractor import ExtractorPipeline
 from .loader import SparseTable, Workbook
 from .report import WorkbookReport
 
@@ -44,10 +38,10 @@ class ParserPipeline:
 
     @classmethod
     def run(cls, wb: Workbook) -> None:
-        actions = build_default_actions(cls.build_default_headers())
+        text_matcher = cls.build_default_headers()
 
         tables = cls.read_workbook(wb)
-        annotated_tables_generator = (AnnotationPipeline.run(actions, t) for t in tables)
+        annotated_tables_generator = (AnnotationPipeline(text_matcher, t).run() for t in tables)
 
         for annotated_table in annotated_tables_generator:
-            ...
+            extracted_data = ExtractorPipeline(annotated_table).run()

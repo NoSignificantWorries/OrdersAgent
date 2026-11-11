@@ -106,35 +106,6 @@ class TextMatcher:
         return self.classify_text(value)
 
 
-def build_default_actions(matcher: TextMatcher) -> list[Action]:
-    pattern = re.compile(r"^\s*([\d\s]+(?:[.,]\d+)?)\s*[xXхХ*×]\s*([\d\s]+(?:[.,]\d+)?)\s*$")
-
-    def is_sizes(value: Any) -> bool:
-        return bool(isinstance(value, str) and pattern.fullmatch(value))
-
-    def transform_sizes(value: Any) -> tuple[int, int] | None:
-        match = pattern.match(value)
-        if not match:
-            return None
-        try:
-            w = int(float(match.group(1).replace(" ", "").replace(",", ".")))
-            h = int(float(match.group(2).replace(" ", "").replace(",", ".")))
-            return w, h
-        except ValueError:
-            return None
-
-    return [
-        Action("int", lambda val: isinstance(val, int),
-            lambda _: (CellRole.NUMERIC, CellKind.UNKNOWN), priority=200),
-        Action("sizes", is_sizes,
-            lambda _: (CellRole.SIZES, CellKind.UNKNOWN),
-            transform_sizes, priority=100),
-        Action("text", lambda val: isinstance(val, str) and matcher.classify_text(val) is not None,
-            lambda val: (lambda cls: (cls.role, cls.kind))(matcher.classify_text(val)),
-            priority=50),
-        Action("str", lambda val: isinstance(val, str),
-            lambda _: (CellRole.LABEL, CellKind.UNKNOWN), priority=30)
-    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,10 +119,10 @@ class ResCell:
 
 @dataclass(frozen=True)
 class Stats:
-    roles_in_row: dict[int, frozenset[CellRole]]
-    roles_in_col: dict[int, frozenset[CellRole]]
-    kinds_in_row: dict[int, frozenset[CellRole]]
-    kinds_in_col: dict[int, frozenset[CellRole]]
+    roles_in_row: dict[int, set[CellRole]]
+    roles_in_col: dict[int, set[CellRole]]
+    kinds_in_row: dict[int, set[CellKind]]
+    kinds_in_col: dict[int, set[CellKind]]
 
 
 @dataclass(frozen=True)
@@ -165,10 +136,46 @@ class AnnotatedTable:
 
 class AnnotationPipeline:
     @classmethod
-    def make_annotations(cls, actions: list[Action], table: SparseTable) -> list[list[ResCell]]:
-        res_table = [[ResCell(None, irow, icol) for icol in range(table.ncols)] for irow in range(table.nrows)]
-        for row, col, cell in table.iter_cells():
-            for action in actions:
+    def build_default_actions(cls, matcher: TextMatcher) -> list[Action]:
+        pattern = re.compile(r"^\s*([\d\s]+(?:[.,]\d+)?)\s*[xXхХ*×]\s*([\d\s]+(?:[.,]\d+)?)\s*$")
+
+        def is_sizes(value: Any) -> bool:
+            return bool(isinstance(value, str) and pattern.fullmatch(value))
+
+        def transform_sizes(value: Any) -> tuple[int, int] | None:
+            match = pattern.match(value)
+            if not match:
+                return None
+            try:
+                w = int(float(match.group(1).replace(" ", "").replace(",", ".")))
+                h = int(float(match.group(2).replace(" ", "").replace(",", ".")))
+                return w, h
+            except ValueError:
+                return None
+
+        return [
+            Action("int", lambda val: isinstance(val, int),
+                lambda _: (CellRole.NUMERIC, CellKind.UNKNOWN), priority=200),
+            Action("sizes", is_sizes,
+                lambda _: (CellRole.SIZES, CellKind.UNKNOWN),
+                transform_sizes, priority=100),
+            Action("text", lambda val: isinstance(val, str) and matcher.classify_text(val) is not None,
+                lambda val: (lambda cls: (cls.role, cls.kind))(matcher.classify_text(val)),
+                priority=50),
+            Action("str", lambda val: isinstance(val, str),
+                lambda _: (CellRole.LABEL, CellKind.UNKNOWN), priority=30)
+        ]
+
+    def __init__(self, text_matcher: TextMatcher, table: SparseTable) -> None:
+        self.text_matcher = text_matcher
+        self.actions = self.build_default_actions(self.text_matcher)
+        self.actions = sorted(self.actions, key=lambda act: act.priority, reverse=True)
+        self.table = table
+
+    def make_annotations(self) -> list[list[ResCell]]:
+        res_table = [[ResCell(None, irow, icol) for icol in range(self.table.ncols)] for irow in range(self.table.nrows)]
+        for row, col, cell in self.table.iter_cells():
+            for action in self.actions:
 
                 if not action.trigger(cell.value):
                     continue
@@ -190,10 +197,10 @@ class AnnotationPipeline:
 
     @classmethod
     def make_stats(cls, table: list[list[ResCell]]) -> Stats:
-        per_row_roles = {}
-        per_col_roles = {}
-        per_row_kinds = {}
-        per_col_kinds = {}
+        per_row_roles: dict[int, set[CellRole]] = {}
+        per_col_roles: dict[int, set[CellRole]] = {}
+        per_row_kinds: dict[int, set[CellKind]] = {}
+        per_col_kinds: dict[int, set[CellKind]] = {}
         for irow, row in enumerate(table):
             for icol, cell in enumerate(row):
 
@@ -214,16 +221,14 @@ class AnnotationPipeline:
             per_col_kinds
         )
 
-    @classmethod
-    def run(cls, actions: list[Action], table: SparseTable) -> AnnotatedTable:
-        sorted_actions = sorted(actions, key=lambda act: act.priority, reverse=True)
-        annotated_cells = cls.make_annotations(sorted_actions, table)
-        stats = cls.make_stats(annotated_cells)
+    def run(self) -> AnnotatedTable:
+        annotated_cells = self.make_annotations()
+        stats = self.make_stats(annotated_cells)
 
         return AnnotatedTable(
-            table.name,
-            table.nrows,
-            table.ncols,
+            self.table.name,
+            self.table.nrows,
+            self.table.ncols,
             annotated_cells,
             stats
         )
