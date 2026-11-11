@@ -153,18 +153,42 @@
                     >
                         <div class="email-item-subject-row">
                             <div class="subject">${escapeHtml(email.subject)}</div>
-                            ${email.has_comment
-                                ? `
-                                    <span class="email-item-comment-indicator" aria-hidden="true">
-                                        <img
-                                            src="/static/images/comment.svg"
-                                            alt=""
-                                            class="email-item-comment-indicator-icon"
+
+                            <div class="email-item-indicators">
+                                ${email.is_favorite_sender
+                                    ? `
+                                        <span
+                                            class="email-item-favorite-indicator"
+                                            title="Избранный отправитель"
+                                            role="img"
+                                            aria-label="Избранный отправитель"
                                         >
-                                    </span>
-                                `
-                                : ""
-                            }
+                                            <svg
+                                                class="email-item-favorite-icon"
+                                                viewBox="0 0 24 24"
+                                                aria-hidden="true"
+                                                focusable="false"
+                                            >
+                                                <path d="M12 3 14.78 8.63 21 9.54 16.5 13.93 17.56 20.13 12 17.2 6.44 20.13 7.5 13.93 3 9.54 9.22 8.63Z"></path>
+                                            </svg>
+                                        </span>
+                                    `
+                                    : ""
+                                }
+
+                                ${email.has_comment
+                                    ? `
+                                        <span class="email-item-comment-indicator" aria-hidden="true">
+                                            <img
+                                                src="/static/images/comment.svg"
+                                                alt=""
+                                                class="email-item-comment-indicator-icon"
+                                            >
+                                        </span>
+                                    `
+                                    : ""
+                                }
+                            </div>
                         </div>
 
                         <div class="email-item-header">

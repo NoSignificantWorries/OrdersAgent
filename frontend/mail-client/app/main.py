@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import os
 
 from app.config import settings
-from app.routers import auth, queue, me, sent, mappings
+from app.routers import auth, queue, me, sent, mappings, favorite_senders
 
 app = FastAPI(
     title=settings.app_name,
@@ -21,6 +21,7 @@ app.include_router(queue.router)
 app.include_router(sent.router)
 app.include_router(me.router)
 app.include_router(mappings.router)
+app.include_router(favorite_senders.router)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -104,6 +105,24 @@ async def materials_page(request: Request):
             "request": request,
             "user": user,
             "current_page": "materials",
+        },
+    )
+
+
+@app.get("/favorites", response_class=HTMLResponse)
+async def favorites_page(request: Request):
+    """Общий список избранных почтовых адресов."""
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="favorites.html",
+        context={
+            "request": request,
+            "user": user,
+            "current_page": "favorites",
         },
     )
 

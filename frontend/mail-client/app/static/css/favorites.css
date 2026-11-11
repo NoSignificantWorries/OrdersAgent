@@ -1,0 +1,122 @@
+/* Дополнения к оформлению справочников из materials.css */
+
+.favorites-app-container .favorites-search-input {
+    padding-left: 14px;
+}
+
+/* Используем собственную кнопку очистки поиска. */
+.favorites-app-container .favorites-search-input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+}
+
+.favorites-app-container .favorites-table {
+    min-width: 780px;
+}
+
+.favorites-app-container .favorites-email-heading {
+    width: 34%;
+}
+
+.favorites-app-container .favorites-email-cell {
+    color: #1e293b;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.favorites-app-container .favorites-comment-cell {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.favorites-app-container .materials-actions-heading,
+.favorites-app-container .materials-actions-cell {
+    width: 230px;
+}
+
+.favorites-app-container .favorites-comment-input {
+    min-height: 76px;
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.45;
+}
+
+.favorites-app-container .favorites-edit-btn,
+.favorites-app-container .favorites-delete-btn {
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #475569;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.favorites-app-container .favorites-edit-btn:hover {
+    border-color: #a5b4fc;
+    background: #eef2ff;
+    color: #4338ca;
+}
+
+.favorites-app-container .favorites-delete-btn {
+    border-color: #fecaca;
+    color: #dc2626;
+}
+
+.favorites-app-container .favorites-delete-btn:hover {
+    border-color: #fca5a5;
+    background: #fef2f2;
+}
+
+.favorites-app-container .favorites-edit-btn:focus-visible,
+.favorites-app-container .favorites-delete-btn:focus-visible {
+    outline: 2px solid #667eea;
+    outline-offset: 2px;
+}
+
+.favorites-app-container .favorites-edit-btn:disabled,
+.favorites-app-container .favorites-delete-btn:disabled,
+.favorites-app-container .materials-retry-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.favorites-app-container .favorites-error {
+    margin: 0 0 16px;
+    padding: 10px 14px;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 14px;
+    line-height: 1.45;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.favorites-app-container #favorites-error-text {
+    white-space: pre-line;
+}
+
+.favorites-app-container .favorites-error .materials-retry-btn {
+    display: block;
+    margin-top: 10px;
+}
+
+.favorites-app-container .favorites-error[hidden],
+.favorites-app-container .favorites-error .materials-retry-btn[hidden] {
+    display: none;
+}
+
+.favorites-app-container .favorites-field-hint {
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+.favorites-app-container .favorites-empty-comment {
+    color: #94a3b8;
+}
