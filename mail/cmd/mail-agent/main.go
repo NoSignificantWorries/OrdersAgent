@@ -1,21 +1,21 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
-	"context"
-    "io"
-    "net/http"
-    "strconv"
-    "strings"
-	"fmt"
-	"encoding/json"
 
-    mailsmtp "mail/internal/smtp"
+	mailsmtp "mail/internal/smtp"
 
 	"github.com/joho/godotenv"
 
@@ -28,11 +28,11 @@ import (
 )
 
 func writeJSONError(w http.ResponseWriter, status int, detail string) {
-    w.Header().Set("Content-Type", "application/json; charset=utf-8")
-    w.WriteHeader(status)
-    _ = json.NewEncoder(w).Encode(map[string]string{
-        "detail": detail,
-    })
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"detail": detail,
+	})
 }
 
 func main() {
@@ -49,6 +49,19 @@ func main() {
 		log.Fatalf("db connect: %v", err)
 	}
 	defer db.Conn.Close()
+
+	if rawUserID := os.Getenv("MAIL_LEGACY_AUDIT_USER_ID"); rawUserID != "" {
+		userID, parseErr := strconv.ParseInt(rawUserID, 10, 64)
+		if parseErr != nil || userID <= 0 {
+			log.Fatal("MAIL_LEGACY_AUDIT_USER_ID must be a positive integer")
+		}
+
+		if auditErr := runLegacyAudit(db, cfg, userID); auditErr != nil {
+			log.Fatalf("legacy audit failed: %v", auditErr)
+		}
+
+		return
+	}
 
 	endpoint := os.Getenv("MINIO_ENDPOINT")
 	accessKey := os.Getenv("MINIO_ACCESS_KEY")
@@ -77,7 +90,7 @@ func main() {
 		Host: "smtp.yandex.ru",
 		Port: 465,
 	})
-	
+
 	imapCfg := &config.Config{
 		Host: cfg.Host,
 		Port: cfg.Port,
@@ -97,94 +110,94 @@ func main() {
 		// }
 
 		path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/emails/"), "/")
-        parts := strings.Split(path, "/")
+		parts := strings.Split(path, "/")
 
-        const maxRequestBodySize = 30 << 20 // 30 MB
-        r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+		const maxRequestBodySize = 30 << 20 // 30 MB
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 
-        contentType := r.Header.Get("Content-Type")
+		contentType := r.Header.Get("Content-Type")
 
 		if len(parts) == 2 && parts[1] == "forward-draft" {
-            if r.Method != http.MethodGet && r.Method != http.MethodPost {
-                http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-                return
-            }
+			if r.Method != http.MethodGet && r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
 
-            emailID, err := strconv.ParseInt(parts[0], 10, 64)
-            if err != nil || emailID <= 0 {
-                writeJSONError(w, http.StatusBadRequest, "invalid email id")
-                return
-            }
+			emailID, err := strconv.ParseInt(parts[0], 10, 64)
+			if err != nil || emailID <= 0 {
+				writeJSONError(w, http.StatusBadRequest, "invalid email id")
+				return
+			}
 
-            sourceType := strings.TrimSpace(r.URL.Query().Get("source_type"))
+			sourceType := strings.TrimSpace(r.URL.Query().Get("source_type"))
 
 			draft, err := storage.BuildForwardDraft(db, emailID, sourceType)
-            if err != nil {
-                log.Printf("forward draft failed | email_id=%d err=%v", emailID, err)
-                writeJSONError(w, http.StatusInternalServerError, "failed to build forward draft")
-                return
-            }
+			if err != nil {
+				log.Printf("forward draft failed | email_id=%d err=%v", emailID, err)
+				writeJSONError(w, http.StatusInternalServerError, "failed to build forward draft")
+				return
+			}
 
-            w.Header().Set("Content-Type", "application/json; charset=utf-8")
-            if err := json.NewEncoder(w).Encode(draft); err != nil {
-                log.Printf("forward draft encode failed | email_id=%d err=%v", emailID, err)
-            }
-            return
-        }
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			if err := json.NewEncoder(w).Encode(draft); err != nil {
+				log.Printf("forward draft encode failed | email_id=%d err=%v", emailID, err)
+			}
+			return
+		}
 
 		if len(parts) == 2 && parts[1] == "reply-draft" {
-            if r.Method != http.MethodGet && r.Method != http.MethodPost {
-                http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-                return
-            }
+			if r.Method != http.MethodGet && r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
 
-            emailID, err := strconv.ParseInt(parts[0], 10, 64)
-            if err != nil || emailID <= 0 {
-                writeJSONError(w, http.StatusBadRequest, "invalid email id")
-                return
-            }
+			emailID, err := strconv.ParseInt(parts[0], 10, 64)
+			if err != nil || emailID <= 0 {
+				writeJSONError(w, http.StatusBadRequest, "invalid email id")
+				return
+			}
 
-            sourceType := strings.TrimSpace(r.URL.Query().Get("source_type"))
+			sourceType := strings.TrimSpace(r.URL.Query().Get("source_type"))
 
-            draft, err := storage.BuildReplyDraft(db, emailID, sourceType)
-            if err != nil {
-                log.Printf("reply draft failed | email_id=%d err=%v", emailID, err)
-                writeJSONError(w, http.StatusInternalServerError, "failed to build reply draft")
-                return
-            }
+			draft, err := storage.BuildReplyDraft(db, emailID, sourceType)
+			if err != nil {
+				log.Printf("reply draft failed | email_id=%d err=%v", emailID, err)
+				writeJSONError(w, http.StatusInternalServerError, "failed to build reply draft")
+				return
+			}
 
-            w.Header().Set("Content-Type", "application/json; charset=utf-8")
-            if err := json.NewEncoder(w).Encode(draft); err != nil {
-                log.Printf("reply draft encode failed | email_id=%d err=%v", emailID, err)
-            }
-            return
-        }
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			if err := json.NewEncoder(w).Encode(draft); err != nil {
+				log.Printf("reply draft encode failed | email_id=%d err=%v", emailID, err)
+			}
+			return
+		}
 
 		if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
-        if strings.HasPrefix(contentType, "multipart/form-data") {
-            if err := r.ParseMultipartForm(25 << 20); err != nil {
-                http.Error(w, "invalid multipart form", http.StatusBadRequest)
-                return
-            }
-        } else {
-            if err := r.ParseForm(); err != nil {
-                http.Error(w, "invalid form", http.StatusBadRequest)
-                return
-            }
-        }
+		if strings.HasPrefix(contentType, "multipart/form-data") {
+			if err := r.ParseMultipartForm(25 << 20); err != nil {
+				http.Error(w, "invalid multipart form", http.StatusBadRequest)
+				return
+			}
+		} else {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+		}
 
 		const maxAttachmentsCount = 10
-		const maxAttachmentSize = 10 << 20 // 10 MB
+		const maxAttachmentSize = 10 << 20       // 10 MB
 		const maxTotalAttachmentsSize = 25 << 20 // 25 MB
 
 		const (
-			ErrTooManyFiles        = "много файлов, лимит 10 штук"
-			ErrFileTooLarge        = "вес превышен: файл весит больше 10МБ"
-			ErrTotalSizeExceeded   = "вес превышен: общий вес письма выше 25МБ"
+			ErrTooManyFiles      = "много файлов, лимит 10 штук"
+			ErrFileTooLarge      = "вес превышен: файл весит больше 10МБ"
+			ErrTotalSizeExceeded = "вес превышен: общий вес письма выше 25МБ"
 		)
 
 		readAttachments := func() ([]storage.SendAttachment, error) {
@@ -485,7 +498,6 @@ func main() {
 			log.Fatalf("reply http server: %v", err)
 		}
 	}()
-
 
 	startNewWorkers()
 

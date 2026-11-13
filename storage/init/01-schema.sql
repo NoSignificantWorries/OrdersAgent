@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS emails (
     user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
     mailbox VARCHAR(100) NOT NULL,
     email_uid BIGINT NOT NULL,
+    uid_validity BIGINT,
     message_id TEXT,
     in_reply_to TEXT,
     references_header TEXT,
@@ -82,7 +83,22 @@ CREATE TABLE IF NOT EXISTS emails (
     archived BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
-    UNIQUE(mailbox, email_uid)
+    CONSTRAINT emails_mailbox_uid_validity_uid_key
+    UNIQUE NULLS NOT DISTINCT (mailbox, uid_validity, email_uid)
+);
+
+-- Контрольные точки восстановления входящих писем из INBOX
+CREATE TABLE IF NOT EXISTS mail_sync_state (
+    user_id BIGINT PRIMARY KEY
+        REFERENCES users(id) ON DELETE CASCADE,
+
+    uid_validity BIGINT NOT NULL
+        CHECK (uid_validity BETWEEN 1 AND 4294967295),
+
+    last_reconciled_uid BIGINT NOT NULL
+        CHECK (last_reconciled_uid BETWEEN 0 AND 4294967295),
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Таблица исходящих

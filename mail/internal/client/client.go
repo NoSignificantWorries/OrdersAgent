@@ -3,8 +3,8 @@ package client
 import (
 	"fmt"
 	"log"
+	"sort"
 	"time"
-	//"sort"
 
 	"mail/internal/config"
 
@@ -19,41 +19,59 @@ type Client struct {
 	sessionID   string
 	connectedAt time.Time
 	lastOKAt    time.Time
+	uidValidity uint32
+	uidNext     imap.UID
 }
 
 func (c *Client) SessionID() string {
-    if c == nil {
-        return ""
-    }
-    return c.sessionID
+	if c == nil {
+		return ""
+	}
+	return c.sessionID
 }
 
 func (c *Client) Email() string {
-    if c == nil {
-        return ""
-    }
-    return c.email
+	if c == nil {
+		return ""
+	}
+	return c.email
 }
 
 func (c *Client) ConnectedAt() time.Time {
-    if c == nil {
-        return time.Time{}
-    }
-    return c.connectedAt
+	if c == nil {
+		return time.Time{}
+	}
+	return c.connectedAt
 }
 
 func (c *Client) LastOKAt() time.Time {
-    if c == nil {
-        return time.Time{}
-    }
-    return c.lastOKAt
+	if c == nil {
+		return time.Time{}
+	}
+	return c.lastOKAt
+}
+
+func (c *Client) UIDValidity() uint32 {
+	if c == nil {
+		return 0
+	}
+	return c.uidValidity
+}
+
+// UIDNextAtConnect возвращает UIDNEXT на момент выбора INBOX
+// При подключении, а не постоянно обновляемое значение
+func (c *Client) UIDNextAtConnect() imap.UID {
+	if c == nil {
+		return 0
+	}
+	return c.uidNext
 }
 
 func (c *Client) TouchOK() {
-    if c == nil {
-        return
-    }
-    c.lastOKAt = time.Now()
+	if c == nil {
+		return
+	}
+	c.lastOKAt = time.Now()
 }
 
 // Конструктор по OAuth2 (XOAUTH2).
@@ -76,9 +94,24 @@ func NewOAuth(cfg *config.Config, email, accessToken string) (*Client, error) {
 		return nil, fmt.Errorf("authenticate XOAUTH2: %w", err)
 	}
 
-	if _, err := c.Select("INBOX", nil).Wait(); err != nil {
-		c.Close()
+	selected, err := c.Select("INBOX", nil).Wait()
+	if err != nil {
+		_ = c.Close()
 		return nil, fmt.Errorf("select INBOX: %w", err)
+	}
+
+	if selected.UIDValidity == 0 {
+		_ = c.Close()
+		return nil, fmt.Errorf(
+			"select INBOX: server returned invalid UIDVALIDITY=0",
+		)
+	}
+
+	if selected.UIDNext == 0 {
+		_ = c.Close()
+		return nil, fmt.Errorf(
+			"select INBOX: server did not provide a usable UIDNEXT",
+		)
 	}
 
 	now := time.Now()
@@ -91,117 +124,205 @@ func NewOAuth(cfg *config.Config, email, accessToken string) (*Client, error) {
 		sessionID:   sessionID,
 		connectedAt: now,
 		lastOKAt:    now,
+		uidValidity: selected.UIDValidity,
+		uidNext:     selected.UIDNext,
 	}
 
-	log.Printf("imap client ready | email=%s session_id=%s", email, sessionID)
+	log.Printf(
+		"imap client ready | email=%s session_id=%s uid_validity=%d uid_next=%d",
+		email,
+		sessionID,
+		client.uidValidity,
+		client.uidNext,
+	)
 
 	return client, nil
 }
 
-func (c *Client) FetchUnread() ([]imap.UID, error) {
-    criteria := &imap.SearchCriteria{
-        NotFlag: []imap.Flag{"\\Seen"},
-    }
+// InboxSyncBoundary получает свежие данные INBOX для восстановления
+func (c *Client) InboxSyncBoundary() (
+	uidValidity uint32,
+	uidNext imap.UID,
+	err error,
+) {
+	started := time.Now()
 
-    started := time.Now()
-    log.Printf(
-        "imap search unread start | email=%s session_id=%s age=%s",
-        c.email,
-        c.sessionID,
-        time.Since(c.connectedAt),
-    )
+	status, err := c.conn.Status(
+		"INBOX",
+		&imap.StatusOptions{
+			UIDValidity: true,
+			UIDNext:     true,
+		},
+	).Wait()
+	if err != nil {
+		return 0, 0, fmt.Errorf(
+			"status INBOX: session_id=%s duration=%s: %w",
+			c.sessionID,
+			time.Since(started),
+			err,
+		)
+	}
 
-    searchData, err := c.conn.UIDSearch(criteria, nil).Wait()
-    duration := time.Since(started)
-    if err != nil {
-        return nil, fmt.Errorf(
-            "search unread: session_id=%s duration=%s: %w",
-            c.sessionID,
-            duration,
-            err,
-        )
-    }
+	if status.UIDValidity == 0 || status.UIDNext == 0 {
+		return 0, 0, fmt.Errorf(
+			"status INBOX returned invalid sync data: session_id=%s uid_validity=%d uid_next=%d",
+			c.sessionID,
+			status.UIDValidity,
+			status.UIDNext,
+		)
+	}
 
-    c.TouchOK()
+	if status.UIDValidity != c.uidValidity {
+		return 0, 0, fmt.Errorf(
+			"UIDVALIDITY changed during session: session_id=%s selected=%d current=%d; reconnect required",
+			c.sessionID,
+			c.uidValidity,
+			status.UIDValidity,
+		)
+	}
 
-    uids := searchData.AllUIDs()
-    log.Printf(
-        "imap search unread done | email=%s session_id=%s duration=%s count=%d uids=%v",
-        c.email,
-        c.sessionID,
-        duration,
-        len(uids),
-        uids,
-    )
+	c.TouchOK()
 
-    if len(uids) == 0 {
-        //c.logAllMessagesDiagnostic()
-        return nil, nil
-    }
+	log.Printf(
+		"imap sync boundary | email=%s session_id=%s uid_validity=%d uid_next=%d duration=%s",
+		c.email,
+		c.sessionID,
+		status.UIDValidity,
+		status.UIDNext,
+		time.Since(started),
+	)
 
-    return uids, nil
+	return status.UIDValidity, status.UIDNext, nil
 }
 
-// func (c *Client) logAllMessagesDiagnostic() {
-//     started := time.Now()
+// SearchUIDRange возвращает существующие UID в замкнутом диапазоне.
+// Статус прочтения не учитывается.
+// Тела писем не скачиваются.
+func (c *Client) SearchUIDRange(
+	first imap.UID,
+	last imap.UID,
+) ([]imap.UID, error) {
+	if first == 0 || last == 0 {
+		return nil, fmt.Errorf(
+			"invalid UID range: first=%d last=%d; zero is not allowed",
+			first,
+			last,
+		)
+	}
 
-//     log.Printf(
-//         "imap diagnostic all start | email=%s session_id=%s age=%s",
-//         c.email,
-//         c.sessionID,
-//         time.Since(c.connectedAt),
-//     )
+	if first > last {
+		return nil, fmt.Errorf(
+			"invalid UID range: first=%d exceeds last=%d",
+			first,
+			last,
+		)
+	}
 
-//     allCriteria := &imap.SearchCriteria{}
-//     searchData, err := c.conn.UIDSearch(allCriteria, nil).Wait()
-//     duration := time.Since(started)
-//     if err != nil {
-//         log.Printf(
-//             "imap diagnostic all failed | email=%s session_id=%s duration=%s err=%v",
-//             c.email,
-//             c.sessionID,
-//             duration,
-//             err,
-//         )
-//         return
-//     }
+	var uidSet imap.UIDSet
+	uidSet.AddRange(first, last)
 
-//     c.TouchOK()
+	criteria := &imap.SearchCriteria{
+		UID: []imap.UIDSet{uidSet},
+	}
 
-//     allUIDs := searchData.AllUIDs()
-//     log.Printf(
-//         "imap diagnostic all done | email=%s session_id=%s duration=%s count=%d",
-//         c.email,
-//         c.sessionID,
-//         duration,
-//         len(allUIDs),
-//     )
+	started := time.Now()
 
-//     if len(allUIDs) == 0 {
-//         log.Printf(
-//             "imap diagnostic all empty | email=%s session_id=%s",
-//             c.email,
-//             c.sessionID,
-//         )
-//         return
-//     }
+	log.Printf(
+		"imap sync search start | email=%s session_id=%s first_uid=%d last_uid=%d",
+		c.email,
+		c.sessionID,
+		first,
+		last,
+	)
 
-//     sorted := append([]imap.UID(nil), allUIDs...)
-//     sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	searchData, err := c.conn.UIDSearch(criteria, nil).Wait()
+	if err != nil {
+		return nil, fmt.Errorf(
+			"search UID range %d:%d: session_id=%s duration=%s: %w",
+			first,
+			last,
+			c.sessionID,
+			time.Since(started),
+			err,
+		)
+	}
 
-//     limit := 5
-//     if len(sorted) < limit {
-//         limit = len(sorted)
-//     }
+	uids := searchData.AllUIDs()
 
-//     tail := sorted[len(sorted)-limit:]
-//     log.Printf(
-//         "imap diagnostic recent uids | email=%s session_id=%s recent_uids=%v",
-//         c.email,
-//         c.sessionID,
-//         tail,
-//     )
-// }
+	for _, uid := range uids {
+		if uid < first || uid > last {
+			return nil, fmt.Errorf(
+				"search UID range returned out-of-range UID: session_id=%s requested=%d:%d received=%d",
+				c.sessionID,
+				first,
+				last,
+				uid,
+			)
+		}
+	}
+
+	sort.Slice(uids, func(i, j int) bool {
+		return uids[i] < uids[j]
+	})
+
+	c.TouchOK()
+
+	log.Printf(
+		"imap sync search done | email=%s session_id=%s first_uid=%d last_uid=%d count=%d duration=%s",
+		c.email,
+		c.sessionID,
+		first,
+		last,
+		len(uids),
+		time.Since(started),
+	)
+
+	return uids, nil
+}
+
+func (c *Client) FetchUnread() ([]imap.UID, error) {
+	criteria := &imap.SearchCriteria{
+		NotFlag: []imap.Flag{"\\Seen"},
+	}
+
+	started := time.Now()
+	log.Printf(
+		"imap search unread start | email=%s session_id=%s age=%s",
+		c.email,
+		c.sessionID,
+		time.Since(c.connectedAt),
+	)
+
+	searchData, err := c.conn.UIDSearch(criteria, nil).Wait()
+	duration := time.Since(started)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"search unread: session_id=%s duration=%s: %w",
+			c.sessionID,
+			duration,
+			err,
+		)
+	}
+
+	c.TouchOK()
+
+	uids := searchData.AllUIDs()
+	log.Printf(
+		"imap search unread done | email=%s session_id=%s duration=%s count=%d uids=%v",
+		c.email,
+		c.sessionID,
+		duration,
+		len(uids),
+		uids,
+	)
+
+	if len(uids) == 0 {
+		//c.logAllMessagesDiagnostic()
+		return nil, nil
+	}
+
+	return uids, nil
+}
 
 func (c *Client) FetchMessage(uid imap.UID) (*imapclient.FetchCommand, error) {
 	log.Printf("imap fetch message | email=%s session_id=%s uid=%d", c.email, c.sessionID, uid)
@@ -210,14 +331,14 @@ func (c *Client) FetchMessage(uid imap.UID) (*imapclient.FetchCommand, error) {
 		UID:      true,
 		Envelope: true,
 		BodySection: []*imap.FetchItemBodySection{
-            {
-                Peek: true,
-                Specifier: imap.PartSpecifierHeader,
-            },
-            {
-                Peek: true,
-            },
-        },
+			{
+				Peek:      true,
+				Specifier: imap.PartSpecifierHeader,
+			},
+			{
+				Peek: true,
+			},
+		},
 	}
 
 	c.TouchOK()
@@ -225,33 +346,33 @@ func (c *Client) FetchMessage(uid imap.UID) (*imapclient.FetchCommand, error) {
 }
 
 func (c *Client) MarkRead(uid imap.UID) error {
-    started := time.Now()
+	started := time.Now()
 
-    storeFlags := imap.StoreFlags{
-        Op:    imap.StoreFlagsAdd,
-        Flags: []imap.Flag{"\\Seen"},
-    }
+	storeFlags := imap.StoreFlags{
+		Op:    imap.StoreFlagsAdd,
+		Flags: []imap.Flag{"\\Seen"},
+	}
 
-    log.Printf("imap mark read start | email=%s session_id=%s uid=%d", c.email, c.sessionID, uid)
+	log.Printf("imap mark read start | email=%s session_id=%s uid=%d", c.email, c.sessionID, uid)
 
-    storeCmd := c.conn.Store(imap.UIDSetNum(uid), &storeFlags, nil)
-    if err := storeCmd.Close(); err != nil {
-        return fmt.Errorf("mark read uid=%d session_id=%s duration=%s: %w", uid, c.sessionID, time.Since(started), err)
-    }
+	storeCmd := c.conn.Store(imap.UIDSetNum(uid), &storeFlags, nil)
+	if err := storeCmd.Close(); err != nil {
+		return fmt.Errorf("mark read uid=%d session_id=%s duration=%s: %w", uid, c.sessionID, time.Since(started), err)
+	}
 
-    c.TouchOK()
-    log.Printf("imap mark read done | email=%s session_id=%s uid=%d duration=%s", c.email, c.sessionID, uid, time.Since(started))
-    return nil
+	c.TouchOK()
+	log.Printf("imap mark read done | email=%s session_id=%s uid=%d duration=%s", c.email, c.sessionID, uid, time.Since(started))
+	return nil
 }
 
 func (c *Client) Close() error {
-    log.Printf("imap client close | email=%s session_id=%s age=%s last_ok_ago=%s",
-        c.email,
-        c.sessionID,
-        time.Since(c.connectedAt),
-        time.Since(c.lastOKAt),
-    )
-    return c.conn.Close()
+	log.Printf("imap client close | email=%s session_id=%s age=%s last_ok_ago=%s",
+		c.email,
+		c.sessionID,
+		time.Since(c.connectedAt),
+		time.Since(c.lastOKAt),
+	)
+	return c.conn.Close()
 }
 
 type xoauth2Client struct {
