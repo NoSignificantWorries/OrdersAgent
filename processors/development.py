@@ -161,10 +161,10 @@ def mainv5():
 
 
 def mainv5_one_file():
-    input = Path("Бланк заявки Иван Баня 26.02.2026.xls")
+    # input = Path("Бланк заявки Иван Баня 26.02.2026.xls")
     # input = Path("Заявка на стеклопакеты часть 4.xlsx")
     # input = Path("Заявка 17 М1.xlsx")  # for merged materials
-    # input = Path("Заявка М1 на СП от 26.02.26.xlsx")  # two tables on nearest rows
+    input = Path("Заявка М1 на СП от 26.02.26.xlsx")  # two tables on nearest rows
     # input = Path("Заявка на СП захватка №2.xlsx")
     # input = Path("Заявка на СП захватка №3.xlsx")
     # input = Path("27.01.26 г.Новосибирск, НА СИЛЬВЕР 70 только низ.xls")  # one column size
