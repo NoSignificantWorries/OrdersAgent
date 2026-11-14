@@ -21,25 +21,25 @@ class TableEngine:
             return self.table.table[row][col]
         return None
 
-    def range_rows(self) -> range:
-        return range(self.table.nrows)
+    def range_rows(self, start: int = 0) -> range:
+        return range(start, self.table.nrows)
 
-    def range_cols(self) -> range:
-        return range(self.table.ncols)
+    def range_cols(self, start: int = 0) -> range:
+        return range(start, self.table.ncols)
 
     def row_roles(self, row: int) -> set[CellRole]:
         if self._check_col(row + 1):
             return self.table.stats.roles_in_row.get(row, set())
         return set()
 
-    def row_kinds(self, row: int) -> set[CellRole]:
+    def row_kinds(self, row: int) -> set[CellKind]:
         if self._check_col(row + 1):
-            return self.table.stats.roles_in_row.get(row, set())
+            return self.table.stats.kinds_in_row.get(row, set())
         return set()
 
     def col_roles(self, col: int) -> set[CellRole]:
         if self._check_col(col + 1):
-            return self.table.stats.roles_in_row.get(col, set())
+            return self.table.stats.roles_in_col.get(col, set())
         return set()
 
     def col_kinds(self, col: int) -> set[CellKind]:
@@ -167,6 +167,7 @@ class HeaderType(Enum):
 @dataclass(frozen=True)
 class HeaderSpec:
     type: HeaderType
+    direction: Direction
     scheme: dict[CellKind, tuple[int, int]]
     priority: int = 0
 
@@ -236,6 +237,16 @@ class Header:
     specs: list[HeaderSpec]
 
 
+@dataclass
+class Block:
+    header: Header
+    data: dict[int, list[ResCell]]
+
+    @property
+    def data_size(self) -> int:
+        return len(self.data)
+
+
 class ExtractorPipeline:
     @classmethod
     def build_default_fields_registry(cls) -> FieldsRegistry:
@@ -250,21 +261,21 @@ class ExtractorPipeline:
     @classmethod
     def build_default_headers_registry(cls) -> HeadersRegistry:
         return HeadersRegistry([
-            HeaderSpec(HeaderType.ONE_SIZE_COLUMN, {
+            HeaderSpec(HeaderType.ONE_SIZE_COLUMN, Direction.VERTICAL, {
                 CellKind.MATERIAL: (1, 1),
                 CellKind.SIZE: (1, 1),
                 CellKind.AMOUNT: (1, 1),
                 CellKind.BARCODE: (0, 1),
                 CellKind.MARKING: (0, 1)
             }, priority=200),
-            HeaderSpec(HeaderType.STANDART, {
+            HeaderSpec(HeaderType.STANDART, Direction.VERTICAL, {
                 CellKind.MATERIAL: (1, 1),
                 CellKind.SIZE: (2, 2),
                 CellKind.AMOUNT: (1, 1),
                 CellKind.BARCODE: (0, 1),
                 CellKind.MARKING: (0, 1)
             }, priority=100),
-            HeaderSpec(HeaderType.OKNA_DATA, {
+            HeaderSpec(HeaderType.OKNA_DATA, Direction.VERTICAL, {
                 CellKind.SIZE: (2, 2),
                 CellKind.AMOUNT: (1, 1),
                 CellKind.BARCODE: (0, 1),
@@ -446,6 +457,29 @@ class ExtractorPipeline:
 
         return headers
 
+    def build_block(self, header: Header) -> Block:
+        data: dict[int, list[ResCell]] = {}
+        stop = False
+        for irow in self.engine.range_rows(header.index + 1):
+            data_row: list[ResCell] = []
+            for field in header.fields:
+                data_cell = self.engine.get_cell(irow, field.index)
+                if data_cell is None or self.engine.header_in_row(irow):
+                    stop = True
+                    break
+                data_row.append(data_cell)
+            if stop:
+                break
+            data[irow] = data_row
+        return Block(header, data)
+
+    def build_blocks(self, headers: dict[int, list[Header]]) -> list[Block]:
+        blocks: list[Block] = []
+        for row in headers.values():
+            for header in row:
+                block = self.build_block(header)
+                blocks.append(block)
+        return blocks
 
     def run(self) -> None:
         header_rows = self.mark_header_rows()
@@ -464,7 +498,15 @@ class ExtractorPipeline:
                 print(f"({i}, {j}): {field.index}: {field.sources}: {field.spec.kind.name}")
             print("---")
         headers = self.build_header_objects(merged_rows)
+        print("\n")
         for i, header in headers.items():
             for h in header:
                 for spec in h.specs:
                     print(f"{i} ({spec.type.name}):", [f.spec.kind.name for f in h.fields], spec.valid([f.spec.kind for f in h.fields]))
+            print("---")
+        blocks = self.build_blocks(headers)
+        print("\n")
+        for block in blocks:
+            print(block.header.index)
+            for irow, data_row in block.data.items():
+                print(f"{irow}:", [(data.role.name, data.value) for data in data_row])
