@@ -160,6 +160,8 @@ class FieldsRegistry:
 
 class HeaderType(Enum):
     STANDART = "standart"
+    ONE_SIZE_COLUMN = "one-size-column"
+    OKNA_DATA = "okna-data"
 
 
 @dataclass(frozen=True)
@@ -168,29 +170,70 @@ class HeaderSpec:
     scheme: dict[CellKind, tuple[int, int]]
     priority: int = 0
 
-    def match(self, lst: list[CellKind]) -> bool:
+    def valid(self, lst: list[CellKind]) -> bool:
         counts = Counter(lst)
         if not counts.keys() <= self.scheme.keys():
             return False
-
         for kind, (lo, hi) in self.scheme.items():
             n = counts.get(kind, 0)
             if n < lo or n > hi:
                 return False
+        return True
 
+    def submatch(self, lst: list[CellKind]) -> bool:
+        counts = Counter(lst)
+        for kind, (_, hi) in self.scheme.items():
+            n = counts.get(kind, 0)
+            if n > hi:
+                return False
+        return True
+
+    def full(self, lst: list[CellKind]) -> bool:
+        counts = Counter(lst)
+        for key, (_, hi) in self.scheme.items():
+            n = counts.get(key, 0)
+            if n != hi:
+                return False
         return True
 
 
 class HeadersRegistry:
     def __init__(self, specs: list[HeaderSpec]) -> None:
-        self.specs = sorted(specs, key=lambda s: s.priority)
+        self.specs = sorted(specs, key=lambda s: s.priority, reverse=True)
+        self.kinds = set()
+        for spec in specs:
+            for kind in spec.scheme:
+                self.kinds.add(kind)
 
-    def matched(self, lst: list[CellKind]) -> list[HeaderSpec]:
+    def kind_in(self, kind: CellKind) -> bool:
+        return kind in self.kinds
+
+    def sort_matched(self, lst: list[CellKind], matched: list[HeaderSpec]) -> list[HeaderSpec]:
+        return sorted(
+            matched,
+            key=lambda s: (s.valid(lst), s.priority),
+            reverse=True,
+        )
+
+    def subschemes(self, lst: list[CellKind]) -> list[HeaderSpec]:
         res = []
         for spec in self.specs:
-            if spec.match(lst):
+            if spec.submatch(lst):
                 res.append(spec)
-        return res
+        return self.sort_matched(lst, res)
+
+    def full_matched(self, lst: list[CellKind]) -> HeaderSpec | None:
+        for spec in self.specs:
+            if spec.full(lst):
+                return spec
+        return None
+
+
+@dataclass
+class Header:
+    index: int
+    fields: list[Field]
+    specs: list[HeaderSpec]
 
 
 class ExtractorPipeline:
@@ -207,13 +250,26 @@ class ExtractorPipeline:
     @classmethod
     def build_default_headers_registry(cls) -> HeadersRegistry:
         return HeadersRegistry([
+            HeaderSpec(HeaderType.ONE_SIZE_COLUMN, {
+                CellKind.MATERIAL: (1, 1),
+                CellKind.SIZE: (1, 1),
+                CellKind.AMOUNT: (1, 1),
+                CellKind.BARCODE: (0, 1),
+                CellKind.MARKING: (0, 1)
+            }, priority=200),
             HeaderSpec(HeaderType.STANDART, {
                 CellKind.MATERIAL: (1, 1),
                 CellKind.SIZE: (2, 2),
                 CellKind.AMOUNT: (1, 1),
                 CellKind.BARCODE: (0, 1),
                 CellKind.MARKING: (0, 1)
-            })
+            }, priority=100),
+            HeaderSpec(HeaderType.OKNA_DATA, {
+                CellKind.SIZE: (2, 2),
+                CellKind.AMOUNT: (1, 1),
+                CellKind.BARCODE: (0, 1),
+                CellKind.MARKING: (0, 1)
+            }, priority=50),
         ])
 
     def __init__(self, annotated_table: AnnotatedTable) -> None:
@@ -275,7 +331,7 @@ class ExtractorPipeline:
                 if datacol.watch().role == CellRole.NUMERIC and left.role == CellRole.NUMERIC:
                     return True
 
-                if datacol.kind == CellKind.EMPTY:
+                if datacol.watch().kind == CellKind.EMPTY:
                     datacol.down()
                     continue
 
@@ -349,6 +405,48 @@ class ExtractorPipeline:
         res[last[0]] = last[1]
         return res
 
+    def build_headers_in_row(self, irow: int, row: dict[int, Field]) -> list[Header]:
+        row_headers: list[Header] = []
+
+        last_schemes: list[HeaderSpec] = []
+        fields: list[Field] = []
+        kinds: list[CellKind] = []
+        for field in row.values():
+            fkind = field.spec.kind
+            if not self.hregistry.kind_in(fkind):
+                continue
+            matched = self.hregistry.subschemes(kinds + [fkind])
+            if matched:
+                last_schemes = matched
+                kinds.append(fkind)
+                fields.append(field)
+            elif last_schemes:
+                row_headers.append(Header(
+                    irow,
+                    fields,
+                    last_schemes
+                ))
+                kinds = [fkind]
+                fields = [field]
+                last_schemes = self.hregistry.subschemes(kinds)
+
+        if last_schemes and fields:
+            row_headers.append(Header(
+                irow,
+                fields,
+                last_schemes
+            ))
+
+        return row_headers
+
+    def build_header_objects(self, header_rows: dict[int, dict[int, Field]]) -> dict[int, list[Header]]:
+        headers: dict[int, list[Header]] = {}
+        for irow, row in header_rows.items():
+            headers[irow] = self.build_headers_in_row(irow, row)
+
+        return headers
+
+
     def run(self) -> None:
         header_rows = self.mark_header_rows()
         header_cols = self.mark_header_cols()
@@ -365,3 +463,8 @@ class ExtractorPipeline:
             for j, field in row.items():
                 print(f"({i}, {j}): {field.index}: {field.sources}: {field.spec.kind.name}")
             print("---")
+        headers = self.build_header_objects(merged_rows)
+        for i, header in headers.items():
+            for h in header:
+                for spec in h.specs:
+                    print(f"{i} ({spec.type.name}):", [f.spec.kind.name for f in h.fields], spec.valid([f.spec.kind for f in h.fields]))

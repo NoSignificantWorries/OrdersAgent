@@ -120,36 +120,7 @@ def mainv5():
         print(data.name, data.fmt)
         print("\n")
 
-        report, tables = tp.read(data)
-
-        # for sheet in report.sheets:
-        #     print(sheet.rows_match)
-        #     print(sheet.cols_match)
-        #     print("\n")
-
-        print(len(tables))
-        for table in tables:
-            ann = tp.annotate_table(table)
-            stats = tp.make_stats(ann)
-            source = Source(table, ann, stats)
-            chains = make_horizontal_chains(source)
-            merged_chains = merge_chains_in_table(chains)
-            for ir, chns in chains.items():
-                for chn in chns:
-                    print(f"{ir}:", [field.kind.value for field in chn.fields])
-            print("\n")
-            for ir, chns in merged_chains.items():
-                for chn in chns:
-                    print(f"{ir}:", [field.kind.value for field in chn.fields], chn.kind_counts)
-            subtables = get_data_by_horizontal_chains(merged_chains, source)
-            clean_subtables = clean_empty_tables(clean_dirty_tables(subtables))
-            for subtable in clean_subtables:
-                subtable_class = subtable.classify_table()
-                print(subtable_class)
-                for row in subtable.data_rows.values():
-                    print([elem if elem is None else elem.value for elem in row])
-                print("\n")
-            print("\n")
+        tp.ParserPipeline.run(data)
 
         parsed_cnt += 1
 
@@ -162,9 +133,9 @@ def mainv5():
 
 def mainv5_one_file():
     # input = Path("Бланк заявки Иван Баня 26.02.2026.xls")
-    # input = Path("Заявка на стеклопакеты часть 4.xlsx")
+    input = Path("Заявка на стеклопакеты часть 4.xlsx")
     # input = Path("Заявка 17 М1.xlsx")  # for merged materials
-    input = Path("Заявка М1 на СП от 26.02.26.xlsx")  # two tables on nearest rows
+    # input = Path("Заявка М1 на СП от 26.02.26.xlsx")  # two tables on nearest rows
     # input = Path("Заявка на СП захватка №2.xlsx")
     # input = Path("Заявка на СП захватка №3.xlsx")
     # input = Path("27.01.26 г.Новосибирск, НА СИЛЬВЕР 70 только низ.xls")  # one column size
@@ -192,26 +163,6 @@ def mainv5_one_file():
     print(data.name, data.fmt)
 
     tp.ParserPipeline.run(data)
-
-    # report, tables = tp.(data)
-
-    # for sheet in report.sheets:
-    #     print(sheet.rows_match)
-    #     print(sheet.cols_match)
-    #     print("\n")
-
-    # print(len(tables))
-    # for table in tables:
-    #     ann = tp.annotate_table(table)
-    #     stats = tp.make_stats(ann)
-    #     source = Source(table, ann, stats)
-    #     headers = FieldsPipeline.run(source)
-    #     for ir, row in headers.items():
-    #         print(ir, {ic: col.kind for ic, col in row.items()})
-    #     print("\n")
-
-    # with open(output / Path(f"{report.name}.html"), "w") as file:
-    #     file.write(report.to_html())
 
 
 if __name__ == "__main__":
