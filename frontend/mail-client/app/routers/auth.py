@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from app.config import settings
 from app.services.users import (
     get_or_create_user_by_email,
-    update_user_mail_tokens,  # <-- нужно добавить в app/services/users.py
+    update_user_mail_tokens,
 )
 
 router = APIRouter()
@@ -25,9 +25,11 @@ def generate_state():
 
 
 @router.get("/auth/yandex")
-async def auth_yandex():
+async def auth_yandex(request: Request):
     """Начало авторизации через Яндекс (с правами на почту)"""
     state = generate_state()
+
+    use_secure_cookies = request.url.scheme == "https"
 
     scope = "login:email login:info mail:imap_full mail:smtp"
 
@@ -37,6 +39,7 @@ async def auth_yandex():
         "redirect_uri": settings.yandex_redirect_uri,
         "state": state,
         "scope": scope,
+        "force_confirm": "yes",
     }
 
     auth_url = f"{settings.yandex_auth_url}?{urlencode(params)}"
@@ -48,23 +51,11 @@ async def auth_yandex():
         httponly=True,
         max_age=300,
         samesite="lax",
-        secure=False,
+        secure=use_secure_cookies,
         path="/",
     )
 
-    response.set_cookie(
-        key="oauth_state_debug",
-        value=state,
-        httponly=False,
-        max_age=300,
-        samesite="lax",
-        secure=False,
-        path="/",
-    )
-
-    print("=== НАЧАЛО АВТОРИЗАЦИИ ===")
-    print(f"Установлена кука oauth_state: {state}")
-    print(f"Редирект на Яндекс: {auth_url}")
+    print("OAuth authorization started")
 
     return response
 
@@ -77,31 +68,27 @@ async def auth_callback(
     error: str | None = None,
 ):
     """Обработка callback от Яндекса"""
+    use_secure_cookies = request.url.scheme == "https"
 
-    print("\n=== НАЧАЛО CALLBACK ===")
-    print(f"Все параметры запроса: {dict(request.query_params)}")
-    print(f"Все куки запроса: {request.cookies}")
-    print(f"Code: {code}")
-    print(f"State из URL: {state}")
+    print("OAuth callback received")
 
     if error:
-        print(f"Яндекс вернул ошибку: {error}")
-        return {"error": f"Яндекс вернул ошибку: {error}"}
+        print(f"Yandex OAuth returned error: {error}")
+        return RedirectResponse(url="/login", status_code=302)
 
     if not code:
-        print("Нет code в запросе")
-        return {"error": "No code provided"}
+        return RedirectResponse(url="/login", status_code=302)
 
-    # TODO: в проде вернуть строгую проверку state
-    print("⚠️ РЕЖИМ ОТЛАДКИ: пропускаем проверку state")
-    print(f"State из URL: {state}")
-    print(f"State из куки oauth_state: {request.cookies.get('oauth_state')}")
-    print(f"State из куки oauth_state_debug: {request.cookies.get('oauth_state_debug')}")
+    cookie_state = request.cookies.get("oauth_state")
+
+    if not state or not cookie_state or state != cookie_state:
+        print("OAuth state validation failed")
+        return RedirectResponse(url="/login", status_code=302)
+
+    print("OAuth state validated")
 
     async with httpx.AsyncClient(timeout=20.0) as client:
-        print("Отправляем запрос на получение токена...")
-        print(f"Client ID: {settings.yandex_client_id}")
-        print(f"Redirect URI: {settings.yandex_redirect_uri}")
+        print("Requesting Yandex OAuth token")
 
         token_response = await client.post(
             settings.yandex_token_url,
@@ -116,9 +103,11 @@ async def auth_callback(
         print(f"Статус ответа токена: {token_response.status_code}")
 
         if token_response.status_code != 200:
-            error_text = token_response.text
-            print(f"Ошибка получения токена: {error_text}")
-            return {"error": f"Failed to get token: {error_text}"}
+            print(
+                f"Yandex token request failed: "
+                f"status={token_response.status_code}"
+            )
+            return RedirectResponse(url="/login", status_code=302)
 
         token_data = token_response.json()
         access_token = token_data.get("access_token")
@@ -126,21 +115,17 @@ async def auth_callback(
         expires_in = int(token_data.get("expires_in") or 0)
 
         if not access_token:
-            print("Нет access_token в ответе")
-            return {"error": "No access token in response"}
+            print("Yandex token response does not contain access_token")
+            return RedirectResponse(url="/login", status_code=302)
 
         if not refresh_token:
-            print("⚠️ Нет refresh_token в ответе — mail-agent не сможет долго обновлять токен автоматически")
-        else:
-            print("✓ Получен refresh_token")
+            print("Yandex token response does not contain refresh_token")
 
         access_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in or 3600)
 
-        print("✓ Токен получен успешно")
-        print(f"expires_in: {expires_in}")
-        print(f"access_expires_at: {access_expires_at.isoformat()}")
+        print("Yandex OAuth token received")
 
-        print("Запрашиваем информацию о пользователе...")
+        print("Requesting Yandex user info")
         user_response = await client.get(
             settings.yandex_user_info_url,
             params={"format": "json"},
@@ -148,12 +133,14 @@ async def auth_callback(
         )
 
         if user_response.status_code != 200:
-            error_text = user_response.text
-            print(f"Ошибка получения данных пользователя: {error_text}")
-            return {"error": f"Failed to get user info: {error_text}"}
+            print(
+                f"Yandex user info request failed: "
+                f"status={user_response.status_code}"
+            )
+            return RedirectResponse(url="/login", status_code=302)
 
         user_data = user_response.json()
-        print(f"Данные пользователя получены: {user_data.get('default_email')}")
+        print("Yandex user info received")
 
         email = user_data.get("default_email")
         login = user_data.get("login") or email
@@ -170,8 +157,8 @@ async def auth_callback(
                 name=name,
             )
         except Exception as e:
-            print(f"Ошибка работы с БД users: {e}")
-            return {"error": "Failed to sync user with database"}
+            print(f"Failed to sync user with database: {type(e).__name__}: {e}")
+            return RedirectResponse(url="/login", status_code=302)
 
         try:
             await update_user_mail_tokens(
@@ -180,10 +167,10 @@ async def auth_callback(
                 refresh_token=refresh_token,
                 access_expires_at=access_expires_at,
             )
-            print(f"✓ Почтовые токены сохранены для user_id={db_user['id']}")
+            print(f"Mail tokens saved for user_id={db_user['id']}")
         except Exception as e:
-            print(f"Ошибка сохранения почтовых токенов: {e}")
-            return {"error": "Failed to save mail tokens"}
+            print(f"Failed to sync user with database: {type(e).__name__}: {e}")
+            return RedirectResponse(url="/login", status_code=302)
 
         session_id = generate_state()
         sessions[session_id] = {
@@ -194,9 +181,7 @@ async def auth_callback(
             "role": db_user["role"],
         }
 
-        print(f"✓ Сессия создана: {session_id}")
-        print(f"Пользователь (app): {sessions[session_id]}")
-        print(f"Всего сессий: {len(sessions)}")
+        print(f"Application session created for user_id={db_user['id']}")
 
         print("Перенаправляем на главную страницу...")
         response = RedirectResponse(url="/", status_code=302)
@@ -206,12 +191,16 @@ async def auth_callback(
             httponly=True,
             max_age=86400,
             samesite="lax",
-            secure=False,
+            secure=use_secure_cookies,
             path="/",
         )
 
-        response.delete_cookie(key="oauth_state", path="/")
-        response.delete_cookie(key="oauth_state_debug", path="/")
+        response.delete_cookie(
+            key="oauth_state",
+            path="/",
+            samesite="lax",
+            secure=use_secure_cookies,
+        )
 
         print("=== КОНЕЦ CALLBACK ===\n")
         return response
@@ -221,26 +210,30 @@ async def auth_callback(
 async def logout(request: Request):
     """Выход из системы"""
     session_id = request.cookies.get("session_id")
-    print(f"Выход: session_id = {session_id}")
 
-    if session_id and session_id in sessions:
-        del sessions[session_id]
-        print(f"Сессия {session_id} удалена")
+    if session_id:
+        sessions.pop(session_id, None)
 
-    response = RedirectResponse(url="/login")
-    response.delete_cookie(key="session_id")
+    use_secure_cookies = request.url.scheme == "https"
+
+    response = RedirectResponse(url="/login", status_code=303)
+
+    response.delete_cookie(
+        key="session_id",
+        path="/",
+        samesite="lax",
+        secure=use_secure_cookies,
+    )
     return response
 
 
 def get_current_user(request: Request):
     """Получение текущего пользователя из сессии"""
     session_id = request.cookies.get("session_id")
-    print(f"get_current_user: session_id = {session_id}")
 
-    if session_id and session_id in sessions:
-        user = sessions[session_id]
-        print(f"Найден пользователь: {user['email']}")
-        return user
+    if session_id:
+        user = sessions.get(session_id)
+        if user:
+            return user
 
-    print("Пользователь не найден")
     return None

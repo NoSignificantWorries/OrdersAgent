@@ -49,6 +49,13 @@
                     >
                         Материалы
                     </a>
+                    <a
+                        href="/favorites"
+                        class="nav-btn {% if current_page == 'favorites' %}active{% endif %}"
+                        {% if current_page == 'favorites' %}aria-current="page"{% endif %}
+                    >
+                        Избранные почты
+                    </a>
                 </nav>
             </div>
 

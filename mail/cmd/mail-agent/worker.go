@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -32,17 +34,57 @@ func runUserWorker(
 	defer onExit(userID)
 
 	mailAuth, err := storage.GetUserMailAuth(db, userID)
-    if err != nil {
-        log.Printf("get user mail auth: %v", err)
-        return
-    }
-    userEmail := mailAuth.Email
+	if err != nil {
+		log.Printf("get user mail auth: %v", err)
+		return
+	}
+	userEmail := mailAuth.Email
 
 	processor := orders.New(repo, userID)
 
 	consecutiveReconnectErrors := 0
 
+	forceRefreshToken := func() error {
+		mailAuth, err := storage.GetUserMailAuth(db, userID)
+		if err != nil {
+			return fmt.Errorf("get user mail auth: %w", err)
+		}
+
+		if mailAuth.RefreshToken == "" {
+			return errors.New("empty mail refresh token")
+		}
+
+		newToken, err := client.RefreshYandexToken(
+			os.Getenv("YANDEX_TOKEN_URL"),
+			os.Getenv("YANDEX_CLIENT_ID"),
+			os.Getenv("YANDEX_CLIENT_SECRET"),
+			mailAuth.RefreshToken,
+		)
+		if err != nil {
+			return fmt.Errorf("refresh yandex token: %w", err)
+		}
+
+		mailAuth.AccessToken = newToken.AccessToken
+		mailAuth.RefreshToken = newToken.RefreshToken
+		mailAuth.AccessExpiresAt = newToken.AccessExpiresAt
+
+		if err := storage.UpdateUserMailTokens(db, userID, mailAuth); err != nil {
+			return fmt.Errorf("update user mail tokens: %w", err)
+		}
+
+		log.Printf(
+			"access token force refreshed | user_id=%d email=%s new_expires_at=%s",
+			userID,
+			mailAuth.Email,
+			mailAuth.AccessExpiresAt.Format(time.RFC3339),
+		)
+
+		return nil
+	}
+
 	var imapClient *client.Client
+	recoveryPending := true
+
 	defer func() {
 		if imapClient != nil {
 			imapClient.Close()
@@ -112,6 +154,8 @@ func runUserWorker(
 		)
 
 		imapClient = c
+		recoveryPending = true
+
 		return imapClient, nil
 	}
 
@@ -145,10 +189,55 @@ func runUserWorker(
 		c, err := getConnectedClient()
 		if err != nil {
 			log.Printf("get IMAP client | user_id=%d err=%v", userID, err)
+
+			if isAuthError(err) {
+				log.Printf(
+					"authentication failed, forcing token refresh | user_id=%d email=%s err=%v",
+					userID,
+					userEmail,
+					err,
+				)
+
+				if refreshErr := forceRefreshToken(); refreshErr != nil {
+					log.Printf(
+						"force token refresh failed | user_id=%d email=%s err=%v",
+						userID,
+						userEmail,
+						refreshErr,
+					)
+				}
+
+				resetClient(err)
+			}
+
 			return
 		}
 
-		err = ProcessEmails(c, stopChan, processor, userEmail)
+		if recoveryPending {
+			done, recoveryErr := recoverInboxBatch(
+				context.Background(),
+				userID,
+				db,
+				c,
+				processor,
+				stopChan,
+			)
+
+			if recoveryErr != nil {
+				err = recoveryErr
+			} else if !done {
+				// Один участок проверен либо получен сигнал остановки.
+				// Продолжим восстановление в следующем цикле.
+				return
+			} else {
+				recoveryPending = false
+			}
+		}
+
+		if err == nil {
+			err = ProcessEmails(c, stopChan, processor, userEmail)
+		}
+
 		if err == nil {
 			if consecutiveReconnectErrors > 0 {
 				log.Printf(
@@ -170,6 +259,27 @@ func runUserWorker(
 			c.SessionID(),
 			err,
 		)
+
+		if isAuthError(err) {
+			log.Printf(
+				"authentication failed during processing, forcing token refresh | user_id=%d email=%s err=%v",
+				userID,
+				userEmail,
+				err,
+			)
+
+			if refreshErr := forceRefreshToken(); refreshErr != nil {
+				log.Printf(
+					"force token refresh failed | user_id=%d email=%s err=%v",
+					userID,
+					userEmail,
+					refreshErr,
+				)
+			}
+
+			resetClient(err)
+			return
+		}
 
 		if isReconnectableError(err) {
 			consecutiveReconnectErrors++
@@ -201,12 +311,12 @@ func runUserWorker(
 }
 
 func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *orders.Processor, userEmail string) error {
-    uids, err := imap.FetchUnread()
-    if err != nil {
-        return err
-    }
+	uids, err := imap.FetchUnread()
+	if err != nil {
+		return err
+	}
 
-    log.Printf(
+	log.Printf(
 		"ProcessEmails | email=%s session_id=%s unread_count=%d uids=%v",
 		imap.Email(),
 		imap.SessionID(),
@@ -214,62 +324,77 @@ func ProcessEmails(imap *client.Client, stopChan <-chan struct{}, processor *ord
 		uids,
 	)
 
-    if len(uids) == 0 {
-        return nil
-    }
+	if len(uids) == 0 {
+		return nil
+	}
 
-    for _, uid := range uids {
-        log.Printf("ProcessEmails | email=%s session_id=%s start uid=%d", imap.Email(), imap.SessionID(), uid)
+	for _, uid := range uids {
+		log.Printf("ProcessEmails | email=%s session_id=%s start uid=%d", imap.Email(), imap.SessionID(), uid)
 
-        select {
-        case <-stopChan:
-            log.Printf("interrupt while processing, stopping")
-            return nil
-        default:
-        }
+		select {
+		case <-stopChan:
+			log.Printf("interrupt while processing, stopping")
+			return nil
+		default:
+		}
 
-        fetchCmd, err := imap.FetchMessage(uid)
-        if err != nil {
-            log.Printf("fetch message uid=%d: %v", uid, err)
-            if isReconnectableError(err) {
-                return err
-            }
-            continue
-        }
-
-        log.Printf("ProcessEmails | email=%s session_id=%s fetched uid=%d", imap.Email(), imap.SessionID(), uid)
-
-        email, err := parser.ParseMessage(uid, fetchCmd, userEmail)
-        if err != nil {
-            log.Printf("parse uid=%d: %v", uid, err)
-            if isReconnectableError(err) {
+		fetchCmd, err := imap.FetchMessage(uid)
+		if err != nil {
+			log.Printf("fetch message uid=%d: %v", uid, err)
+			if isReconnectableError(err) {
 				return err
 			}
-            continue
-        }
+			continue
+		}
 
-        log.Printf("ProcessEmails | parsed uid=%d subject=%q from=%q attachments=%d",
-            uid, email.Subject, email.From, len(email.Files))
+		log.Printf("ProcessEmails | email=%s session_id=%s fetched uid=%d", imap.Email(), imap.SessionID(), uid)
 
-        if err := processor.ProcessEmail(*email); err != nil {
-            log.Printf("process uid=%d: %v", uid, err)
-        } else {
-            log.Printf("ProcessEmails | email=%s session_id=%s processed uid=%d", imap.Email(), imap.SessionID(), uid)
-        }
+		email, err := parser.ParseMessage(uid, fetchCmd, userEmail)
+		if err != nil {
+			log.Printf("parse uid=%d: %v", uid, err)
+			if isReconnectableError(err) {
+				return err
+			}
+			continue
+		}
 
-        //fetchCmd.Close()
+		email.UIDValidity = imap.UIDValidity()
 
-        if err := imap.MarkRead(uid); err != nil {
-            log.Printf("mark read uid=%d: %v", uid, err)
-            if isReconnectableError(err) {
-                return err
-            }
-        } else {
-            log.Printf("ProcessEmails | email=%s session_id=%s marked read uid=%d", imap.Email(), imap.SessionID(), uid)
-        }
-    }
+		log.Printf("ProcessEmails | parsed uid=%d subject=%q from=%q attachments=%d",
+			uid, email.Subject, email.From, len(email.Files))
 
-    return nil
+		if err := processor.ProcessEmail(*email); err != nil {
+			log.Printf(
+				"ProcessEmails | processing failed, skip MarkRead | email=%s session_id=%s uid=%d subject=%q err=%v",
+				imap.Email(),
+				imap.SessionID(),
+				uid,
+				email.Subject,
+				err,
+			)
+			continue
+		}
+
+		log.Printf(
+			"ProcessEmails | email=%s session_id=%s processed uid=%d",
+			imap.Email(),
+			imap.SessionID(),
+			uid,
+		)
+
+		//fetchCmd.Close()
+
+		if err := imap.MarkRead(uid); err != nil {
+			log.Printf("mark read uid=%d: %v", uid, err)
+			if isReconnectableError(err) {
+				return err
+			}
+		} else {
+			log.Printf("ProcessEmails | email=%s session_id=%s marked read uid=%d", imap.Email(), imap.SessionID(), uid)
+		}
+	}
+
+	return nil
 }
 
 func isReconnectableError(err error) bool {
@@ -285,7 +410,10 @@ func isReconnectableError(err error) bool {
 		strings.Contains(msg, "unexpected eof") ||
 		strings.Contains(msg, "eof") ||
 		strings.Contains(msg, "i/o timeout") ||
-		strings.Contains(msg, "connection refused") {
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "unavailable") ||
+		strings.Contains(msg, "backend error") ||
+		strings.Contains(msg, "try again") {
 		return true
 	}
 
@@ -302,4 +430,18 @@ func isReconnectableError(err error) bool {
 	}
 
 	return false
+}
+
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+
+	return strings.Contains(msg, "authenticationfailed") ||
+		strings.Contains(msg, "invalid credentials") ||
+		strings.Contains(msg, "imap is disabled") ||
+		strings.Contains(msg, "535") ||
+		strings.Contains(msg, "invalid user or password")
 }

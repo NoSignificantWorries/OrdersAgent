@@ -910,6 +910,52 @@ body {
     margin-bottom: 0;
 }
 
+/* Группа индикаторов справа от темы */
+.email-item .email-item-subject-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.email-item .email-item-subject-row > .subject {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.email-item .email-item-indicators {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+/* Звёздочка избранного отправителя */
+.email-item-favorite-indicator {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+    color: #fbbf24;
+    cursor: default;
+}
+
+.email-item-favorite-icon {
+    display: block;
+    width: 16px;
+    height: 16px;
+    fill: #fde68a;
+    stroke: currentColor;
+    stroke-width: 1.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+
 .email-item-comment-indicator {
     flex: 0 0 auto;
     width: 18px;

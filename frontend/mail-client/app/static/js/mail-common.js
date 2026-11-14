@@ -460,6 +460,7 @@ function normalizeApiItem(item, idx) {
         uid: item.email_uid ?? item.emailuid ?? null,
 
         sender: item.sender || item.emailfrom || "Неизвестный отправитель",
+        is_favorite_sender: item.is_favorite_sender === true,
         subject: item.subject || item.emailsubject || "(без темы)",
         date: dateValue,
 

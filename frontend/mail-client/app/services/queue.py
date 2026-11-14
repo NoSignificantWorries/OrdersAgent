@@ -141,6 +141,40 @@ async def list_queue_for_user(
         normalized_class_filter = (class_filter or "").strip().lower()
         normalized_sort = "oldest" if (sort or "").strip().lower() == "oldest" else "newest"
 
+        # Приоритет действует только для раздела "Входящие"
+        use_favorite_priority = archived is False
+
+        favorite_sender_sql = "FALSE"
+
+        if use_favorite_priority:
+            favorite_sender_sql = """
+                EXISTS (
+                    SELECT 1
+                    FROM favorite_senders fs
+                    WHERE LOWER(fs.email) = LOWER(
+                        BTRIM(
+                            CASE
+                                -- Один отправитель с именем:
+                                -- Имя <address@example.com>
+                                WHEN COALESCE(e.email_from, '')
+                                    ~ '^[^<>]*<[^<>]+>[[:space:]]*$'
+                                THEN SUBSTRING(
+                                    e.email_from
+                                    FROM '<([^<>]+)>[[:space:]]*$'
+                                )
+
+                                -- Один адрес без имени.
+                                WHEN COALESCE(e.email_from, '')
+                                    ~ '^[^<>,;[:space:]]+@[^<>,;[:space:]]+$'
+                                THEN e.email_from
+
+                                ELSE NULL
+                            END
+                        )
+                    )
+                )
+            """
+
         if not is_admin:
             where_clauses.append(f"e.mailbox = ${param_idx}")
             params.append(user["email"])
@@ -186,23 +220,25 @@ async def list_queue_for_user(
         if where_clauses:
             where_sql = "\nWHERE " + "\n  AND ".join(where_clauses)
 
-        page_order_sql = """
-            sort_date DESC,
-            id DESC
-        """
-        dedupe_pick_order_sql = """
-            sort_date DESC,
-            id DESC
+        sort_direction = "ASC" if normalized_sort == "oldest" else "DESC"
+
+        dedupe_pick_order_sql = f"""
+            sort_date {sort_direction},
+            id {sort_direction}
         """
 
-        if normalized_sort == "oldest":
-            page_order_sql = """
-                sort_date ASC,
-                id ASC
-            """
-            dedupe_pick_order_sql = """
-                sort_date ASC,
-                id ASC
+        page_order_sql = f"""
+            sort_date {sort_direction},
+            id {sort_direction}
+        """
+
+        # день -> избранность -> время -> id
+        if use_favorite_priority:
+            page_order_sql = f"""
+                sort_day {sort_direction},
+                is_favorite_sender DESC,
+                sort_date {sort_direction},
+                id {sort_direction}
             """
 
         base_cte = f"""
@@ -210,7 +246,15 @@ async def list_queue_for_user(
                 SELECT
                     e.id,
                     COALESCE(e.email_date, e.created_at) AS sort_date,
-                    COALESCE(NULLIF(e.message_id, ''), 'no_id_' || e.id::text) AS dedupe_key
+                    (
+                        COALESCE(e.email_date, e.created_at)
+                        AT TIME ZONE 'Asia/Novosibirsk'
+                    )::date AS sort_day,
+                    {favorite_sender_sql} AS is_favorite_sender,
+                    COALESCE(
+                        NULLIF(e.message_id, ''),
+                        'no_id_' || e.id::text
+                    ) AS dedupe_key
                 FROM emails e
                 LEFT JOIN LATERAL (
                     SELECT
@@ -232,7 +276,9 @@ async def list_queue_for_user(
                     SELECT DISTINCT ON (dedupe_key)
                         id,
                         dedupe_key,
-                        sort_date
+                        sort_date,
+                        sort_day,
+                        is_favorite_sender
                     FROM filtered
                     ORDER BY
                         dedupe_key,
@@ -247,7 +293,9 @@ async def list_queue_for_user(
                     SELECT DISTINCT ON (dedupe_key)
                         id,
                         dedupe_key,
-                        sort_date
+                        sort_date,
+                        sort_day,
+                        is_favorite_sender
                     FROM filtered
                     ORDER BY
                         dedupe_key,
@@ -255,6 +303,7 @@ async def list_queue_for_user(
                 )
                 SELECT
                     id,
+                    is_favorite_sender,
                     COUNT(*) OVER() AS total
                 FROM deduped
                 ORDER BY
@@ -271,6 +320,7 @@ async def list_queue_for_user(
             page_sql = base_cte + f"""
                 SELECT
                     id,
+                    is_favorite_sender,
                     COUNT(*) OVER() AS total
                 FROM filtered
                 ORDER BY
@@ -282,6 +332,10 @@ async def list_queue_for_user(
         page_rows = await conn.fetch(page_sql, *params, per_page, offset)
         total = int(page_rows[0]["total"] or 0) if page_rows else 0
         email_ids = [row["id"] for row in page_rows]
+        favorite_flags_by_id = {
+            row["id"]: bool(row["is_favorite_sender"])
+            for row in page_rows
+        }
 
         if not email_ids:
             total_pages = max(1, (total + per_page - 1) // per_page)
@@ -393,6 +447,10 @@ async def list_queue_for_user(
                 "email_uid": row["email_uid"],
                 "subject": row["email_subject"],
                 "sender": row["email_from"],
+                "is_favorite_sender": favorite_flags_by_id.get(
+                    row["email_id"],
+                    False,
+                ),
                 "status": row["task_status"],
                 "class": (row["email_model_decision"] or "").strip() or None,
                 "is_read": bool(row["email_is_read"]),
