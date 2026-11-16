@@ -1,9 +1,6 @@
-from table.extractor import CellRole
 
-from .annotate import AnnotationPipeline, CellKind, TextMatcher, TextSpec
-from .extractor import ExtractorPipeline
-from .loader import SparseTable, Workbook
-from .report import WorkbookReport
+from . import extractor, loader, report
+from .annotate import AnnotationPipeline, CellKind, CellRole, TextMatcher, TextSpec
 
 
 class ParserPipeline:
@@ -22,9 +19,9 @@ class ParserPipeline:
         ])
 
     @classmethod
-    def read_workbook(cls, wb: Workbook) -> list[SparseTable]:
+    def read_workbook(cls, wb: loader.Workbook) -> list[loader.SparseTable]:
         # report = WorkbookReport(wb.name)
-        tables: list[SparseTable] = []
+        tables: list[loader.SparseTable] = []
         for subtable in wb.sheets:
             # report.add_sheet(name=subtable.name, nrows=subtable.nrows, ncols=subtable.ncols)
             # report.add_cell_on_last_sheet(cell.row, cell.col, None if new_cell is None else new_cell.value)
@@ -37,11 +34,11 @@ class ParserPipeline:
         return tables
 
     @classmethod
-    def run(cls, wb: Workbook) -> None:
+    def run(cls, wb: loader.Workbook) -> None:
         text_matcher = cls.build_default_headers()
 
         tables = cls.read_workbook(wb)
         annotated_tables_generator = (AnnotationPipeline(text_matcher, t).run() for t in tables)
 
         for annotated_table in annotated_tables_generator:
-            extracted_data = ExtractorPipeline(annotated_table).run()
+            extracted_data = extractor.pipeline.ExtractorPipeline(annotated_table).run()

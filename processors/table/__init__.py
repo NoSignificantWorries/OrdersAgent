@@ -1,5 +1,4 @@
-from . import functional as func
-from . import loader, parser_v7, schemes
+from . import parser_v7, schemes
 from .table_processer import (
     TableParseResults,
     TableWorker,
@@ -10,8 +9,6 @@ from .table_processer import (
 __all__ = [
     "TableParseResults",
     "TableWorker",
-    "func",
-    "loader",
     "make_callculation_xlsx",
     "make_request_xlsx",
     "parser_v7",
