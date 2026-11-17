@@ -16,6 +16,7 @@ class FieldSpec:
     roles: set[CellRole]
     direction: Direction
     none_allowed: bool
+    multirole_allowed: bool
 
 
 @dataclass(slots=True)

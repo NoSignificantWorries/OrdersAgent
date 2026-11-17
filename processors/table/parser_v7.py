@@ -41,4 +41,5 @@ class ParserPipeline:
         annotated_tables_generator = (AnnotationPipeline(text_matcher, t).run() for t in tables)
 
         for annotated_table in annotated_tables_generator:
-            extracted_data = extractor.pipeline.ExtractorPipeline(annotated_table).run()
+            extracted_blocks = extractor.pipeline.ExtractorPipeline(annotated_table).run()
+            extractor.validator.ValidatorPipeline.run(extracted_blocks)

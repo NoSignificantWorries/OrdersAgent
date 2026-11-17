@@ -1,6 +1,4 @@
-from typing import Self
-
-from table.annotate import AnnotatedTable, CellKind, CellRole, ResCell
+from table.annotate import AnnotatedTable, CellRole, ResCell
 
 
 class TableEngine:

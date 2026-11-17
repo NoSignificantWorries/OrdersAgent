@@ -116,6 +116,14 @@ class ResCell:
     kind: CellKind = CellKind.EMPTY
     role: CellRole = CellRole.UNKNOWN
 
+    @property
+    def is_empty(self) -> bool:
+        return self.kind == CellKind.EMPTY
+
+    @property
+    def is_header(self) -> bool:
+        return self.role == CellRole.HEADER
+
 
 @dataclass(frozen=True)
 class Stats:

@@ -11,11 +11,11 @@ from table.extractor.specs import (
 
 def build_default_fields_registry() -> FieldsRegistry:
     return FieldsRegistry([
-        FieldSpec(CellKind.MATERIAL, {CellRole.LABEL}, Direction.VERTICAL, False),
-        FieldSpec(CellKind.SIZE, {CellRole.SIZES, CellRole.NUMERIC}, Direction.VERTICAL, False),
-        FieldSpec(CellKind.AMOUNT, {CellRole.NUMERIC}, Direction.VERTICAL, False),
-        FieldSpec(CellKind.BARCODE, {CellRole.LABEL, CellRole.NUMERIC}, Direction.VERTICAL, True),
-        FieldSpec(CellKind.MARKING, {CellRole.LABEL, CellRole.NUMERIC}, Direction.VERTICAL, True),
+        FieldSpec(CellKind.MATERIAL, {CellRole.LABEL}, Direction.VERTICAL, True, False),
+        FieldSpec(CellKind.SIZE, {CellRole.SIZES, CellRole.NUMERIC}, Direction.VERTICAL, False, False),
+        FieldSpec(CellKind.AMOUNT, {CellRole.NUMERIC}, Direction.VERTICAL, False, False),
+        FieldSpec(CellKind.BARCODE, {CellRole.LABEL, CellRole.NUMERIC}, Direction.VERTICAL, True, True),
+        FieldSpec(CellKind.MARKING, {CellRole.LABEL, CellRole.NUMERIC}, Direction.VERTICAL, True, True),
     ])
 
 def build_default_headers_registry() -> HeadersRegistry:

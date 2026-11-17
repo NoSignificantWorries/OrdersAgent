@@ -5,6 +5,7 @@ from table.annotate import AnnotatedTable, CellKind, CellRole, ResCell
 from table.extractor import engine, specs
 from table.extractor.specs import (
     Field,
+    FieldSpec,
     Header,
     HeaderSpec,
 )
@@ -20,6 +21,68 @@ class Block:
     @property
     def data_size(self) -> int:
         return len(self.data)
+
+    @property
+    def empty(self) -> bool:
+        return self.data_size == 0
+
+    @property
+    def valid_specs(self) -> dict[HeaderSpec, bool]:
+        return {spec: spec.valid([field.spec.kind for field in self.header.fields]) for spec in self.header.specs}
+
+    def validate_fields(self) -> list[bool]:
+        return [self._validate_column(icol, field) for icol, field in enumerate(self.header.fields)]
+
+    def _validate_column(self, icol: int, field: Field) -> bool:
+        first_role = None
+        for row in self.data.values():
+            elem = row[icol]
+            if elem.is_empty and not field.spec.none_allowed:
+                return False
+            if not elem.is_empty and elem.role not in field.spec.roles:
+                return False
+            first_role = first_role or elem.role
+            if not elem.is_empty and not field.spec.multirole_allowed and elem.role != first_role:
+                return False
+        return True
+
+    def drop_invalid_rows(self) -> list[int]:
+        droped_rows: list[int] = []
+        new_data: dict[int, list[ResCell]] = {}
+        for irow, row in self.data.items():
+            if self._drop_row(row):
+                droped_rows.append(irow)
+                continue
+            new_data[irow] = row
+        self.data = new_data
+        return droped_rows
+
+    def _drop_row(self, row: list[ResCell]) -> bool:
+        for elem, field in zip(row, self.header.fields):
+            if elem.is_empty and not field.spec.none_allowed:
+                return True
+            if not elem.is_empty and elem.role not in field.spec.roles:
+                return True
+        return False
+
+    def fill_forward_material(self) -> bool:
+        for icol, field in enumerate(self.header.fields):
+            if field.spec.kind != CellKind.MATERIAL:
+                continue
+
+            last_cell = None
+            for row in self.data.values():
+                elem = row[icol]
+                if elem.is_empty:
+                    if last_cell:
+                        row[icol] = ResCell(last_cell.value, last_cell.row, last_cell.col, last_cell.kind, last_cell.role)
+                    else:
+                        return False
+                else:
+                    last_cell = elem
+        return True
+
+
 
 
 class ExtractorPipeline:
@@ -223,11 +286,23 @@ class ExtractorPipeline:
                 blocks.append(block)
         return blocks
 
+    ###########################
+    ##    BLOCKS CLEANING    ##
+    ###########################
+
+    def clean_blocks(self, blocks: list[Block]) -> list[Block]:
+        not_empty_blocks: list[Block] = []
+        for block in blocks:
+            block.drop_invalid_rows()
+            if not block.empty:
+                not_empty_blocks.append(block)
+        return not_empty_blocks
+
     ########################
     ##    RUN PIPELINE    ##
     ########################
 
-    def run(self) -> None:
+    def run(self) -> list[Block]:
         header_rows = self.mark_header_rows()
         header_cols = self.mark_header_cols()
 
@@ -264,3 +339,19 @@ class ExtractorPipeline:
             print(block.header.index)
             for irow, data_row in block.data.items():
                 print(f"{irow}:", [(data.role.name, data.value) for data in data_row])
+
+        cleaned_blocks = self.clean_blocks(blocks)
+        print("\n")
+        print("Cleaned blocks")
+        for block in cleaned_blocks:
+            print(block.header.index)
+            for irow, data_row in block.data.items():
+                print(f"{irow}:", [(data.role.name, data.value) for data in data_row])
+        print("\n")
+        print("Valid columns")
+        for block in cleaned_blocks:
+            print(block.header.index)
+            print([field.spec.kind.name for field in block.header.fields])
+            print(block.validate_fields())
+
+        return cleaned_blocks
