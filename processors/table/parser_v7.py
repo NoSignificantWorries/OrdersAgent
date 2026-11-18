@@ -1,9 +1,29 @@
 
+import csv
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import extractor, loader
 from .annotate import AnnotationPipeline, CellKind, CellRole, TextMatcher, TextSpec
 
+
+def _save_dat_chunk_to_csv(chunk: extractor.validator.DataChunk, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(path, mode='w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['material', 'X', 'Y', 'amount', 'marking', 'barcode'])
+
+        for i in range(chunk.nrows):
+            writer.writerow([
+                chunk.material[i],
+                chunk.X[i],
+                chunk.Y[i],
+                chunk.amount[i],
+                chunk.marking[i] if chunk.marking[i] is not None else '',
+                chunk.barcode[i] if chunk.barcode[i] is not None else '',
+            ])
+    print(f"Saved {chunk.nrows} rows to {path}")
 
 @dataclass
 class ParsedFile:
@@ -19,7 +39,7 @@ class ParserPipeline:
             TextSpec(CellKind.AMOUNT, CellRole.HEADER, ["кол-во", "количество", "кол-во(шт)", "количество(шт)", "колич", "n", "количес", "шт"]),
             TextSpec(CellKind.SIZE, CellRole.HEADER, ["размер", "размеры", "размер мм", "размеры мм", "длина", "длина мм", "ширина мм", "ширина", "высота", "высота мм", "стекла", "габариты", "габариты мм", "мм"]),
             TextSpec(CellKind.BARCODE, CellRole.HEADER, ["штрихкод", "шк", "штрих"]),
-            TextSpec(CellKind.MARKING, CellRole.HEADER, ["маркировка", "маркир"]),
+            TextSpec(CellKind.MARKING, CellRole.HEADER, ["маркировка", "маркир", "позиция/номер"]),
             TextSpec(CellKind.NAME, CellRole.FIELD, ["имя:"]),
             TextSpec(CellKind.AUFBAU, CellRole.FIELD, ["aufbau:"]),
             TextSpec(CellKind.THICKNESS, CellRole.FIELD, ["толщина:"]),
@@ -57,5 +77,7 @@ class ParserPipeline:
                 print("Empty data on sheet!!!")
                 continue
             result.data[annotated_table.name] = table_data_chunk
+            _save_dat_chunk_to_csv(table_data_chunk, Path(f"../private/csv_results/{wb.name or "unknown"}_{annotated_table.name}.csv"))
+
 
         return result
