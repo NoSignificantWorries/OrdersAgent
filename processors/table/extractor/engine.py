@@ -25,6 +25,12 @@ class TableEngine:
     def has_header_in_col(self, col: int) -> bool:
         return CellRole.HEADER in self.table.stats.roles_in_col.get(col, set())
 
+    def has_field_in_row(self, row: int) -> bool:
+        return CellRole.FIELD in self.table.stats.roles_in_row.get(row, set())
+
+    def has_field_in_col(self, col: int) -> bool:
+        return CellRole.FIELD in self.table.stats.roles_in_col.get(col, set())
+
 
 Pos = tuple[int, int]
 

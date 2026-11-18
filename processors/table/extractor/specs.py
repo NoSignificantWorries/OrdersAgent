@@ -38,6 +38,7 @@ class FieldsRegistry:
 class HeaderType(Enum):
     STANDART = "standart"
     ONE_SIZE_COLUMN = "one-size-column"
+    OKNA_TOP = "okna-top"
     OKNA_DATA = "okna-data"
 
 
@@ -47,6 +48,9 @@ class HeaderSpec:
     direction: Direction
     scheme: dict[CellKind, tuple[int, int]]
     priority: int = 0
+
+    def kind_in(self, kind: CellKind) -> bool:
+        return kind in self.scheme
 
     def valid(self, lst: list[CellKind]) -> bool:
         counts = Counter(lst)
@@ -60,6 +64,8 @@ class HeaderSpec:
 
     def submatch(self, lst: list[CellKind]) -> bool:
         counts = Counter(lst)
+        if not counts.keys() <= self.scheme.keys():
+            return False
         for kind, (_, hi) in self.scheme.items():
             n = counts.get(kind, 0)
             if n > hi:
@@ -112,3 +118,6 @@ class Header:
     index: int
     fields: list[Field]
     specs: list[HeaderSpec]
+
+    def find_kind_indexes(self, kind: CellKind) -> list[int]:
+        return [i for i, field in enumerate(self.fields) if field.spec.kind == kind]

@@ -1,6 +1,14 @@
 
-from . import extractor, loader, report
+from dataclasses import dataclass, field
+
+from . import extractor, loader
 from .annotate import AnnotationPipeline, CellKind, CellRole, TextMatcher, TextSpec
+
+
+@dataclass
+class ParsedFile:
+    name: str | None
+    data: dict[str, extractor.validator.DataChunk] = field(default_factory=dict)
 
 
 class ParserPipeline:
@@ -12,9 +20,9 @@ class ParserPipeline:
             TextSpec(CellKind.SIZE, CellRole.HEADER, ["размер", "размеры", "размер мм", "размеры мм", "длина", "длина мм", "ширина мм", "ширина", "высота", "высота мм", "стекла", "габариты", "габариты мм", "мм"]),
             TextSpec(CellKind.BARCODE, CellRole.HEADER, ["штрихкод", "шк", "штрих"]),
             TextSpec(CellKind.MARKING, CellRole.HEADER, ["маркировка", "маркир"]),
-            TextSpec(CellKind.NAME, CellRole.HEADER, ["имя:"]),
-            TextSpec(CellKind.AUFBAU, CellRole.HEADER, ["aufbau:"]),
-            TextSpec(CellKind.THICKNESS, CellRole.HEADER, ["толщина:"]),
+            TextSpec(CellKind.NAME, CellRole.FIELD, ["имя:"]),
+            TextSpec(CellKind.AUFBAU, CellRole.FIELD, ["aufbau:"]),
+            TextSpec(CellKind.THICKNESS, CellRole.FIELD, ["толщина:"]),
             TextSpec(CellKind.ITOGO, CellRole.UNKNOWN, ["итого", "итого:"])
         ])
 
@@ -34,12 +42,20 @@ class ParserPipeline:
         return tables
 
     @classmethod
-    def run(cls, wb: loader.Workbook) -> None:
+    def run(cls, wb: loader.Workbook) -> ParsedFile:
         text_matcher = cls.build_default_headers()
+
+        result = ParsedFile(wb.name)
 
         tables = cls.read_workbook(wb)
         annotated_tables_generator = (AnnotationPipeline(text_matcher, t).run() for t in tables)
 
         for annotated_table in annotated_tables_generator:
             extracted_blocks = extractor.pipeline.ExtractorPipeline(annotated_table).run()
-            extractor.validator.ValidatorPipeline.run(extracted_blocks)
+            table_data_chunk = extractor.validator.ValidatorPipeline.run(extracted_blocks)
+            if not table_data_chunk:
+                print("Empty data on sheet!!!")
+                continue
+            result.data[annotated_table.name] = table_data_chunk
+
+        return result

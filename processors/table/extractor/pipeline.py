@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from table.annotate import AnnotatedTable, CellKind, CellRole, ResCell
 from table.extractor import engine, specs
 from table.extractor.specs import (
+    Direction,
     Field,
-    FieldSpec,
     Header,
     HeaderSpec,
 )
@@ -16,7 +16,14 @@ from .defaults import build_default_fields_registry, build_default_headers_regis
 @dataclass
 class Block:
     header: Header
+    pos: tuple[int, int]
     data: dict[int, list[ResCell]]
+
+    @staticmethod
+    def make_position(header: Header) -> tuple[int, int]:
+        if header.specs[0].direction == Direction.VERTICAL:
+            return header.index, min(f.index for f in header.fields)
+        return min(f.index for f in header.fields), header.index
 
     @property
     def data_size(self) -> int:
@@ -27,8 +34,8 @@ class Block:
         return self.data_size == 0
 
     @property
-    def valid_specs(self) -> dict[HeaderSpec, bool]:
-        return {spec: spec.valid([field.spec.kind for field in self.header.fields]) for spec in self.header.specs}
+    def valid_specs(self) -> list[bool]:
+        return [spec.valid([field.spec.kind for field in self.header.fields]) for spec in self.header.specs]
 
     def validate_fields(self) -> list[bool]:
         return [self._validate_column(icol, field) for icol, field in enumerate(self.header.fields)]
@@ -83,8 +90,6 @@ class Block:
         return True
 
 
-
-
 class ExtractorPipeline:
     def __init__(self,
                  annotated_table: AnnotatedTable,
@@ -105,6 +110,12 @@ class ExtractorPipeline:
     def mark_header_cols(self) -> list[int]:
         return [icol for icol in self.engine.range_cols() if self.engine.has_header_in_col(icol)]
 
+    def mark_field_rows(self) -> list[int]:
+        return [irow for irow in self.engine.range_rows() if self.engine.has_field_in_row(irow)]
+
+    def mark_field_cols(self) -> list[int]:
+        return [icol for icol in self.engine.range_cols() if self.engine.has_field_in_col(icol)]
+
     def make_fields_in_row(self, irow: int, hcols: list[int]) -> dict[int, Field]:
         fields = {}
         for icol in hcols:
@@ -121,10 +132,33 @@ class ExtractorPipeline:
 
         return fields
 
-    def make_fields(self, hrows: list[int], hcols: list[int]) -> dict[int, dict[int, Field]]:
+    def make_fields_in_col(self, icol: int, frows: list[int]) -> dict[int, Field]:
+        fields = {}
+        for irow in frows:
+            cell = self.engine.get_cell(irow, icol)
+            if cell is None:
+                break
+            if cell.role == CellRole.FIELD:
+                spec = self.fregistry.get_by_kind(cell.kind)
+                if spec is None:
+                    continue
+
+                field = Field(irow, [icol], spec)
+                fields[irow] = field
+
+        return fields
+
+    def make_h_fields(self, hrows: list[int], hcols: list[int]) -> dict[int, dict[int, Field]]:
         fields = {}
         for irow in hrows:
             fields[irow] = self.make_fields_in_row(irow, hcols)
+
+        return fields
+
+    def make_v_fields(self, fcols: list[int], frows: list[int]) -> dict[int, dict[int, Field]]:
+        fields = {}
+        for icol in fcols:
+            fields[icol] = self.make_fields_in_col(icol, frows)
 
         return fields
 
@@ -253,10 +287,44 @@ class ExtractorPipeline:
             headers.append(Header(irow, fields, last_schemes))
         return headers
 
-    def build_header_objects(self, header_rows: dict[int, dict[int, Field]]) -> dict[int, list[Header]]:
+    def build_headers_in_col(self, icol: int, col: dict[int, Field]) -> list[Header]:
+        headers: list[Header] = []
+        kinds: list[CellKind] = []
+        fields: list[Field] = []
+
+        last_schemes: list[HeaderSpec] = []
+        for field in col.values():
+            kind = field.spec.kind
+            if not self.hregistry.kind_in(kind):
+                continue
+
+            schemes = self.hregistry.subschemes(kinds + [kind])
+            if not schemes and last_schemes:
+                headers.append(Header(icol, fields, last_schemes))
+                kinds = [kind]
+                last_schemes = self.hregistry.subschemes(kinds)
+                fields = [field]
+                continue
+
+            last_schemes = schemes
+            kinds.append(kind)
+            fields.append(field)
+
+        if fields:
+            headers.append(Header(icol, fields, last_schemes))
+        return headers
+
+    def build_h_header_objects(self, header_rows: dict[int, dict[int, Field]]) -> dict[int, list[Header]]:
         headers: dict[int, list[Header]] = {}
         for irow, row in header_rows.items():
             headers[irow] = self.build_headers_in_row(irow, row)
+
+        return headers
+
+    def build_v_header_objects(self, header_cols: dict[int, dict[int, Field]]) -> dict[int, list[Header]]:
+        headers: dict[int, list[Header]] = {}
+        for icol, col in header_cols.items():
+            headers[icol] = self.build_headers_in_col(icol, col)
 
         return headers
 
@@ -269,20 +337,49 @@ class ExtractorPipeline:
             return None
         return cells
 
-    def build_block(self, header: Header) -> Block:
+    def _read_col_data(self, icol: int, header: Header) -> list[ResCell] | None:
+        if self.engine.has_field_in_col(icol):
+            return None
+
+        cells = [self.engine.get_cell(f.index, icol) for f in header.fields]
+        if any(c is None for c in cells):
+            return None
+        return cells
+
+    def build_h_block(self, header: Header) -> Block:
         data: dict[int, list[ResCell]] = {}
         for irow in self.engine.range_rows(header.index + 1):
             data_row = self._read_row_data(irow, header)
             if data_row is None:
                 break
             data[irow] = data_row
-        return Block(header, data)
+        return Block(header, Block.make_position(header), data)
 
-    def build_blocks(self, headers: dict[int, list[Header]]) -> list[Block]:
+    def build_h_blocks(self, headers: dict[int, list[Header]]) -> list[Block]:
         blocks: list[Block] = []
         for row in headers.values():
             for header in row:
-                block = self.build_block(header)
+                block = self.build_h_block(header)
+                blocks.append(block)
+        return blocks
+
+    def build_v_block(self, header: Header) -> Block:
+        data: dict[int, list[ResCell]] = {}
+        for icol in self.engine.range_cols(header.index + 1):
+            data_col = self._read_col_data(icol, header)
+            if data_col is None:
+                break
+            if all(data.kind == CellKind.EMPTY for data in data_col):
+                continue
+            data[icol] = data_col
+            break
+        return Block(header, Block.make_position(header), data)
+
+    def build_v_blocks(self, headers: dict[int, list[Header]]) -> list[Block]:
+        blocks: list[Block] = []
+        for col in headers.values():
+            for header in col:
+                block = self.build_v_block(header)
                 blocks.append(block)
         return blocks
 
@@ -306,52 +403,92 @@ class ExtractorPipeline:
         header_rows = self.mark_header_rows()
         header_cols = self.mark_header_cols()
 
-        fields_matrix = self.make_fields(header_rows, header_cols)
-        size_paired_fields = self.expand_paired_sizes(fields_matrix)
+        h_fields_matrix = self.make_h_fields(header_rows, header_cols)
+        size_paired_fields = self.expand_paired_sizes(h_fields_matrix)
+        # print("Fields")
+        # for i, row in size_paired_fields.items():
+        #     for j, field in row.items():
+        #         print(f"({i}, {j}): {field.index}: {field.sources}: {field.spec.kind.name}")
+        #     print("---")
 
-        print("Fields")
-        for i, row in size_paired_fields.items():
-            for j, field in row.items():
-                print(f"({i}, {j}): {field.index}: {field.sources}: {field.spec.kind.name}")
-            print("---")
+        field_cols = self.mark_field_cols()
+        field_rows = self.mark_field_rows()
+
+        v_fields_matrix = self.make_v_fields(field_cols, field_rows)
+        # print("Vertical Fields")
+        # for i, col in v_fields_matrix.items():
+        #     for j, field in col.items():
+        #         print(f"({j}, {i}): {field.index}: {field.sources}: {field.spec.kind.name}")
+        #     print("---")
 
         merged_rows = self.merge_multiline_headers(size_paired_fields)
-        print("\n")
-        print("Merged")
-        for i, row in merged_rows.items():
-            for j, field in row.items():
-                print(f"({i}, {j}): {field.index}: {field.sources}: {field.spec.kind.name}")
-            print("---")
+        # print("\n")
+        # print("Merged")
+        # for i, row in merged_rows.items():
+        #     for j, field in row.items():
+        #         print(f"({i}, {j}): {field.index}: {field.sources}: {field.spec.kind.name}")
+        #     print("---")
 
-        headers = self.build_header_objects(merged_rows)
-        print("\n")
-        print("Headers")
-        for i, header in headers.items():
-            for h in header:
-                for spec in h.specs:
-                    print(f"{i} ({spec.type.name}):", [f.spec.kind.name for f in h.fields], spec.valid([f.spec.kind for f in h.fields]))
-            print("---")
+        h_headers = self.build_h_header_objects(merged_rows)
+        # print("\n")
+        # print("Headers")
+        # for i, header in h_headers.items():
+        #     for h in header:
+        #         for spec in h.specs:
+        #             print(f"{i} ({spec.type.name}):", [f.spec.kind.name for f in h.fields], spec.valid([f.spec.kind for f in h.fields]))
+        #     print("---")
+        v_headers = self.build_v_header_objects(v_fields_matrix)
+        # print("\n")
+        # print("Vert Headers")
+        # for i, header in v_headers.items():
+        #     for h in header:
+        #         for spec in h.specs:
+        #             print(f"{i} ({spec.type.name}):", [f.spec.kind.name for f in h.fields], spec.valid([f.spec.kind for f in h.fields]))
+        #     print("---")
 
-        blocks = self.build_blocks(headers)
-        print("\n")
-        print("Blocks")
-        for block in blocks:
-            print(block.header.index)
-            for irow, data_row in block.data.items():
-                print(f"{irow}:", [(data.role.name, data.value) for data in data_row])
+        h_blocks = self.build_h_blocks(h_headers)
+        # print("\n")
+        # print("Blocks")
+        # for block in blocks:
+        #     print(block.header.index)
+        #     for irow, data_row in block.data.items():
+        #         print(f"{irow}:", [(data.role.name, data.value) for data in data_row])
+        v_blocks = self.build_v_blocks(v_headers)
+        # print("\n")
+        # print("Blocks")
+        # for block in v_blocks:
+        #     print(block.header.index)
+        #     for irow, data_row in block.data.items():
+        #         print(f"{irow}:", [(data.role.name, data.value) for data in data_row])
 
-        cleaned_blocks = self.clean_blocks(blocks)
+        cleaned_h_blocks = self.clean_blocks(h_blocks)
+        # print("\n")
+        # print("Cleaned blocks")
+        # for block in cleaned_blocks:
+        #     print(block.header.index)
+        #     for irow, data_row in block.data.items():
+        #         print(f"{irow}:", [(data.role.name, data.value) for data in data_row])
+        # print("\n")
+        # print("Valid columns")
+        # for block in cleaned_blocks:
+        #     print(block.header.index)
+        #     print([field.spec.kind.name for field in block.header.fields])
+        #     print(block.validate_fields())
+        cleaned_v_blocks = self.clean_blocks(v_blocks)
+        # print("\n")
+        # print("Cleaned blocks")
+        # for block in cleaned_v_blocks:
+        #     print(block.pos)
+        #     for irow, data_row in block.data.items():
+        #         print(f"{irow}:", [(data.role.name, data.value) for data in data_row])
+        blocks = cleaned_h_blocks + cleaned_v_blocks
+        blocks = sorted(blocks, key=lambda b: b.pos)
         print("\n")
         print("Cleaned blocks")
-        for block in cleaned_blocks:
-            print(block.header.index)
+        for block in blocks:
+            print(block.pos)
+            print([field.spec.kind.name for field in block.header.fields])
             for irow, data_row in block.data.items():
                 print(f"{irow}:", [(data.role.name, data.value) for data in data_row])
-        print("\n")
-        print("Valid columns")
-        for block in cleaned_blocks:
-            print(block.header.index)
-            print([field.spec.kind.name for field in block.header.fields])
-            print(block.validate_fields())
 
-        return cleaned_blocks
+        return blocks

@@ -25,6 +25,7 @@ class CellKind(str, Enum):
 
 class CellRole(str, Enum):
     HEADER = "header"
+    FIELD = "field"
     LABEL = "label"
     NUMERIC = "numeric"
     SIZES = "sizes"

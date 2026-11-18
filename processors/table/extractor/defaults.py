@@ -11,15 +11,23 @@ from table.extractor.specs import (
 
 def build_default_fields_registry() -> FieldsRegistry:
     return FieldsRegistry([
-        FieldSpec(CellKind.MATERIAL, {CellRole.LABEL}, Direction.VERTICAL, True, False),
-        FieldSpec(CellKind.SIZE, {CellRole.SIZES, CellRole.NUMERIC}, Direction.VERTICAL, False, False),
-        FieldSpec(CellKind.AMOUNT, {CellRole.NUMERIC}, Direction.VERTICAL, False, False),
-        FieldSpec(CellKind.BARCODE, {CellRole.LABEL, CellRole.NUMERIC}, Direction.VERTICAL, True, True),
-        FieldSpec(CellKind.MARKING, {CellRole.LABEL, CellRole.NUMERIC}, Direction.VERTICAL, True, True),
+        FieldSpec(CellKind.MATERIAL, {CellRole.LABEL}, Direction.VERTICAL, none_allowed=True, multirole_allowed=False),
+        FieldSpec(CellKind.SIZE, {CellRole.SIZES, CellRole.NUMERIC}, Direction.VERTICAL, none_allowed=False, multirole_allowed=False),
+        FieldSpec(CellKind.AMOUNT, {CellRole.NUMERIC}, Direction.VERTICAL, none_allowed=False, multirole_allowed=False),
+        FieldSpec(CellKind.BARCODE, {CellRole.LABEL, CellRole.NUMERIC}, Direction.VERTICAL, none_allowed=True, multirole_allowed=True),
+        FieldSpec(CellKind.MARKING, {CellRole.LABEL, CellRole.NUMERIC}, Direction.VERTICAL, none_allowed=True, multirole_allowed=True),
+        FieldSpec(CellKind.NAME, {CellRole.LABEL}, Direction.HORIZONTAL, none_allowed=True, multirole_allowed=False),
+        FieldSpec(CellKind.THICKNESS, {CellRole.LABEL}, Direction.HORIZONTAL, none_allowed=True, multirole_allowed=False),
+        FieldSpec(CellKind.AUFBAU, {CellRole.LABEL}, Direction.HORIZONTAL, none_allowed=True, multirole_allowed=False),
     ])
 
 def build_default_headers_registry() -> HeadersRegistry:
     return HeadersRegistry([
+        HeaderSpec(HeaderType.OKNA_TOP, Direction.HORIZONTAL, {
+            CellKind.NAME: (1, 1),
+            CellKind.AUFBAU: (0, 1),
+            CellKind.THICKNESS: (0, 1),
+        }, priority=200),
         HeaderSpec(HeaderType.ONE_SIZE_COLUMN, Direction.VERTICAL, {
             CellKind.MATERIAL: (1, 1),
             CellKind.SIZE: (1, 1),
