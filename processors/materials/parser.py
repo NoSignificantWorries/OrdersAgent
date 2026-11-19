@@ -1,7 +1,6 @@
 import csv
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
 
 DELIMETERS = ["-", "–", "—", "+", "x", "х", "*"]
 
@@ -22,7 +21,7 @@ class DelimetersList:
         return self._cnt
 
     @property
-    def index(self) -> List:
+    def index(self) -> list:
         return self._index
 
     def add(self, idx):
@@ -30,7 +29,7 @@ class DelimetersList:
         self._index.append(idx)
 
 
-def _check_breket(breket: str) -> Optional[str]:
+def _check_breket(breket: str) -> str | None:
     if breket in "()":
         return "round"
     if breket in "{}":
@@ -44,7 +43,7 @@ def _check_breket(breket: str) -> Optional[str]:
 
 class Block:
     def __init__(
-        self, brek: str, level: int, start_i: int, end_i: Optional[int] = None
+        self, brek: str, level: int, start_i: int, end_i: int | None = None
     ):
         self._btype = _check_breket(brek)
         if self._btype is None:
@@ -70,7 +69,7 @@ class Block:
         return self._level
 
     @property
-    def btype(self) -> Optional[str]:
+    def btype(self) -> str | None:
         return self._btype
 
     @property
@@ -78,15 +77,15 @@ class Block:
         return self._start
 
     @property
-    def end(self) -> Optional[int]:
+    def end(self) -> int | None:
         return self._end
 
     @property
-    def delims(self) -> Dict:
+    def delims(self) -> dict:
         return self._delims
 
     @property
-    def max_delimeter(self) -> Optional[str]:
+    def max_delimeter(self) -> str | None:
         return self._max_delimeter
 
     @property
@@ -94,10 +93,10 @@ class Block:
         return self._max_count
 
     @property
-    def string(self) -> Optional[str]:
+    def string(self) -> str | None:
         return self._string
 
-    def get_pair(self) -> Tuple[int, Optional[int]]:
+    def get_pair(self) -> tuple[int, int | None]:
         return self._start, self._end
 
     def set_end(self, idx) -> None:
@@ -117,7 +116,7 @@ class Block:
             self._max_count = delim_cnt
             self._max_delimeter = delimeter
 
-    def split_by_delim(self, delim: str) -> List[str]:
+    def split_by_delim(self, delim: str) -> list[str]:
         if delim not in self._delims:
             raise ValueError(
                 f"Undefined delimeter in the Block! Current delimeters: {list(self._delims.keys())}"
@@ -150,7 +149,7 @@ class BlockLevels:
     def depth(self) -> int:
         return self._depth
 
-    def get_level(self, level: int) -> Optional[List]:
+    def get_level(self, level: int) -> list | None:
         return self._levels.get(level)
 
     def add_block(self, block: Block) -> None:
@@ -160,11 +159,10 @@ class BlockLevels:
             self._levels[lvl] = []
         self._levels[lvl].append(block)
 
-        if lvl > self._depth:
-            self._depth = lvl
+        self._depth = max(self._depth, lvl)
 
 
-def _symbols_tree(line: str, delims: List[str]) -> BlockLevels:
+def _symbols_tree(line: str, delims: list[str]) -> BlockLevels:
     open_breks = "([{"
     close_breks = "}])"
 
@@ -204,17 +202,17 @@ def _symbols_tree(line: str, delims: List[str]) -> BlockLevels:
 
 @dataclass
 class ParseResults:
-    material: Optional[str] = None
-    prefix: Optional[str] = None
-    postfix: Optional[str] = None
-    levels: Optional[BlockLevels] = None
-    parts: List[str] = field(default_factory=list)
-    matches: List[Tuple[str, str, bool]] = field(default_factory=list)
+    material: str | None = None
+    prefix: str | None = None
+    postfix: str | None = None
+    levels: BlockLevels | None = None
+    parts: list[str] = field(default_factory=list)
+    matches: list[tuple[str, str, bool]] = field(default_factory=list)
     parts_count: int = 0
 
 
 class ParserV2:
-    def __init__(self, delimeters: List[str]) -> None:
+    def __init__(self, delimeters: list[str]) -> None:
         self._delims = delimeters
 
     def _no_brekets_rule(self, levels: BlockLevels) -> ParseResults:
@@ -246,7 +244,7 @@ class ParserV2:
             material=general.string, parts=[general.string], parts_count=1
         )
 
-    def _find_candidates(self, blocks: List[Block], general: Block) -> List[Block]:
+    def _find_candidates(self, blocks: list[Block], general: Block) -> list[Block]:
         candidates = []
         cnt = general.max_delimeter_count
         for obj in blocks:
@@ -402,8 +400,7 @@ def development() -> None:
                 continue
             if parsed.levels is not None:
                 print(parsed.levels)
-            if parsed.parts_count > max_parts:
-                max_parts = parsed.parts_count
+            max_parts = max(max_parts, parsed.parts_count)
             result = {
                 "material": parsed.material,
                 "prefix": parsed.prefix,

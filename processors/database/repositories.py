@@ -1,9 +1,7 @@
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Session
 from sqlalchemy.sql.functions import coalesce
 
 from .base import DatabaseManager
@@ -15,21 +13,21 @@ from .models import Document, Email, Mapping, Task, TaskStatus, User
 
 
 class UserRepository:
-    def get_by_id(self, user_id: int) -> Optional[User]:
+    def get_by_id(self, user_id: int) -> User | None:
         with DatabaseManager.session_scope() as session:
             return session.get(User, user_id)
 
-    def get_by_login(self, login: str) -> Optional[User]:
+    def get_by_login(self, login: str) -> User | None:
         with DatabaseManager.session_scope() as session:
             query = select(User).where(User.login == login)
             return session.execute(query).scalar_one_or_none()
 
-    def get_by_email(self, email: str) -> Optional[User]:
+    def get_by_email(self, email: str) -> User | None:
         with DatabaseManager.session_scope() as session:
             query = select(User).where(User.email == email)
             return session.execute(query).scalar_one_or_none()
 
-    def get_all_managers(self) -> List[User]:
+    def get_all_managers(self) -> list[User]:
         with DatabaseManager.session_scope() as session:
             query = select(User).where(User.role == "manager")
             return list(session.execute(query).scalars().all())
@@ -50,14 +48,14 @@ class UserRepository:
 
 
 class MappingRepository:
-    def find(self, source: str) -> Optional[Tuple[str, str, bool]]:
+    def find(self, source: str) -> tuple[str, str, bool] | None:
         with DatabaseManager.session_scope() as session:
             mapping = session.get(Mapping, source)
             if mapping:
                 return mapping.target, mapping.article, mapping.black_list
             return None
 
-    def batch_find(self, sources: List[str]) -> Dict[str, Optional[Tuple[str, bool]]]:
+    def batch_find(self, sources: list[str]) -> dict[str, tuple[str, bool] | None]:
         if not sources:
             return {}
         with DatabaseManager.session_scope() as session:
@@ -72,8 +70,8 @@ class MappingRepository:
     def add(
         self,
         source: str,
-        target: Optional[str],
-        article: Optional[str],
+        target: str | None,
+        article: str | None,
         black_list: bool = False,
     ) -> None:
         with DatabaseManager.session_scope() as session:
@@ -83,7 +81,7 @@ class MappingRepository:
             session.add(mapping)
 
     def batch_add(
-        self, items: List[Tuple[str, Optional[str], Optional[str], bool]]
+        self, items: list[tuple[str, str | None, str | None, bool]]
     ) -> None:
         with DatabaseManager.session_scope() as session:
             stmt = pg_insert(Mapping).values(
@@ -132,9 +130,9 @@ class MappingRepository:
     def update(
         self,
         source: str,
-        target: Optional[str] = None,
-        article: Optional[str] = None,
-        black_list: Optional[bool] = None,
+        target: str | None = None,
+        article: str | None = None,
+        black_list: bool | None = None,
     ) -> bool:
         with DatabaseManager.session_scope() as session:
             mapping = session.get(Mapping, source)
@@ -167,11 +165,11 @@ class EmailRepository:
         self,
         mailbox: str,
         email_uid: int,
-        email_from: Optional[str] = None,
-        email_subject: Optional[str] = None,
-        raw_email: Optional[str] = None,
-        email_date: Optional[datetime] = None,
-    ) -> Optional[Email]:
+        email_from: str | None = None,
+        email_subject: str | None = None,
+        raw_email: str | None = None,
+        email_date: datetime | None = None,
+    ) -> Email | None:
         with DatabaseManager.session_scope() as session:
             existing = session.execute(
                 select(Email).where(
@@ -194,11 +192,11 @@ class EmailRepository:
             session.flush()
             return email
 
-    def get_by_id(self, email_id: int) -> Optional[Email]:
+    def get_by_id(self, email_id: int) -> Email | None:
         with DatabaseManager.session_scope() as session:
             return session.get(Email, email_id)
 
-    def get_by_mailbox_and_uid(self, mailbox: str, email_uid: int) -> Optional[Email]:
+    def get_by_mailbox_and_uid(self, mailbox: str, email_uid: int) -> Email | None:
         with DatabaseManager.session_scope() as session:
             query = select(Email).where(
                 and_(Email.mailbox == mailbox, Email.email_uid == email_uid)
@@ -207,7 +205,7 @@ class EmailRepository:
 
     def get_emails_by_mailbox(
         self, mailbox: str, limit: int = 50, offset: int = 0
-    ) -> List[Email]:
+    ) -> list[Email]:
         with DatabaseManager.session_scope() as session:
             query = (
                 select(Email)
@@ -218,7 +216,7 @@ class EmailRepository:
             )
             return list(session.execute(query).scalars().all())
 
-    def get_all_emails(self, limit: int = 50, offset: int = 0) -> List[Email]:
+    def get_all_emails(self, limit: int = 50, offset: int = 0) -> list[Email]:
         with DatabaseManager.session_scope() as session:
             query = (
                 select(Email)
@@ -265,7 +263,7 @@ class DocumentRepository:
             session.flush()
             return doc
 
-    def get_by_email_id(self, email_id: int) -> List[Document]:
+    def get_by_email_id(self, email_id: int) -> list[Document]:
         with DatabaseManager.session_scope() as session:
             query = (
                 select(Document)
@@ -274,7 +272,7 @@ class DocumentRepository:
             )
             return list(session.execute(query).scalars().all())
 
-    def get_by_id(self, doc_id: int) -> Optional[Document]:
+    def get_by_id(self, doc_id: int) -> Document | None:
         with DatabaseManager.session_scope() as session:
             return session.get(Document, doc_id)
 
@@ -299,12 +297,12 @@ class TaskRepository:
             session.flush()
             return task
 
-    def get_by_id(self, task_id: int) -> Optional[Task]:
+    def get_by_id(self, task_id: int) -> Task | None:
         with DatabaseManager.session_scope() as session:
             return session.get(Task, task_id)
 
     # --- Получение задач для планировщика ---
-    def fetch_pending(self, limit: int = 10) -> List[Task]:
+    def fetch_pending(self, limit: int = 10) -> list[Task]:
         with DatabaseManager.session_scope() as session:
             query = (
                 select(Task)
@@ -325,7 +323,7 @@ class TaskRepository:
             return list(session.execute(query).scalars().all())
 
     # --- Получение задач для WebUI ---
-    def fetch_manual(self, limit: int = 50) -> List[Task]:
+    def fetch_manual(self, limit: int = 50) -> list[Task]:
         with DatabaseManager.session_scope() as session:
             query = (
                 select(Task)
@@ -342,7 +340,7 @@ class TaskRepository:
             )
             return list(session.execute(query).scalars().all())
 
-    def fetch_by_user(self, user_id: int, limit: int = 50) -> List[Task]:
+    def fetch_by_user(self, user_id: int, limit: int = 50) -> list[Task]:
         with DatabaseManager.session_scope() as session:
             query = (
                 select(Task)
@@ -377,7 +375,7 @@ class TaskRepository:
                 for key, value in kwargs.items():
                     if hasattr(task, key):
                         setattr(task, key, value)
-                task.updated_at = datetime.now(timezone.utc)
+                task.updated_at = datetime.now(UTC)
 
     # --- Хелперы для конкретных переходов ---
     def set_ml_result(
@@ -399,7 +397,7 @@ class TaskRepository:
         )
 
     def set_excel_result(
-        self, task_id: int, parsed_data: Dict, ambiguous: Optional[List] = None
+        self, task_id: int, parsed_data: dict, ambiguous: list | None = None
     ) -> None:
         if ambiguous:
             new_status = TaskStatus.MATERIALS_REVIEW.value
@@ -411,7 +409,7 @@ class TaskRepository:
                 task_id,
                 new_status,
                 output_data=output,
-                completed_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(UTC),
             )
             return  # не делаем update_status дважды
 
@@ -434,7 +432,7 @@ class TaskRepository:
                 task.status = TaskStatus.ERROR.value
                 task.error_message = error_message[:1000]
                 task.retry_count = (task.retry_count or 0) + 1
-                task.updated_at = datetime.now(timezone.utc)
+                task.updated_at = datetime.now(UTC)
 
     # --- Для WebUI: взять задачу в работу ---
 
@@ -443,7 +441,7 @@ class TaskRepository:
             task = session.get(Task, task_id)
             if task and task.assigned_to is None:
                 task.assigned_to = user_id
-                task.updated_at = datetime.now(timezone.utc)
+                task.updated_at = datetime.now(UTC)
                 return True
             return False
 
@@ -452,4 +450,4 @@ class TaskRepository:
             task = session.get(Task, task_id)
             if task:
                 task.assigned_to = None
-                task.updated_at = datetime.now(timezone.utc)
+                task.updated_at = datetime.now(UTC)

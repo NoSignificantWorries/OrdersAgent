@@ -1,10 +1,10 @@
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 
 class FeaturesExtractor:
     @classmethod
-    def extract_text_features(cls, text: str) -> Dict[str, Any]:
+    def extract_text_features(cls, text: str) -> dict[str, Any]:
         text_lower = text.lower().strip()
 
         # =========================================================
@@ -195,7 +195,7 @@ class FeaturesExtractor:
         return features
 
     @classmethod
-    def extract_files_features(cls, files: List[str]) -> Dict[str, Any]:
+    def extract_files_features(cls, files: list[str]) -> dict[str, Any]:
         has_xlsx = False
         count_files = 0
         for file in files:

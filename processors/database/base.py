@@ -1,7 +1,7 @@
 import os
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Generator, Optional
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
@@ -34,8 +34,8 @@ Base = declarative_base()
 
 class DatabaseManager:
     _instance = None
-    _engine: Optional[Engine] = None
-    _session_factory: Optional[sessionmaker] = None
+    _engine: Engine | None = None
+    _session_factory: sessionmaker | None = None
 
     def __new__(cls):
         if cls._instance is None:

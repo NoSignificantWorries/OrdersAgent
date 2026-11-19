@@ -1,13 +1,11 @@
 import os
 from io import BytesIO
-from typing import Optional
 
 from minio import Minio
-from minio.error import S3Error
 
 
 class MinIOClient:
-    _instance: Optional[Minio] = None
+    _instance: Minio | None = None
 
     @classmethod
     def get_client(cls) -> Minio:
@@ -21,7 +19,7 @@ class MinIOClient:
         return cls._instance
 
 
-def get_bytes_object(client: Minio, bucket: str, filename: str) -> Optional[BytesIO]:
+def get_bytes_object(client: Minio, bucket: str, filename: str) -> BytesIO | None:
     try:
         response = client.get_object(bucket, filename)
         file_data = BytesIO(response.read())
@@ -57,7 +55,7 @@ def development() -> None:
 
     print(client)
 
-    response = client.get_object("orders-attachments", "test.txt")
+    response = client.get_object(bucket_name, "test.txt")
 
     print(response)
 

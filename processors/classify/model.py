@@ -1,13 +1,13 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import joblib
-
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 
 from .features import FeaturesExtractor
+
 
 class RFModel:
     def __init__(self) -> None:
@@ -75,10 +75,10 @@ class RFModel:
             raise ValueError("Model weights not found")
 
     def predict(
-        self, features: List[Dict[str, Any]]
-    ) -> Tuple[List[str], List[int], List[float]]:
+        self, features: list[dict[str, Any]]
+    ) -> tuple[list[str], list[int], list[float]]:
         import pandas as pd
-        
+
         if self._model is None or self._features is None or self._label_encoder is None:
             raise ValueError("Model not loaded, run train() or load() first")
 
@@ -92,8 +92,8 @@ class RFModel:
         return y_pred, class_indexes, y_proba
 
     def predict_proba(
-        self, features: List[Dict[str, Any]]
-    ) -> Tuple[List[str], List[int], List[List[float]]]:
+        self, features: list[dict[str, Any]]
+    ) -> tuple[list[str], list[int], list[list[float]]]:
         if self._model is None or self._features is None or self._label_encoder is None:
             raise ValueError("Model not loaded, run train() or load() first")
 
@@ -107,8 +107,8 @@ class RFModel:
 
 
 def decide_by_thresholds(
-    classes: List[str], indexes: List[int], proba: List[float], threshold: float = 0.75
-) -> List[Tuple[str, Optional[int], str, float]]:
+    classes: list[str], indexes: list[int], proba: list[float], threshold: float = 0.75
+) -> list[tuple[str, int | None, str, float]]:
     res = []
     for cls, idx, prob in zip(classes, indexes, proba):
         if prob >= threshold:
