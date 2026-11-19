@@ -44,16 +44,9 @@ class RFModel:
         self._model.fit(X, y_encoded)
         self._features = feature_cols
 
-        # print(f"Модель обучена на {len(X)} примерах")
-        # print(f"Классы: {self.label_encoder.classes_}")
-        # print(f"Важность признаков (топ-5):")
-        # importance = dict(zip(self.feature_names, self.model.feature_importances_))
-        # for k, v in sorted(importance.items(), key=lambda x: x[1], reverse=True)[:5]:
-        #     print(f"  {k}: {v:.3f}")
-
         return self
 
-    def save(self, filepath="model.joblib") -> None:
+    def save(self, filepath: Path | str = "model.joblib") -> None:
         if self._model is None or self._features is None or self._label_encoder is None:
             raise ValueError("Model not loaded, run train() or load() first")
 
@@ -65,7 +58,7 @@ class RFModel:
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
         joblib.dump(model, filepath)
 
-    def load(self, filepath="model.joblib") -> None:
+    def load(self, filepath: Path | str = "model.joblib") -> None:
         if Path(filepath).exists():
             model_data = joblib.load(filepath)
             self._model = model_data["model"]
