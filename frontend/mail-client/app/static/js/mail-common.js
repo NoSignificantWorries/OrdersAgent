@@ -87,7 +87,7 @@ const threadCache = new Map();
 
 let currentStatusFilter = "all";
 let currentClassFilter = "all";
-let sortNewestFirst = true;
+let sortNewestFirst = false;
 let currentSearchTerm = "";
 
 let isMaterialInputComposing = false;

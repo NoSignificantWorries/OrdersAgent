@@ -4,7 +4,7 @@
 
         const page = Math.max(1, Number(params.get("page")) || 1);
         const search = params.get("search") || "";
-        const sort = params.get("sort") === "oldest" ? "oldest" : "newest";
+        const sort = params.get("sort") === "newest" ? "newest" : "oldest";
         const selectedEmailId = Math.max(0, Number(params.get("selected_email_id")) || 0) || null;
         const selectedSourceType = params.get("selected_source") || pageType || "inbox";
 
@@ -91,7 +91,7 @@
         }
 
         if (state.sortNewestFirst === false) {
-            params.set("sort", "oldest");
+            params.set("sort", "newest");
         }
 
         if (pageType !== "sent") {
@@ -135,34 +135,53 @@
             try {
                 const url = new URL(rawHref, window.location.origin);
                 const params = new URLSearchParams();
-
-                if (String(state.currentSearchTerm || "").trim()) {
-                    params.set("search", String(state.currentSearchTerm).trim());
-                }
-
-                if (state.sortNewestFirst === false) {
-                    params.set("sort", "oldest");
-                }
-
                 const isSentLink = url.pathname === "/sent";
 
                 if (!isSentLink) {
-                    if (state.currentStatusFilter && state.currentStatusFilter !== "all") {
+                    if (String(state.currentSearchTerm || "").trim()) {
+                        params.set(
+                            "search",
+                            String(state.currentSearchTerm).trim(),
+                    );
+                    }
+
+                    if (state.sortNewestFirst === true) {
+                        params.set("sort", "newest");
+                    }
+
+                    if (
+                        state.currentStatusFilter &&
+                        state.currentStatusFilter !== "all"
+                    ) {
                         params.set("status", state.currentStatusFilter);
                     }
 
-                    if (state.currentClassFilter && state.currentClassFilter !== "all") {
+                    if (
+                        state.currentClassFilter &&
+                        state.currentClassFilter !== "all"
+                    ) {
                         params.set("class", state.currentClassFilter);
                     }
                 }
 
-                if (state.selectedEmailId != null && Number(state.selectedEmailId) > 0) {
-                    params.set("selected_email_id", String(state.selectedEmailId));
-                    params.set("selected_source", String(state.selectedSourceType || "inbox"));
+                if (
+                    state.selectedEmailId != null &&
+                    Number(state.selectedEmailId) > 0
+                ) {
+                    params.set(
+                        "selected_email_id",
+                        String(state.selectedEmailId),
+                    );
+                    params.set(
+                        "selected_source",
+                        String(state.selectedSourceType || "inbox"),
+                    );
                 }
 
-                link.href = params.toString()
-                    ? `${url.pathname}?${params.toString()}`
+                const query = params.toString();
+
+                link.href = query
+                    ? `${url.pathname}?${query}`
                     : url.pathname;
             } catch (error) {
                 console.error("Не удалось обновить ссылку раздела", error);
